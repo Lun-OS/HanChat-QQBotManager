@@ -1,0 +1,15 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "logger": {
+    "level": "info",
+    "path": "./logs"
+  },
+  "websocket": {
+    "authorization": "your_websocket_token",
+    "port": 8765
+  },
+  "accounts": {}
+}

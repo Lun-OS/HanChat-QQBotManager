@@ -1,0 +1,4 @@
+{
+  "description": "HTTP Web显示插件配置",
+  "note": "将静态文件放在插件目录的 web/ 子目录中，访问地址: /plugins/{selfid}/web"
+}

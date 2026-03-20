@@ -1,0 +1,15 @@
+{
+  "submit_command": "投稿",
+  "reply_error_message": "机器人发生错误，自动投稿失败，请联系系统管理员（1596534228）",
+  "reply_success_message": "自动投稿成功，您的投稿id是:",
+  "talk_about_copywriting": "此投稿的id是：",
+  "delete_command": "删除",
+  "admins": 
+  [
+    1596534228,
+    1984551484,
+    3878928463
+  ],
+  "reply_delete_message": "删除成功",
+  "reply_no_permission_message": "您没有权限删除投稿，如果侵犯了你的权益请联系管理员（1596534228、1984551484、3878928463）"
+}

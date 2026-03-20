@@ -1,0 +1,166 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Blockly 容器 - 确保可以接收鼠标事件 */
+.blocklyContainer {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 工具箱 - 允许鼠标穿透到工作区 */
+.blocklyToolbox {
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+.blocklyToolboxDiv {
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+/* 工具箱分组 */
+.blocklyToolboxCategoryGroup {
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+/* 弹出面板 - 降低层级 */
+.blocklyFlyoutBackground,
+.blocklyFlyout {
+  z-index: 8 !important;
+}
+
+/* 工作区 - 关键修复：允许拖动 */
+.blocklyMainBackground {
+  z-index: 0 !important;
+  cursor: grab !important;
+}
+
+.blocklyMainBackground:active {
+  cursor: grabbing !important;
+}
+
+/* SVG 画布 */
+svg.blocklySvg {
+  z-index: 1 !important;
+  pointer-events: auto !important;
+  cursor: default !important;
+}
+
+/* 积木块 */
+.blocklyBlockCanvas {
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+/* 拖动表面 */
+.blocklyDragSurface {
+  z-index: 15 !important;
+  pointer-events: none !important;
+}
+
+/* 气泡 */
+.blocklyBubbleCanvas {
+  z-index: 30 !important;
+}
+
+/* 提示 */
+.blocklyTooltipBackground {
+  z-index: 9999 !important;
+}
+
+/* 滚动条 */
+.blocklyScrollbarVertical,
+.blocklyScrollbarHorizontal {
+  display: none !important;
+}
+
+/* 确保区域可以接收事件 */
+.blocklyWidgetDiv {
+  pointer-events: auto !important;
+}
+
+/* 禁用工具箱时的遮罩 */
+.blocklyToolboxCategoryPopup {
+  z-index: 50 !important;
+}
+
+/* ==================== 输入框样式优化 ==================== */
+
+/* 文本类型输入框 - 橙色背景 */
+.blocklyEditableText rect {
+  fill: #FFF3E0 !important;
+  stroke: #FF9800 !important;
+  stroke-width: 2px !important;
+}
+
+/* 数字类型输入框 - 蓝色背景 */
+.blocklyEditableText[data-type="number"] rect,
+.blocklyEditableText input[type="number"] + rect {
+  fill: #E3F2FD !important;
+  stroke: #2196F3 !important;
+  stroke-width: 2px !important;
+}
+
+/* 文本输入框的提示文字 */
+.blocklyEditableText text.blocklyText {
+  fill: #666 !important;
+  font-style: italic !important;
+}
+
+/* 数字输入框的提示文字 */
+.blocklyEditableText[data-type="number"] text.blocklyText {
+  fill: #1976D2 !important;
+  font-style: italic !important;
+}
+
+/* 输入框聚焦状态 */
+.blocklyEditableText:focus-within rect,
+.blocklyHtmlInput:focus {
+  stroke: #165DFF !important;
+  stroke-width: 3px !important;
+}
+
+/* 占位符/提示文字样式 */
+.blocklyEditableText .blocklyPlaceholderText {
+  fill: #999 !important;
+  font-style: italic !important;
+  font-size: 11px !important;
+}
+
+/* 字符串类型输入框占位符 */
+.blocklyEditableText[data-check="String"] rect {
+  fill: #FFF8E1 !important;
+  stroke: #FFC107 !important;
+}
+
+/* 数字类型输入框占位符 */
+.blocklyEditableText[data-check="Number"] rect {
+  fill: #E8F5E9 !important;
+  stroke: #4CAF50 !important;
+}
+
+/* 布尔类型输入框占位符 */
+.blocklyEditableText[data-check="Boolean"] rect {
+  fill: #F3E5F5 !important;
+  stroke: #9C27B0 !important;
+}
+
+/* 数组/列表类型输入框占位符 */
+.blocklyEditableText[data-check="Array"] rect {
+  fill: #E0F7FA !important;
+  stroke: #00BCD4 !important;
+}
+
+/* 输入框标签文字 */
+.blocklyFieldLabel {
+  fill: #333 !important;
+  font-weight: 500 !important;
+}
+
+/* 输入框值文字 */
+.blocklyFieldTextInput text {
+  fill: #000 !important;
+  font-weight: 400 !important;
+}

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTTP Web显示插件</title>
+</head>
+<style>
+    /* HTTP Web显示插件样式 */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    text-align: center;
+    padding: 40px 20px;
+    color: white;
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+
+.subtitle {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+main {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.info-card {
+    background: white;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease;
+}
+
+.info-card:hover {
+    transform: translateY(-5px);
+}
+
+.info-card h2 {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 1.3rem;
+    border-bottom: 2px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+.info-card ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.info-card li {
+    padding: 8px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.info-card li:last-child {
+    border-bottom: none;
+}
+
+.file-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.file-type {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    transition: background 0.3s ease;
+}
+
+.file-type:hover {
+    background: #e9ecef;
+}
+
+.file-type .icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+.file-type .name {
+    font-size: 0.9rem;
+    color: #666;
+    text-align: center;
+}
+
+.features li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+code {
+    background: #f4f4f4;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    color: #e83e8c;
+}
+
+ol {
+    padding-left: 20px;
+}
+
+ol li {
+    padding: 8px 0;
+}
+
+.test-section {
+    text-align: center;
+}
+
+.btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 12px 30px;
+    border-radius: 25px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+.btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn:active {
+    transform: scale(0.95);
+}
+
+#testResult {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 8px;
+    font-weight: bold;
+    min-height: 40px;
+}
+
+#testResult.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+#testResult.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+footer {
+    text-align: center;
+    padding: 30px;
+    color: white;
+    opacity: 0.8;
+}
+
+/* 响应式设计 */
+@media (max-width: 600px) {
+    header h1 {
+        font-size: 1.8rem;
+    }
+    
+    .subtitle {
+        font-size: 1rem;
+    }
+    
+    .file-types {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .info-card {
+        padding: 20px;
+    }
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.info-card {
+    animation: fadeIn 0.5s ease forwards;
+}
+
+.info-card:nth-child(1) { animation-delay: 0.1s; }
+.info-card:nth-child(2) { animation-delay: 0.2s; }
+.info-card:nth-child(3) { animation-delay: 0.3s; }
+.info-card:nth-child(4) { animation-delay: 0.4s; }
+.info-card:nth-child(5) { animation-delay: 0.5s; }
+
+</style>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 HTTP Web显示插件</h1>
+            <p class="subtitle">静态文件服务已成功运行！</p>
+        </header>
+
+        <main>
+            <section class="info-card">
+                <h2>📋 插件信息</h2>
+                <ul>
+                    <li><strong>插件名称:</strong> http_web_display</li>
+                    <li><strong>版本:</strong> 1.0.0</li>
+                    <li><strong>功能:</strong> 提供类似Nginx的静态文件服务</li>
+                </ul>
+            </section>
+
+            <section class="info-card">
+                <h2>📁 支持的文件类型</h2>
+                <div class="file-types">
+                    <div class="file-type">
+                        <span class="icon">🌐</span>
+                        <span class="name">HTML/CSS/JS</span>
+                    </div>
+                    <div class="file-type">
+                        <span class="icon">🖼️</span>
+                        <span class="name">PNG/JPG/GIF/SVG</span>
+                    </div>
+                    <div class="file-type">
+                        <span class="icon">🔤</span>
+                        <span class="name">WOFF/TTF/OTF</span>
+                    </div>
+                    <div class="file-type">
+                        <span class="icon">📄</span>
+                        <span class="name">JSON/XML/TXT</span>
+                    </div>
+                    <div class="file-type">
+                        <span class="icon">🎬</span>
+                        <span class="name">MP4/WEBM/MP3</span>
+                    </div>
+                    <div class="file-type">
+                        <span class="icon">📦</span>
+                        <span class="name">PDF/ZIP等</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="info-card">
+                <h2>⚡ 功能特性</h2>
+                <ul class="features">
+                    <li>✅ 自动识别 MIME 类型</li>
+                    <li>✅ 支持目录索引（自动查找 index.html）</li>
+                    <li>✅ 防止目录遍历攻击</li>
+                    <li>✅ 支持缓存控制</li>
+                    <li>✅ 404/500 错误页面</li>
+                </ul>
+            </section>
+
+            <section class="info-card">
+                <h2>📝 使用说明</h2>
+                <ol>
+                    <li>将静态文件放入插件目录的 <code>web/</code> 子目录中</li>
+                    <li>通过 <code>/plugins/{selfid}/web/文件名</code> 访问</li>
+                    <li>访问 <code>/plugins/{selfid}/web</code> 自动加载 index.html</li>
+                </ol>
+            </section>
+
+            <section class="info-card test-section">
+                <h2>🧪 测试区域</h2>
+                <p>点击下方按钮测试 JavaScript 功能：</p>
+                <button id="testBtn" class="btn">点击测试 JS</button>
+                <p id="testResult"></p>
+            </section>
+        </main>
+
+        <footer>
+            <p>Powered by QQBot HTTP Web显示插件</p>
+        </footer>
+    </div>
+
+    <script>
+        /**
+ * HTTP Web显示插件 - JavaScript 测试文件
+ */
+
+// 等待 DOM 加载完成
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 HTTP Web显示插件 - JavaScript 已加载');
+    
+    // 获取测试按钮
+    const testBtn = document.getElementById('testBtn');
+    const testResult = document.getElementById('testResult');
+    
+    // 点击事件处理
+    if (testBtn) {
+        testBtn.addEventListener('click', function() {
+            console.log('测试按钮被点击');
+            
+            // 显示加载状态
+            testResult.textContent = '正在测试...';
+            testResult.className = '';
+            
+            // 模拟异步操作
+            setTimeout(function() {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString('zh-CN');
+                
+                testResult.innerHTML = `
+                    ✅ JavaScript 运行正常！<br>
+                    <small>当前时间: ${timeString}</small>
+                `;
+                testResult.className = 'success';
+                
+                console.log('✅ 测试成功，时间:', timeString);
+            }, 500);
+        });
+    }
+    
+    // 页面加载完成提示
+    console.log('✅ 页面加载完成');
+    console.log('📁 静态文件服务运行正常');
+    console.log('🌐 支持 HTML/CSS/JS 等静态资源');
+});
+
+// 添加一些实用的全局函数
+window.WebDisplay = {
+    // 获取当前时间
+    getCurrentTime: function() {
+        return new Date().toLocaleString('zh-CN');
+    },
+    
+    // 显示提示信息
+    showNotification: function(message, type) {
+        type = type || 'info';
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // 如果页面中有通知区域，可以在这里添加显示逻辑
+        const resultArea = document.getElementById('testResult');
+        if (resultArea) {
+            resultArea.textContent = message;
+            resultArea.className = type === 'success' ? 'success' : 
+                                   type === 'error' ? 'error' : '';
+        }
+    },
+    
+    // 检查文件类型支持
+    isFileTypeSupported: function(filename) {
+        const supportedTypes = [
+            '.html', '.htm', '.css', '.js', '.json',
+            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',
+            '.woff', '.woff2', '.ttf', '.otf', '.eot',
+            '.txt', '.xml', '.pdf', '.zip',
+            '.mp4', '.webm', '.mp3', '.wav'
+        ];
+        
+        const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+        return supportedTypes.includes(ext);
+    }
+};
+
+    </script>
+</body>
+</html>

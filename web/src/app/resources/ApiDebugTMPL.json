@@ -1,0 +1,2172 @@
+{
+  "_delete_group_notice": {
+    "PS": "群组:删除群公告",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "notice_id": [
+        "string",
+        "公告 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "notice_id": ""
+    }
+  },
+  "_events": {
+    "PS": "消息:长连接接收消息",
+    "PS_json": {},
+    "json": {}
+  },
+  "_get_group_notice": {
+    "PS": "群组:获取群公告",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "_send_group_notice": {
+    "PS": "群组:发送群公告",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "content": [
+        "string",
+        "公告内容",
+        "必须"
+      ],
+      "image": [
+        "string",
+        "图片路径，支持 http://、file://、base64://",
+        ""
+      ],
+      "pinned": [
+        "boolean",
+        "是否置顶",
+        ""
+      ],
+      "confirm_required": [
+        "boolean",
+        "是否需要确认收到",
+        "True"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "content": "",
+      "image": "",
+      "pinned": false,
+      "confirm_required": false
+    }
+  },
+  "batch_delete_group_member": {
+    "PS": "群组:批量踢出群成员",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_ids": [
+        "array",
+        "QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_ids": []
+    }
+  },
+  "clean_cache": {
+    "PS": "系统:清理缓存",
+    "PS_json": {},
+    "json": {}
+  },
+  "create_group_album": {
+    "PS": "群组:创建群相册",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "name": [
+        "string",
+        "相册名称",
+        "必须"
+      ],
+      "desc": [
+        "string",
+        "相册描述",
+        ""
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "name": "",
+      "desc": ""
+    }
+  },
+  "create_group_file_folder": {
+    "PS": "文件:创建群文件文件夹",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "name": [
+        "string",
+        "文件夹名称",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "name": ""
+    }
+  },
+  "delete_essence_msg": {
+    "PS": "群组:删除群精华消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "delete_friend": {
+    "PS": "用户:删除好友",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "好友 QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "delete_group_album": {
+    "PS": "群组:删除群相册",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "album_id": [
+        "string",
+        "相册 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "album_id": ""
+    }
+  },
+  "delete_group_file": {
+    "PS": "文件:删除群文件",
+    "PS_json": {
+      "file_id": [
+        "string",
+        "文件 ID",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "file_id": "",
+      "group_id": 0
+    }
+  },
+  "delete_group_folder": {
+    "PS": "文件:删除群文件文件夹",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "folder_id": [
+        "string",
+        "文件夹 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "folder_id": ""
+    }
+  },
+  "delete_msg": {
+    "PS": "消息:撤回消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "download_file": {
+    "PS": "文件:下载文件到缓存目录",
+    "PS_json": {
+      "url": [
+        "string",
+        "链接地址",
+        ""
+      ],
+      "base64": [
+        "string",
+        "Base64 编码",
+        ""
+      ],
+      "name": [
+        "string",
+        "文件名",
+        ""
+      ],
+      "headers": [
+        "array",
+        "自定义请求头",
+        ""
+      ]
+    },
+    "json": {
+      "url": "",
+      "base64": "",
+      "name": "",
+      "headers": []
+    }
+  },
+  "fetch_custom_face": {
+    "PS": "其他:获取收藏表情",
+    "PS_json": {},
+    "json": {}
+  },
+  "forward_friend_single_msg": {
+    "PS": "消息:转发单条好友消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0,
+      "user_id": 0
+    }
+  },
+  "forward_group_single_msg": {
+    "PS": "消息:转发单条群消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0,
+      "group_id": 0
+    }
+  },
+  "friend_poke": {
+    "PS": "用户:好友戳一戳（双击头像）",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "get_ai_characters": {
+    "PS": "消息:获取群 Ai 语音可用声色列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "42"
+      ],
+      "chat_type": [
+        "integer",
+        "语音类型",
+        "1"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "chat_type": 0
+    }
+  },
+  "get_cookies": {
+    "PS": "系统:获取cookies",
+    "PS_json": {
+      "domain": [
+        "string",
+        "需要获取 cookies 的域名",
+        "必须"
+      ]
+    },
+    "json": {
+      "domain": ""
+    }
+  },
+  "get_doubt_friends_add_request": {
+    "PS": "用户:获取被过滤好友请求",
+    "PS_json": {
+      "count": [
+        "integer",
+        "好友请求数量",
+        "50"
+      ]
+    },
+    "json": {
+      "count": 0
+    }
+  },
+  "get_essence_msg_list": {
+    "PS": "群组:获取群精华消息",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_file": {
+    "PS": "消息:获取消息文件详情",
+    "PS_json": {
+      "file": [
+        "string",
+        "收到的文件名",
+        "必须"
+      ],
+      "download": [
+        "boolean",
+        "是否下载文件到 QQ 目录",
+        "True"
+      ]
+    },
+    "json": {
+      "file": "",
+      "download": false
+    }
+  },
+  "get_flash_file_info": {
+    "PS": "文件:获取闪传文件详情",
+    "PS_json": {
+      "share_link": [
+        "string",
+        "分享链接，和 file_set_id 二选一",
+        ""
+      ],
+      "file_set_id": [
+        "string",
+        "文件集 ID",
+        ""
+      ]
+    },
+    "json": {
+      "share_link": "",
+      "file_set_id": ""
+    }
+  },
+  "get_forward_msg": {
+    "PS": "消息:获取转发消息详情",
+    "PS_json": {
+      "message_id": [
+        "string",
+        "llonebot中，message_id为长id，在上报的转发消息中可以拿到",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": ""
+    }
+  },
+  "get_friend_list": {
+    "PS": "用户:好友列表",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_friend_msg_history": {
+    "PS": "消息:获取好友历史消息记录",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "QQ 号",
+        "必须"
+      ],
+      "message_seq": [
+        "integer",
+        "起始消息序号",
+        ""
+      ],
+      "count": [
+        "integer",
+        "消息数量",
+        "20"
+      ],
+      "reverseOrder": [
+        "boolean",
+        "",
+        ""
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message_seq": 0,
+      "count": 0,
+      "reverseOrder": false
+    }
+  },
+  "get_friends_with_category": {
+    "PS": "用户:好友列表（带分组）",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_group_album_list": {
+    "PS": "群组:获取群相册列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_at_all_remain": {
+    "PS": "群组:获取群 @全体成员 剩余次数",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_file_system_info": {
+    "PS": "文件:获取群文件系统信息",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_file_url": {
+    "PS": "文件:获取群文件资源链接",
+    "PS_json": {
+      "file_id": [
+        "string",
+        "文件 ID",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "file_id": "",
+      "group_id": 0
+    }
+  },
+  "get_group_files_by_folder": {
+    "PS": "文件:获取群子目录文件列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "folder_id": [
+        "string",
+        "文件夹 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "folder_id": ""
+    }
+  },
+  "get_group_honor_info": {
+    "PS": "群组:群荣誉",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "type": [
+        "string",
+        "要获取的群荣誉类型, 可传入 talkative、performer、legend、strong_newbie、emotion 以分别获取单个类型的群荣誉数据, 或传入 all 获取所有数据",
+        "all"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "type": ""
+    }
+  },
+  "get_group_ignore_add_request": {
+    "PS": "群组:获取已过滤的加群通知",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_info": {
+    "PS": "群组:获取群信息",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_list": {
+    "PS": "群组:获取群列表",
+    "PS_json": {
+      "no_cache": [
+        "boolean",
+        "是否不使用缓存",
+        ""
+      ]
+    },
+    "json": {
+      "no_cache": false
+    }
+  },
+  "get_group_member_info": {
+    "PS": "群组:获取群成员信息",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "QQ 号",
+        "必须"
+      ],
+      "no_cache": [
+        "boolean",
+        "是否不使用缓存",
+        ""
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "no_cache": false
+    }
+  },
+  "get_group_member_list": {
+    "PS": "群组:获取群成员列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "no_cache": [
+        "boolean",
+        "是否不使用缓存",
+        ""
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "no_cache": false
+    }
+  },
+  "get_group_msg_history": {
+    "PS": "消息:获取群历史消息",
+    "PS_json": {
+      "group_id": [
+        "string",
+        "群号",
+        "必须"
+      ],
+      "message_seq": [
+        "string",
+        "最新消息序号,填0或者不填表示从最新开始",
+        ""
+      ],
+      "count": [
+        "integer",
+        "消息数量",
+        "20"
+      ],
+      "reverseOrder": [
+        "boolean",
+        "",
+        ""
+      ]
+    },
+    "json": {
+      "group_id": "",
+      "message_seq": "",
+      "count": 0,
+      "reverseOrder": false
+    }
+  },
+  "get_group_root_files": {
+    "PS": "文件:获取群根目录文件列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_shut_list": {
+    "PS": "群组:获取被禁言群员列表",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_system_msg": {
+    "PS": "群组:获取群系统消息",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_image": {
+    "PS": "消息:获取消息图片详情",
+    "PS_json": {
+      "file": [
+        "string",
+        "收到的图片文件名",
+        "必须"
+      ]
+    },
+    "json": {
+      "file": ""
+    }
+  },
+  "get_login_info": {
+    "PS": "系统:获取登录号信息",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_msg": {
+    "PS": "消息:获取消息详情",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "get_private_file_url": {
+    "PS": "文件:获取私聊文件资源链接",
+    "PS_json": {
+      "file_id": [
+        "string",
+        "文件 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "get_profile_like": {
+    "PS": "用户:获取我赞过谁列表",
+    "PS_json": {
+      "start": [
+        "integer",
+        "从0开始，-1表示获取全部，获取全部的时候非好友nick可能为空",
+        ""
+      ],
+      "count": [
+        "integer",
+        "一页的数量，最多30",
+        "20"
+      ]
+    },
+    "json": {
+      "start": 0,
+      "count": 0
+    }
+  },
+  "get_profile_like_me": {
+    "PS": "用户:获取谁赞过我列表",
+    "PS_json": {
+      "start": [
+        "integer",
+        "从0开始，-1表示获取全部，获取全部的时候非好友nick可能为空",
+        ""
+      ],
+      "count": [
+        "integer",
+        "一页的数量，最多30",
+        "20"
+      ]
+    },
+    "json": {
+      "start": 0,
+      "count": 0
+    }
+  },
+  "get_qq_avatar": {
+    "PS": "用户:获取QQ或QQ群头像",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "QQ 号",
+        ""
+      ],
+      "group_id": [
+        "integer",
+        "",
+        ""
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "group_id": 0
+    }
+  },
+  "get_recommend_face": {
+    "PS": "其他:获取推荐表情",
+    "PS_json": {
+      "word": [
+        "string",
+        "关键词",
+        "必须"
+      ]
+    },
+    "json": {
+      "word": ""
+    }
+  },
+  "get_record": {
+    "PS": "消息:获取消息语音详情",
+    "PS_json": {
+      "file": [
+        "string",
+        "收到的语音文件名",
+        "必须"
+      ],
+      "out_format": [
+        "string",
+        "要转换到的格式",
+        "mp3"
+      ]
+    },
+    "json": {
+      "file": "",
+      "out_format": ""
+    }
+  },
+  "get_rkey": {
+    "PS": "其他:获取图片rkey",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_robot_uin_range": {
+    "PS": "用户:获取官方机器人QQ号范围",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_status": {
+    "PS": "系统:bot状态",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_stranger_info": {
+    "PS": "用户:获取陌生人信息",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "get_version_info": {
+    "PS": "系统:获取版本信息",
+    "PS_json": {},
+    "json": {}
+  },
+  "group_poke": {
+    "PS": "群组:群员戳一戳（双击头像）",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0
+    }
+  },
+  "mark_msg_as_read": {
+    "PS": "消息:标记消息已读",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "move_group_file": {
+    "PS": "文件:移动群文件",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "file_id": [
+        "string",
+        "文件 ID",
+        "必须"
+      ],
+      "parent_directory": [
+        "string",
+        "当前文件夹 ID",
+        "必须"
+      ],
+      "target_directory": [
+        "string",
+        "目标文件夹 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "file_id": "",
+      "parent_directory": "",
+      "target_directory": ""
+    }
+  },
+  "ocr_image": {
+    "PS": "其他:图片 OCR",
+    "PS_json": {
+      "image": [
+        "string",
+        "支持http://, file://, base64://",
+        "必须"
+      ]
+    },
+    "json": {
+      "image": ""
+    }
+  },
+  "rename_group_file_folder": {
+    "PS": "文件:重命名群文件文件夹名",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "folder_id": [
+        "string",
+        "文件夹 ID",
+        "必须"
+      ],
+      "new_folder_name": [
+        "string",
+        "新文件夹名称",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "folder_id": "",
+      "new_folder_name": ""
+    }
+  },
+  "scan_qrcode": {
+    "PS": "系统:扫描二维码",
+    "PS_json": {
+      "file": [
+        "string",
+        "支持http(s)://, file://, base64://",
+        "必须"
+      ]
+    },
+    "json": {
+      "file": ""
+    }
+  },
+  "send_group_ai_record": {
+    "PS": "消息:发送群 Ai 语音",
+    "PS_json": {
+      "character": [
+        "string",
+        "语音声色，character_id",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "text": [
+        "string",
+        "语音文本",
+        "必须"
+      ],
+      "chat_type": [
+        "integer",
+        "语音类型",
+        "1"
+      ]
+    },
+    "json": {
+      "character": "",
+      "group_id": 0,
+      "text": "",
+      "chat_type": 0
+    }
+  },
+  "send_group_forward_msg": {
+    "PS": "消息:发送群聊合并转发消息",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "messages": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "messages": []
+    }
+  },
+  "send_group_msg": {
+    "PS": "消息:发送群聊卡片(json)消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊@消息": {
+    "PS": "消息:发送群聊@消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊QQ音乐卡片": {
+    "PS": "消息:发送群聊QQ音乐卡片",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊回复消息": {
+    "PS": "消息:发送群聊回复消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊图片": {
+    "PS": "消息:发送群聊图片",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊文字+图片": {
+    "PS": "消息:发送群聊文字+图片",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊文本消息": {
+    "PS": "消息:发送群聊文本消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊系统表情": {
+    "PS": "消息:发送群聊系统表情",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊网易云音乐卡片": {
+    "PS": "消息:发送群聊网易云音乐卡片",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊自定义音乐卡片": {
+    "PS": "消息:发送群聊自定义音乐卡片",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊视频消息": {
+    "PS": "消息:发送群聊视频消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊语音消息": {
+    "PS": "消息:发送群聊语音消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊超级表情_猜拳": {
+    "PS": "消息:发送群聊超级表情 猜拳",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_msg:发送群聊超级表情_骰子": {
+    "PS": "消息:发送群聊超级表情 骰子",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "group_id": 0
+    }
+  },
+  "send_group_sign": {
+    "PS": "群组:群打卡",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "send_like": {
+    "PS": "用户:点赞",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "times": [
+        "integer",
+        "赞的次数",
+        "1"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "times": 0
+    }
+  },
+  "send_pb": {
+    "PS": "其他:发送Protobuf数据包",
+    "PS_json": {
+      "cmd": [
+        "string",
+        "",
+        "必须"
+      ],
+      "hex": [
+        "string",
+        "Protobuf的16进制字符串",
+        "必须"
+      ]
+    },
+    "json": {
+      "cmd": "",
+      "hex": ""
+    }
+  },
+  "send_private_forward_msg": {
+    "PS": "消息:发送私聊合并转发消息",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "messages": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "messages": []
+    }
+  },
+  "send_private_msg": {
+    "PS": "消息:发送私聊超级表情 骰子",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊QQ音乐卡片": {
+    "PS": "消息:发送私聊QQ音乐卡片",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊卡片(json)消息": {
+    "PS": "消息:发送私聊卡片(json)消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "user_id": 0
+    }
+  },
+  "send_private_msg:发送私聊回复消息": {
+    "PS": "消息:发送私聊回复消息",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊图片": {
+    "PS": "消息:发送私聊图片",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊文字+图片": {
+    "PS": "消息:发送私聊文字+图片",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊文本消息": {
+    "PS": "消息:发送私聊文本消息",
+    "PS_json": {
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ]
+    },
+    "json": {
+      "message": [],
+      "user_id": 0
+    }
+  },
+  "send_private_msg:发送私聊系统表情": {
+    "PS": "消息:发送私聊系统表情",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊网易云音乐卡片": {
+    "PS": "消息:发送私聊网易云音乐卡片",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊自定义音乐卡片": {
+    "PS": "消息:发送私聊自定义音乐卡片",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊视频消息": {
+    "PS": "消息:发送私聊视频消息",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊语音消息": {
+    "PS": "消息:发送私聊语音消息",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_private_msg:发送私聊超级表情_猜拳": {
+    "PS": "消息:发送私聊超级表情 猜拳",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "message": [
+        "array",
+        "要发送的内容",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "set_doubt_friends_add_request": {
+    "PS": "用户:处理被过滤好友请求",
+    "PS_json": {
+      "flag": [
+        "string",
+        "加好友请求的 flag（需从 get_doubt_friends_add_request API 中获得）",
+        "必须"
+      ]
+    },
+    "json": {
+      "flag": ""
+    }
+  },
+  "set_essence_msg": {
+    "PS": "群组:设置群精华消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "set_friend_add_request": {
+    "PS": "用户:处理好友申请",
+    "PS_json": {
+      "flag": [
+        "string",
+        "",
+        "必须"
+      ],
+      "approve": [
+        "boolean",
+        "",
+        "必须"
+      ],
+      "remark": [
+        "string",
+        "",
+        "必须"
+      ]
+    },
+    "json": {
+      "flag": "",
+      "approve": false,
+      "remark": ""
+    }
+  },
+  "set_friend_category": {
+    "PS": "用户:移动好友分组",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "好友 QQ 号",
+        "必须"
+      ],
+      "category_id": [
+        "integer",
+        "分组 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "category_id": 0
+    }
+  },
+  "set_friend_remark": {
+    "PS": "用户:设置好友备注",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "好友 QQ 号",
+        "必须"
+      ],
+      "remark": [
+        "string",
+        "备注名",
+        ""
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "remark": ""
+    }
+  },
+  "set_group_add_request": {
+    "PS": "群组:处理加群请求",
+    "PS_json": {
+      "flag": [
+        "string",
+        "加群请求的 flag",
+        "必须"
+      ],
+      "approve": [
+        "boolean",
+        "是否同意请求／邀请",
+        "True"
+      ],
+      "reason": [
+        "string",
+        "拒绝理由（仅在拒绝时有效）",
+        " "
+      ]
+    },
+    "json": {
+      "flag": "",
+      "approve": false,
+      "reason": ""
+    }
+  },
+  "set_group_admin": {
+    "PS": "群组:设置群管理员",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "",
+        "必须"
+      ],
+      "enable": [
+        "boolean",
+        "",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "enable": false
+    }
+  },
+  "set_group_ban": {
+    "PS": "群组:群禁言",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "要禁言的 QQ 号",
+        "必须"
+      ],
+      "duration": [
+        "integer",
+        "禁言时长(秒)，0为取消禁言",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "duration": 0
+    }
+  },
+  "set_group_card": {
+    "PS": "群组:设置群名片",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "要设置的 QQ 号",
+        "必须"
+      ],
+      "card": [
+        "string",
+        "群名片内容，为空则取消群名片",
+        " "
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "card": ""
+    }
+  },
+  "set_group_file_forever": {
+    "PS": "文件:群文件转永久",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "file_id": [
+        "string",
+        "文件id",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "file_id": ""
+    }
+  },
+  "set_group_kick": {
+    "PS": "群组:群踢人",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "要踢的 QQ 号",
+        "必须"
+      ],
+      "reject_add_request": [
+        "boolean",
+        "是否禁止再次加群",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "reject_add_request": false
+    }
+  },
+  "set_group_leave": {
+    "PS": "群组:退群",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "set_group_msg_mask": {
+    "PS": "群组:设置群消息接收方式",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "mask": [
+        "integer",
+        "接收方式",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "mask": 0
+    }
+  },
+  "set_group_name": {
+    "PS": "群组:设置群名",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "group_name": [
+        "string",
+        "新群名",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "group_name": ""
+    }
+  },
+  "set_group_remark": {
+    "PS": "群组:设置群备注",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "remark": [
+        "string",
+        "备注名，为空则取消备注",
+        " "
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "remark": ""
+    }
+  },
+  "set_group_special_title": {
+    "PS": "群组:设置群头衔",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "user_id": [
+        "integer",
+        "要设置的 QQ 号",
+        "必须"
+      ],
+      "special_title": [
+        "string",
+        "专属头衔，为空则表示去掉群头衔",
+        " "
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "user_id": 0,
+      "special_title": ""
+    }
+  },
+  "set_group_whole_ban": {
+    "PS": "群组:群全体禁言",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "enable": [
+        "boolean",
+        "是否禁言",
+        "True"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "enable": false
+    }
+  },
+  "set_msg_emoji_like": {
+    "PS": "消息:表情回应消息",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ],
+      "emoji_id": [
+        "integer",
+        "表情 ID，参考 https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html#EmojiType",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0,
+      "emoji_id": 0
+    }
+  },
+  "set_online_status": {
+    "PS": "系统:设置在线状态",
+    "PS_json": {
+      "status": [
+        "integer",
+        "状态",
+        "必须"
+      ],
+      "ext_status": [
+        "integer",
+        "扩展状态",
+        "必须"
+      ],
+      "battery_status": [
+        "integer",
+        "电量",
+        "必须"
+      ]
+    },
+    "json": {
+      "status": 0,
+      "ext_status": 0,
+      "battery_status": 0
+    }
+  },
+  "set_qq_avatar": {
+    "PS": "用户:设置个人头像",
+    "PS_json": {
+      "file": [
+        "string",
+        "支持三种形式: \n\n* file://d:/1.png \n\n* http://baidu.com/xxxx/1.png \n\n* base64://xxxxxxxx",
+        "必须"
+      ]
+    },
+    "json": {
+      "file": ""
+    }
+  },
+  "set_qq_profile": {
+    "PS": "用户:设置登录号资料",
+    "PS_json": {
+      "nickname": [
+        "string",
+        "名称",
+        ""
+      ],
+      "personal_note": [
+        "string",
+        "个人说明",
+        ""
+      ]
+    },
+    "json": {
+      "nickname": "",
+      "personal_note": ""
+    }
+  },
+  "set_restart": {
+    "PS": "系统:重启",
+    "PS_json": {},
+    "json": {}
+  },
+  "unset_msg_emoji_like": {
+    "PS": "消息:取消消息表情回应",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ],
+      "emoji_id": [
+        "integer",
+        "表情 ID，参考 https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html#EmojiType",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0,
+      "emoji_id": 0
+    }
+  },
+  "upload_group_album": {
+    "PS": "群组:上传群相册",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "album_id": [
+        "string",
+        "相册 ID",
+        "必须"
+      ],
+      "files": [
+        "array",
+        "文件路径",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "album_id": "",
+      "files": []
+    }
+  },
+  "upload_group_file": {
+    "PS": "文件:上传群文件",
+    "PS_json": {
+      "file": [
+        "string",
+        "文件路径",
+        "必须"
+      ],
+      "name": [
+        "string",
+        "储存名称",
+        ""
+      ],
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "folder_id": [
+        "string",
+        "文件夹 ID，可通过 get_group_root_files 获取",
+        ""
+      ]
+    },
+    "json": {
+      "file": "",
+      "name": "",
+      "group_id": 0,
+      "folder_id": ""
+    }
+  },
+  "upload_private_file": {
+    "PS": "文件:上传私聊文件",
+    "PS_json": {
+      "user_id": [
+        "integer",
+        "对方 QQ 号",
+        "必须"
+      ],
+      "file": [
+        "string",
+        "文件路径",
+        "必须"
+      ],
+      "name": [
+        "string",
+        "文件名称",
+        ""
+      ]
+    },
+    "json": {
+      "user_id": 0,
+      "file": "",
+      "name": ""
+    }
+  },
+  "voice_msg_to_text": {
+    "PS": "消息:语音消息转文字",
+    "PS_json": {
+      "message_id": [
+        "integer",
+        "消息 ID",
+        "必须"
+      ]
+    },
+    "json": {
+      "message_id": 0
+    }
+  }
+}

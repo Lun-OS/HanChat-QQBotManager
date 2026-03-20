@@ -1,0 +1,10 @@
+{
+  "id": "mmw5qxhl6tay1zz9frb",
+  "name": "http示例1",
+  "description": "",
+  "version": "1.0.0",
+  "xmlContent": "<xml xmlns=\"https://developers.google.com/blockly/xml\"><variables><variable id=\"ZJ^6#5*mD|;nv2(qr{Bj\">base64data</variable></variables><block type=\"event_on_init\" id=\";]A|k`7ADb.a;H|`A8Ix\" x=\"-90\" y=\"-430\"><statement name=\"HANDLER\"><block type=\"http_download_base64\" id=\"hsa39u/w#N.nCQt#8ftC\"><field name=\"VAR\" id=\"ZJ^6#5*mD|;nv2(qr{Bj\">base64data</field><value name=\"URL\"><block type=\"text\" id=\"vD]:I3X@[mRydu2eF;Nk\"><field name=\"TEXT\">https://img.wjwj.top/2026/03/08/5a718a78595c3ff9e0921b6df86d86a5.png</field></block></value><next><block type=\"send_private_image_base64\" id=\"!JlI~!G@`R@7nO@ewHjn\"><value name=\"USER_ID\"><block type=\"text\" id=\"PejcKVgJgO371R?;EbS^\"><field name=\"TEXT\">1596534228</field></block></value><value name=\"BASE64\"><block type=\"variables_get\" id=\"}Q~/)-3FW[@*)Q~gjluE\"><field name=\"VAR\" id=\"ZJ^6#5*mD|;nv2(qr{Bj\">base64data</field></block></value></block></next></block></statement></block></xml>",
+  "createdAt": "2026-03-18T14:49:53.673Z",
+  "updatedAt": "2026-03-19T05:43:27.959Z",
+  "path": "/plugins/blockly/http示例1"
+}
