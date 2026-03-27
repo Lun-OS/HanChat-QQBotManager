@@ -119,7 +119,7 @@ export async function updateCachedMessageEmojiReaction(
       const existingList = m.emojiLikesList || []
 
       if (isAdd) {
-        const existingIndex = existingList.findIndex(e => e.emojiId === emojiId)
+        const existingIndex = existingList.findIndex((e: { emojiId: string }) => e.emojiId === emojiId)
         if (existingIndex >= 0) {
           const newList = [...existingList]
           newList[existingIndex] = {
@@ -134,7 +134,7 @@ export async function updateCachedMessageEmojiReaction(
           }
         }
       } else {
-        const existingIndex = existingList.findIndex(e => e.emojiId === emojiId)
+        const existingIndex = existingList.findIndex((e: { emojiId: string }) => e.emojiId === emojiId)
         if (existingIndex >= 0) {
           const newList = [...existingList]
           const newCount = parseInt(newList[existingIndex].likesCnt) - 1

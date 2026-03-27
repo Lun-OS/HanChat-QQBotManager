@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,6 +39,10 @@ type ReverseWebSocketService struct {
 	maxConnections int // 最大连接数限制
 	eventHandlers []func(selfID string, eventData map[string]interface{}) // 事件处理器列表
 	eventHandlersMu sync.RWMutex // 保护eventHandlers
+	
+	// 原始数据事件处理器（用于调试服务透传）
+	rawEventHandlers []func(selfID string, rawData []byte)
+	rawEventHandlersMu sync.RWMutex
 	waitingConnect   map[string]*waitingConnectInfo // 等待connect消息的连接
 	waitingMu        sync.Mutex // 保护waitingConnect
 	
@@ -61,6 +66,11 @@ type ReverseWebSocketService struct {
 	heartbeatTimeout  time.Duration // 心跳超时时间
 	lastHeartbeat     map[string]time.Time // self_id -> 最后心跳时间
 	lastHeartbeatMu   sync.RWMutex
+
+	// 修复问题22：临时响应回调（实例级别，避免全局变量竞争）
+	tempResponseMu   sync.Mutex
+	tempResponseChan map[string]chan map[string]interface{}
+	echoCounter      uint64 // 原子计数器，用于生成唯一的 echo
 }
 
 type waitingConnectInfo struct {
@@ -96,6 +106,9 @@ func NewReverseWebSocketService(baseLogger *zap.Logger, accountMgr *BotAccountMa
 		heartbeatInterval: 30 * time.Second, // 默认30秒心跳间隔
 		heartbeatTimeout:  60 * time.Second, // 默认60秒超时
 		lastHeartbeat:     make(map[string]time.Time),
+		// 修复问题22：初始化临时响应回调映射
+		tempResponseChan:  make(map[string]chan map[string]interface{}),
+		echoCounter:       0,
 	}
 
 	// 启动心跳检测任务
@@ -524,6 +537,17 @@ func (s *ReverseWebSocketService) handleEvent(selfID string, eventData map[strin
 	for _, handler := range handlers {
 		handler(selfID, eventCopy)
 	}
+
+	// 分发原始数据给原始数据处理器（用于调试服务透传）
+	s.rawEventHandlersMu.RLock()
+	rawHandlers := make([]func(selfID string, rawData []byte), len(s.rawEventHandlers))
+	copy(rawHandlers, s.rawEventHandlers)
+	s.rawEventHandlersMu.RUnlock()
+
+	// 直接透传原始数据，不做任何修改
+	for _, handler := range rawHandlers {
+		handler(selfID, rawData)
+	}
 }
 
 // broadcastEventLog 广播事件日志
@@ -571,11 +595,28 @@ func (s *ReverseWebSocketService) broadcastEventLog(selfID string, postType stri
 }
 
 // handleAPIResponse 处理API响应
-// 目前仅记录日志，后续可扩展为与请求关联
+// 修复问题20：添加安全的类型断言
 func (s *ReverseWebSocketService) handleAPIResponse(selfID string, response map[string]interface{}, rawData []byte) {
-	echo, _ := response["echo"].(string)
-	status, _ := response["status"].(string)
-	retcode, _ := response["retcode"].(float64)
+	// 安全获取echo字段
+	echo, ok := response["echo"].(string)
+	if !ok || echo == "" {
+		s.logger.Warnw("收到没有echo的API响应", "self_id", selfID)
+		return
+	}
+
+	// 安全获取status字段
+	status := "unknown"
+	if statusVal, ok := response["status"].(string); ok {
+		status = statusVal
+	}
+
+	// 安全获取retcode字段
+	retcode := -1.0
+	if retcodeVal, ok := response["retcode"].(float64); ok {
+		retcode = retcodeVal
+	} else if retcodeInt, ok := response["retcode"].(int); ok {
+		retcode = float64(retcodeInt)
+	}
 
 	s.logger.Infow("收到API响应",
 		"self_id", selfID,
@@ -583,13 +624,9 @@ func (s *ReverseWebSocketService) handleAPIResponse(selfID string, response map[
 		"status", status,
 		"retcode", retcode)
 
-	// 检查是否是临时响应
-	if echo != "" {
-		s.logger.Debugw("处理临时响应", "echo", echo)
-		go s.handleTempResponse(echo, response)
-	} else {
-		s.logger.Warnw("收到没有echo的API响应", "self_id", selfID)
-	}
+	// 处理临时响应
+	s.logger.Debugw("处理临时响应", "echo", echo)
+	go s.handleTempResponse(echo, response)
 }
 
 // SendMessageToAccount 发送消息到指定账号的WebSocket连接
@@ -609,7 +646,40 @@ func (s *ReverseWebSocketService) SendMessageToAccount(selfID string, message in
 		return fmt.Errorf("序列化消息失败: %w", err)
 	}
 
+	s.logger.Infow("发送WebSocket消息",
+		"self_id", selfID,
+		"message", string(data))
+
 	// 记录发送的 WebSocket 消息（排除 ping）
+	if s.logManager != nil {
+		s.logManager.WriteWSLog(selfID, "send", data)
+	}
+
+	// 使用线程安全的写入方法
+	if err := account.WriteMessage(websocket.TextMessage, data); err != nil {
+		return fmt.Errorf("发送消息失败: %w", err)
+	}
+
+	return nil
+}
+
+// SendRawMessageToAccount 发送原始消息到指定账号的WebSocket连接
+// 用于透传原始数据，不做任何序列化（线程安全）
+func (s *ReverseWebSocketService) SendRawMessageToAccount(selfID string, data []byte) error {
+	account, err := s.accountMgr.GetAccount(selfID)
+	if err != nil {
+		return fmt.Errorf("账号不存在: %w", err)
+	}
+
+	if account.WsConn == nil {
+		return fmt.Errorf("账号未连接: %s", selfID)
+	}
+
+	s.logger.Infow("发送原始WebSocket消息",
+		"self_id", selfID,
+		"size", len(data))
+
+	// 记录发送的 WebSocket 消息
 	if s.logManager != nil {
 		s.logManager.WriteWSLog(selfID, "send", data)
 	}
@@ -627,6 +697,9 @@ func (s *ReverseWebSocketService) SendMessageToAccount(selfID string, message in
 // params: 请求参数
 // 返回响应数据
 func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[string]interface{}) (map[string]interface{}, error) {
+	// 修复：处理action参数，移除开头的"/"，确保接口名称格式一致
+	action = strings.TrimPrefix(action, "/")
+
 	// 获取或创建该账号的并发控制通道（限制并发数为5）
 	s.apiChanMu.Lock()
 	ch, ok := s.apiChan[selfID]
@@ -636,19 +709,25 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 	}
 	s.apiChanMu.Unlock()
 
-	// 尝试获取并发许可，超时等待5秒
+	// 尝试获取并发许可，使用非阻塞select避免丢弃请求
+	// 修复问题21：使用队列等待而不是直接丢弃请求
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	select {
 	case ch <- struct{}{}:
-		defer func() { <-ch }() // 释放许可
-	case <-time.After(5 * time.Second):
+		// 成功获取许可
+	case <-ctx.Done():
 		s.logger.Warnw("API请求等待并发许可超时",
 			"self_id", selfID,
 			"action", action)
 		return nil, fmt.Errorf("API请求并发等待超时: %s", action)
 	}
+	// 确保释放许可
+	defer func() { <-ch }()
 
-	// 生成唯一的echo（使用原子计数器避免并发冲突）
-	echo := generateEcho()
+	// 修复问题23：使用更安全的echo生成方式，包含selfID避免冲突
+	echo := s.generateEcho(selfID)
 
 	// 构建请求
 	request := map[string]interface{}{
@@ -657,7 +736,7 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 		"echo":   echo,
 	}
 
-	s.logger.Debugw("准备发送API请求",
+	s.logger.Infow("准备发送API请求",
 		"self_id", selfID,
 		"action", action,
 		"echo", echo)
@@ -667,7 +746,12 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 
 	// 注册响应回调（临时）
 	s.registerTempResponse(echo, respChan)
-	defer s.unregisterTempResponse(echo)
+	// 修复问题24：在超时后也清理回调，但使用更安全的延迟清理
+	defer func() {
+		// 延迟一小段时间再清理，确保响应已经处理完毕
+		time.Sleep(100 * time.Millisecond)
+		s.unregisterTempResponse(echo)
+	}()
 
 	// 发送请求
 	if err := s.SendMessageToAccount(selfID, request); err != nil {
@@ -678,7 +762,7 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 		return nil, err
 	}
 
-	s.logger.Debugw("API请求已发送，等待响应",
+	s.logger.Infow("API请求已发送，等待响应",
 		"self_id", selfID,
 		"action", action,
 		"echo", echo)
@@ -686,10 +770,12 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 	// 等待响应（30秒超时，考虑到某些API如get_friend_list可能需要较长时间）
 	select {
 	case resp := <-respChan:
-		s.logger.Debugw("收到API响应",
+		s.logger.Infow("收到API响应",
 			"self_id", selfID,
 			"action", action,
 			"echo", echo)
+		// 修复问题19：确保响应数据结构与LLOneBotService一致
+		// 返回完整的响应数据，包含status和data
 		return resp, nil
 	case <-time.After(30 * time.Second):
 		s.logger.Errorw("API请求超时",
@@ -700,42 +786,47 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 	}
 }
 
-// tempResponseCallbacks 临时响应回调
-var (
-	tempResponseMu   sync.Mutex
-	tempResponseChan = make(map[string]chan map[string]interface{})
-	echoCounter      uint64 // 原子计数器，用于生成唯一的 echo
-)
-
-// generateEcho 生成唯一的 echo
-func generateEcho() string {
-	counter := atomic.AddUint64(&echoCounter, 1)
-	return fmt.Sprintf("echo_%d_%d", time.Now().UnixNano(), counter)
+// generateEcho 生成唯一的 echo（修复问题23：包含selfID避免高并发冲突）
+func (s *ReverseWebSocketService) generateEcho(selfID string) string {
+	counter := atomic.AddUint64(&s.echoCounter, 1)
+	return fmt.Sprintf("echo_%s_%d_%d", selfID, time.Now().UnixNano(), counter)
 }
 
-// registerTempResponse 注册临时响应回调
+// registerTempResponse 注册临时响应回调（修复问题22：使用实例级别的锁）
 func (s *ReverseWebSocketService) registerTempResponse(echo string, ch chan map[string]interface{}) {
-	tempResponseMu.Lock()
-	defer tempResponseMu.Unlock()
-	tempResponseChan[echo] = ch
+	s.tempResponseMu.Lock()
+	defer s.tempResponseMu.Unlock()
+	s.tempResponseChan[echo] = ch
 }
 
 // unregisterTempResponse 取消注册临时响应回调
 func (s *ReverseWebSocketService) unregisterTempResponse(echo string) {
-	tempResponseMu.Lock()
-	defer tempResponseMu.Unlock()
-	if ch, ok := tempResponseChan[echo]; ok {
-		close(ch)
-		delete(tempResponseChan, echo)
+	s.tempResponseMu.Lock()
+	defer s.tempResponseMu.Unlock()
+	if ch, ok := s.tempResponseChan[echo]; ok {
+		// 安全关闭通道，避免重复关闭
+		select {
+		case <-ch:
+			// 通道已经关闭或已收到数据
+		default:
+			close(ch)
+		}
+		delete(s.tempResponseChan, echo)
 	}
 }
 
-// handleTempResponse 处理临时响应
+// handleTempResponse 处理临时响应（修复问题22：使用实例级别的锁）
 func (s *ReverseWebSocketService) handleTempResponse(echo string, response map[string]interface{}) {
-	tempResponseMu.Lock()
-	defer tempResponseMu.Unlock()
-	if ch, ok := tempResponseChan[echo]; ok {
-		ch <- response
+	s.tempResponseMu.Lock()
+	defer s.tempResponseMu.Unlock()
+	if ch, ok := s.tempResponseChan[echo]; ok {
+		// 使用非阻塞发送，避免阻塞
+		select {
+		case ch <- response:
+		default:
+			// 通道已满或已关闭，记录警告
+			s.logger.Warnw("响应通道已满或已关闭，丢弃响应", "echo", echo)
+		}
 	}
 }
 
@@ -745,6 +836,14 @@ func (s *ReverseWebSocketService) AddEventHandler(handler func(selfID string, ev
 	s.eventHandlersMu.Lock()
 	defer s.eventHandlersMu.Unlock()
 	s.eventHandlers = append(s.eventHandlers, handler)
+}
+
+// AddRawEventHandler 添加原始数据事件处理器
+// 处理器会接收到所有账号的原始事件数据（不做解析，直接透传）
+func (s *ReverseWebSocketService) AddRawEventHandler(handler func(selfID string, rawData []byte)) {
+	s.rawEventHandlersMu.Lock()
+	defer s.rawEventHandlersMu.Unlock()
+	s.rawEventHandlers = append(s.rawEventHandlers, handler)
 }
 
 // GetEventHandlers 获取事件处理器列表（线程安全）

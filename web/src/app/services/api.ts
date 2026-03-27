@@ -1,15 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { toast } from 'sonner';
 
-// API基础配置
-declare global {
-  interface ImportMetaEnv {
-    VITE_API_BASE_URL?: string;
-  }
-  interface ImportMeta {
-    readonly env: ImportMetaEnv;
-  }
-}
+// API基础配置 - 类型声明在 vite-env.d.ts 中
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -47,14 +39,36 @@ apiClient.interceptors.response.use(
       const status = error.response.status;
       const data = error.response.data as any;
 
+      // 构建详细错误信息对象
+      const detailedError = {
+        status,
+        message: data?.message || data?.wording || '请求失败',
+        data: data,
+        originalError: error,
+        isApiError: true
+      };
+
+      // 记录详细错误日志
+      console.error('API请求失败:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        status,
+        responseData: data,
+        errorMessage: detailedError.message
+      });
+
       switch (status) {
+        case 400:
+          // 400 Bad Request - 让调用方通过 catch 处理业务逻辑
+          // 业务错误（如账号容器不存在、插件未运行等）不应显示toast
+          return Promise.reject(detailedError);
         case 401:
           toast.error('登录已过期，请重新登录');
           localStorage.removeItem('auth_token');
           window.location.href = '/login';
           break;
         case 403:
-          toast.error(data?.message || '权限不足');
+          toast.error(detailedError.message || '权限不足');
           break;
         case 404:
           toast.error('请求的资源不存在');
@@ -63,22 +77,45 @@ apiClient.interceptors.response.use(
           // 409 Conflict - 资源已存在，统一错误处理
           // 让调用方通过 catch 处理业务逻辑
           return Promise.reject({
-            ...error,
-            isConflict: true,
-            message: data?.message || '资源已存在'
+            ...detailedError,
+            isConflict: true
           });
-        case 500:
-          toast.error('服务器内部错误');
+        case 502:
+          toast.error('网关错误：无法连接到机器人服务，请检查机器人是否在线');
+          break;
+        case 503:
+          toast.error('服务暂时不可用，请稍后重试');
+          break;
+        case 504:
+          toast.error('网关超时：机器人服务响应超时');
           break;
         default:
-          toast.error(data?.message || '请求失败');
+          // 显示后端返回的具体错误信息
+          toast.error(detailedError.message || `请求失败 (${status})`);
       }
+
+      return Promise.reject(detailedError);
     } else if (error.request) {
-      toast.error('网络连接失败，请检查网络');
+      // 请求已发送但没有收到响应
+      const networkError = {
+        message: '网络连接失败，请检查网络',
+        isNetworkError: true,
+        originalError: error
+      };
+      toast.error(networkError.message);
+      console.error('网络错误:', error.request);
+      return Promise.reject(networkError);
     } else {
-      toast.error('请求配置错误');
+      // 请求配置错误
+      const configError = {
+        message: '请求配置错误: ' + error.message,
+        isConfigError: true,
+        originalError: error
+      };
+      toast.error(configError.message);
+      console.error('请求配置错误:', error.message);
+      return Promise.reject(configError);
     }
-    return Promise.reject(error);
   }
 );
 
@@ -1008,7 +1045,7 @@ export const messageApi = {
   },
 
   // 获取好友历史消息
-  getFriendMsgHistory: async (selfId: string, userId: string, messageSeq?: number, count: number = 20) => {
+  getFriendMsgHistory: async (selfId: string, userId: string, messageSeq?: number | string, count: number = 20) => {
     const response = await apiClient.post(`/api/${selfId}/get_friend_msg_history`, {
       user_id: parseInt(userId),
       message_seq: messageSeq || 0,

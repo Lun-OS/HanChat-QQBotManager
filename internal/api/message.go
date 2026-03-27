@@ -243,18 +243,109 @@ func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, bas
 
 	// 发送群AI语音
 	r.POST("/group-ai-record", func(c *gin.Context) {
-		var body map[string]interface{}
+		var body struct {
+			GroupId   interface{} `json:"group_id"`
+			Text      string      `json:"text"`
+			Character string      `json:"character"`
+			ChatType  int         `json:"chat_type"`
+		}
 		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+			logger.Errorw("发送群AI语音参数错误", "error", err, "requestId", c.GetString("requestId"))
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "参数错误: " + err.Error(),
+			})
 			return
 		}
-		logger.Infow("发送群AI语音", "requestId", c.GetString("requestId"))
-		res, err := ll.CallAPI("/send_group_ai_record", body, "POST")
+
+		// 参数验证
+		if body.GroupId == nil || body.GroupId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "缺少必填参数: group_id",
+			})
+			return
+		}
+		if body.Text == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "缺少必填参数: text (语音文本内容)",
+			})
+			return
+		}
+		if body.Character == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "缺少必填参数: character (AI角色ID)",
+			})
+			return
+		}
+
+		// 设置默认chat_type
+		if body.ChatType == 0 {
+			body.ChatType = 1
+		}
+
+		// 构建请求参数
+		params := map[string]interface{}{
+			"group_id":  body.GroupId,
+			"text":      body.Text,
+			"character": body.Character,
+			"chat_type": body.ChatType,
+		}
+
+		logger.Infow("发送群AI语音",
+			"requestId", c.GetString("requestId"),
+			"groupId", body.GroupId,
+			"character", body.Character,
+			"textLength", len(body.Text),
+		)
+
+		res, err := ll.CallAPI("/send_group_ai_record", params, "POST")
 		if err != nil {
-			c.Error(err)
-			c.Status(http.StatusBadGateway)
+			logger.Errorw("发送群AI语音失败",
+				"error", err,
+				"requestId", c.GetString("requestId"),
+				"groupId", body.GroupId,
+			)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"success": false,
+				"message": "调用机器人API失败: " + err.Error(),
+				"error":   err.Error(),
+			})
 			return
 		}
+
+		// 检查机器人返回的状态
+		if status, ok := res["status"].(string); ok && status != "ok" {
+			retcode := 0
+			if rc, ok := res["retcode"].(float64); ok {
+				retcode = int(rc)
+			}
+			message := ""
+			if msg, ok := res["message"].(string); ok {
+				message = msg
+			}
+			if wording, ok := res["wording"].(string); ok && wording != "" {
+				message = wording
+			}
+
+			logger.Errorw("机器人返回错误",
+				"status", status,
+				"retcode", retcode,
+				"message", message,
+				"requestId", c.GetString("requestId"),
+			)
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"status":  status,
+				"retcode": retcode,
+				"message": message,
+			})
+			return
+		}
+
 		// 兼容不同上游返回结构：优先返回 data 字段，否则回传完整响应
 		var out interface{}
 		if v, ok := res["data"]; ok && v != nil {
@@ -262,7 +353,17 @@ func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, bas
 		} else {
 			out = res
 		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
+
+		logger.Infow("发送群AI语音成功",
+			"requestId", c.GetString("requestId"),
+			"groupId", body.GroupId,
+		)
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    out,
+			"message": "AI语音发送成功",
+		})
 	})
 
 	// 语音转文本

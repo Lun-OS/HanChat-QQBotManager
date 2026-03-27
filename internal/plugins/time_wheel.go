@@ -184,8 +184,9 @@ func (mtw *MultiLevelTimeWheel) AddTask(task *TimeWheelTask, expiration time.Tim
 	duration := time.Until(expiration)
 
 	// 根据任务的过期时间，选择合适的时间轮级别
+	// 修复：使用 < 而不是 <=，避免边界值判断错误
 	for i, level := range mtw.levels {
-		if duration <= level.interval*time.Duration(level.wheelSize) {
+		if duration < level.interval*time.Duration(level.wheelSize) {
 			mtw.addTaskToLevel(level, task, duration)
 			// 检查logger是否为nil，避免空指针引用
 			if mtw.logger != nil {

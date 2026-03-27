@@ -164,3 +164,32 @@ svg.blocklySvg {
   fill: #000 !important;
   font-weight: 400 !important;
 }
+
+/* ==================== 预览模式样式 ==================== */
+.preview-mode .blocklyBlockCanvas {
+  pointer-events: none !important;
+}
+
+.preview-mode .blocklyBubbleCanvas {
+  pointer-events: none !important;
+}
+
+.preview-mode .blocklyDragSurface {
+  pointer-events: none !important;
+}
+
+.preview-mode .blocklyWidgetDiv {
+  pointer-events: none !important;
+}
+
+.preview-mode .blocklyTooltipBackground {
+  display: none !important;
+}
+
+.preview-mode .blocklyEditableText {
+  pointer-events: none !important;
+}
+
+.preview-mode .blocklyFieldLabel {
+  pointer-events: none !important;
+}

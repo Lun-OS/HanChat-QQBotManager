@@ -182,8 +182,8 @@ end)
 -- 清理函数
 function on_destroy()
     log.info("HTTP私聊助手插件已停止")
-    
-    local selfId = tostring(bot.get_id())
+
+    local selfId = tostring(plugin.self_id)
     local ok1, err1 = http_interface.unregister("sendprivate", selfId)
     if not ok1 then log.error("注销接口 [/sendprivate] 失败: " .. tostring(err1)) end
     

@@ -921,16 +921,24 @@ export function WebQQ() {
     if (!selectedBot) return;
     try {
       const response = await groupApi.getGroupList(selectedBot);
-      // 后端返回格式：{status: 'ok', data: {data: [...], echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (Array.isArray(botData)) {
-        setGroups(botData.map((g: any) => ({
+      // 后端返回格式：{status: 'ok', retcode: 0, data: [...]}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应（群列表数组）
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const groupList = response.data;
+
+      if (outerStatus === 'ok' && outerRetcode === 0 && Array.isArray(groupList)) {
+        setGroups(groupList.map((g: any) => ({
           group_id: String(g.group_id),
           group_name: g.group_name,
           member_count: g.member_count,
         })));
+      } else if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('加载群组列表失败:', response.message);
+        toast.error('加载群组列表失败: ' + (response.message || `API错误 (${outerRetcode})`));
       }
     } catch (error) {
+      console.error('加载群组列表失败:', error);
       toast.error('加载群组列表失败');
     }
   }, [selectedBot]);
@@ -963,15 +971,27 @@ export function WebQQ() {
       
       let response;
       if (chat.type === 'friend') {
-        response = await messageApi.getFriendMsgHistory(selectedBot, chat.id, messageSeq, MESSAGES_PER_PAGE);
+        response = await messageApi.getFriendMsgHistory(selectedBot, chat.id, messageSeq?.toString(), MESSAGES_PER_PAGE);
       } else {
-        response = await messageApi.getGroupMsgHistory(selectedBot, chat.id, messageSeq, MESSAGES_PER_PAGE);
+        response = await messageApi.getGroupMsgHistory(selectedBot, chat.id, messageSeq?.toString(), MESSAGES_PER_PAGE);
       }
 
-      // 后端返回格式：{status: 'ok', data: {data: {messages: [...]}, echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (botData?.messages) {
-        const msgs: Message[] = botData.messages.map((m: any) => ({
+      // 后端返回格式：{status: 'ok', retcode: 0, data: {messages: [...]}}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const oneBotResponse = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('加载消息历史失败:', response.message);
+        toast.error('加载消息历史失败: ' + (response.message || `API错误 (${outerRetcode})`));
+        return;
+      }
+
+      // 然后检查 OneBot 的响应
+      if (oneBotResponse?.messages) {
+        const msgs: Message[] = oneBotResponse.messages.map((m: any) => ({
           message_id: String(m.message_id),
           user_id: String(m.user_id),
           group_id: m.group_id ? String(m.group_id) : undefined,
@@ -1144,12 +1164,26 @@ export function WebQQ() {
         response = await messageApi.sendGroupMsg(selectedBot, selectedChat.id, messageSegment);
       }
 
-      // 后端返回格式：{status: 'ok', data: {data: {...}, echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (botData?.message_id) {
+      // 后端返回格式：{status: 'ok', retcode: 0, data: {message_id: ...}}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const oneBotResponse = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        setMessages(prev => prev.map(m =>
+          m.message_id === tempId ? { ...m, status: 'error' } : m
+        ));
+        toast.error('发送失败: ' + (response.message || `API调用失败 (retcode: ${outerRetcode})`));
+        return;
+      }
+
+      // 然后检查 OneBot 的响应
+      if (oneBotResponse?.message_id) {
         setMessages(prev => prev.map(m =>
           m.message_id === tempId
-            ? { ...m, message_id: String(botData.message_id), status: 'sent', isTemp: false }
+            ? { ...m, message_id: String(oneBotResponse.message_id), status: 'sent', isTemp: false }
             : m
         ));
         updateRecentSession(selectedChat, content, now);
@@ -1157,7 +1191,8 @@ export function WebQQ() {
         setMessages(prev => prev.map(m =>
           m.message_id === tempId ? { ...m, status: 'error' } : m
         ));
-        toast.error('发送失败: ' + (response.data?.message || '未知错误'));
+        const botMessage = oneBotResponse?.message || oneBotResponse?.wording || '未知错误';
+        toast.error('发送失败: ' + botMessage);
       }
     } catch (error) {
       setMessages(prev => prev.map(m =>
@@ -1341,10 +1376,22 @@ export function WebQQ() {
     setLoadingMembers(true);
     try {
       const response = await groupApi.getGroupMemberList(selectedBot, selectedChat.id);
-      // 后端返回格式：{status: 'ok', data: {data: [...], echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (Array.isArray(botData)) {
-        setGroupMembers(botData.map((m: any) => ({
+      // 后端返回格式：{status: 'ok', retcode: 0, data: [...]}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应（成员列表数组）
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const memberList = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('加载群成员失败:', response.message);
+        toast.error('加载群成员失败: ' + (response.message || `API错误 (${outerRetcode})`));
+        return;
+      }
+
+      // 然后处理 OneBot 的响应
+      if (Array.isArray(memberList)) {
+        setGroupMembers(memberList.map((m: any) => ({
           user_id: String(m.user_id),
           nickname: m.nickname,
           card: m.card,
@@ -1352,8 +1399,12 @@ export function WebQQ() {
           join_time: m.join_time,
           last_sent_time: m.last_sent_time,
         })));
+      } else {
+        console.warn('群成员列表格式不正确:', response);
+        toast.warning('群成员列表格式不正确');
       }
     } catch (error) {
+      console.error('加载群成员失败:', error);
       toast.error('加载群成员失败');
     } finally {
       setLoadingMembers(false);
@@ -1402,36 +1453,132 @@ export function WebQQ() {
 
     try {
       const response = await aiVoiceApi.getAICharacters(selectedBot, selectedChat.id);
-      // 后端返回格式：{status: 'ok', data: {data: [...], echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (Array.isArray(botData)) {
+      console.log('AI角色列表响应:', response);
+
+      // 后端返回格式：{status: 'ok', retcode: 0, data: [...]}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const oneBotResponse = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('加载AI语音角色失败:', response.message);
+        toast.error('加载失败: ' + (response.message || `API错误 (${outerRetcode})`));
+        return;
+      }
+
+      // 处理 OneBot 响应数据
+      let botData = null;
+      if (Array.isArray(oneBotResponse)) {
+        // 格式1: 直接返回数组
+        botData = oneBotResponse;
+      } else if (oneBotResponse?.data) {
+        // 格式2: {data: [...]}
+        botData = oneBotResponse.data;
+      } else if (oneBotResponse?.characters) {
+        // 格式3: {characters: [...]}
+        botData = oneBotResponse.characters;
+      }
+
+      if (Array.isArray(botData) && botData.length > 0) {
         const allCharacters: AICharacter[] = [];
         botData.forEach((category: any) => {
-          if (category.characters && Array.isArray(category.characters)) {
+          if (category && category.characters && Array.isArray(category.characters)) {
             allCharacters.push(...category.characters);
           }
         });
+
+        if (allCharacters.length === 0) {
+          // 如果上面的解析没有结果，尝试直接解析
+          botData.forEach((char: any) => {
+            if (char.character_id && char.character_name) {
+              allCharacters.push(char);
+            }
+          });
+        }
+
         setAiCharacters(allCharacters);
         if (allCharacters.length > 0) {
           setSelectedAICharacter(allCharacters[0].character_id);
+          console.log(`成功加载 ${allCharacters.length} 个AI语音角色`);
+        } else {
+          toast.warning('未找到可用的AI语音角色');
         }
+      } else {
+        console.warn('AI角色列表为空或格式不正确:', response);
+        toast.warning('未找到可用的AI语音角色');
       }
-    } catch (error) {
-      toast.error('加载AI语音角色失败');
+    } catch (error: any) {
+      console.error('加载AI语音角色失败:', error);
+      const errorMsg = error.message || error.data?.message || '加载AI语音角色失败';
+      toast.error(`加载失败: ${errorMsg}`);
     }
   }, [selectedBot, selectedChat]);
 
   // 发送AI语音
   const sendAIVoice = useCallback(async () => {
-    if (!selectedBot || !selectedChat || !aiVoiceText.trim() || !selectedAICharacter) return;
+    if (!selectedBot || !selectedChat || !aiVoiceText.trim() || !selectedAICharacter) {
+      toast.warning('请填写完整信息');
+      return;
+    }
     
     try {
-      await aiVoiceApi.sendGroupAIRecord(selectedBot, selectedChat.id, selectedAICharacter, aiVoiceText.trim());
-      toast.success('AI语音已发送');
-      setAiVoiceText('');
-      setShowAIVoice(false);
-    } catch (error) {
-      toast.error('发送AI语音失败');
+      console.log('发送AI语音:', {
+        bot: selectedBot,
+        group: selectedChat.id,
+        character: selectedAICharacter,
+        text: aiVoiceText.trim()
+      });
+      
+      const response = await aiVoiceApi.sendGroupAIRecord(
+        selectedBot,
+        selectedChat.id,
+        selectedAICharacter,
+        aiVoiceText.trim()
+      );
+
+      console.log('AI语音发送响应:', response);
+
+      // 后端返回的数据结构是:
+      // { status: 'ok', retcode: 0, data: { status: 'ok', retcode: 0, data: null, message: '', wording: '' } }
+      // 外层的 status/retcode 是后端 API 包装
+      // 内层的 data 是 OneBot 的原始响应
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const oneBotResponse = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        const errorMsg = response.message || `API调用失败 (retcode: ${outerRetcode})`;
+        toast.error(`发送失败: ${errorMsg}`);
+        return;
+      }
+
+      // 然后检查 OneBot 的响应
+      if (oneBotResponse) {
+        const botStatus = oneBotResponse.status;
+        const botRetcode = oneBotResponse.retcode;
+        const botMessage = oneBotResponse.message || oneBotResponse.wording;
+
+        if (botStatus === 'ok' && botRetcode === 0) {
+          toast.success('AI语音已发送');
+          setAiVoiceText('');
+          setShowAIVoice(false);
+        } else {
+          const errorMsg = botMessage || `发送失败 (retcode: ${botRetcode})`;
+          toast.error(`发送失败: ${errorMsg}`);
+        }
+      } else {
+        // 如果没有 OneBot 响应数据，但后端调用成功，也算成功
+        toast.success('AI语音已发送');
+        setAiVoiceText('');
+        setShowAIVoice(false);
+      }
+    } catch (error: any) {
+      console.error('发送AI语音失败:', error);
+      const errorMsg = error.message || error.data?.message || error.data?.wording || '发送AI语音失败';
+      toast.error(`发送失败: ${errorMsg}`);
     }
   }, [selectedBot, selectedChat, aiVoiceText, selectedAICharacter]);
 
@@ -1441,14 +1588,29 @@ export function WebQQ() {
 
     try {
       const response = await groupApi.getGroupInfo(selectedBot, selectedChat.id);
-      // 后端返回格式：{status: 'ok', data: {data: {...}, echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (botData) {
-        setProfileData(botData);
+      // 后端返回格式：{status: 'ok', retcode: 0, data: {...}}
+      // response 是后端包装后的响应，response.data 是 OneBot 的原始响应
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const oneBotResponse = response.data;
+
+      // 首先检查后端的 API 调用是否成功
+      if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('获取群资料失败:', response.message);
+        toast.error('获取群资料失败: ' + (response.message || `API错误 (${outerRetcode})`));
+        return;
+      }
+
+      // 然后检查 OneBot 的响应
+      if (oneBotResponse) {
+        setProfileData(oneBotResponse);
         setProfileType('group');
         setShowProfile(true);
+      } else {
+        toast.error('获取群资料失败：无数据返回');
       }
     } catch (error) {
+      console.error('获取群资料失败:', error);
       toast.error('获取群资料失败');
     }
   }, [selectedBot, selectedChat]);

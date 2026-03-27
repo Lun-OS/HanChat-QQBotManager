@@ -2,10 +2,127 @@ package plugins
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
+
+// validateCronExpression 验证Cron表达式是否有效
+// 支持标准Cron格式：秒 分 时 日 月 周 (6个字段)
+func validateCronExpression(cronExpr string) error {
+	if cronExpr == "" {
+		return fmt.Errorf("Cron表达式不能为空")
+	}
+
+	fields := strings.Fields(cronExpr)
+	if len(fields) != 5 && len(fields) != 6 {
+		return fmt.Errorf("Cron表达式必须包含5或6个字段，当前有%d个字段", len(fields))
+	}
+
+	// 字段定义（支持6字段格式：秒 分 时 日 月 周）
+	var fieldNames []string
+	var minVals, maxVals []int
+
+	if len(fields) == 6 {
+		// 6字段格式：秒 分 时 日 月 周
+		fieldNames = []string{"秒", "分", "时", "日", "月", "周"}
+		minVals = []int{0, 0, 0, 1, 1, 0}
+		maxVals = []int{59, 59, 23, 31, 12, 6}
+	} else {
+		// 5字段格式：分 时 日 月 周
+		fieldNames = []string{"分", "时", "日", "月", "周"}
+		minVals = []int{0, 0, 1, 1, 0}
+		maxVals = []int{59, 23, 31, 12, 6}
+	}
+
+	// 验证每个字段
+	for i, field := range fields {
+		if err := validateCronField(field, fieldNames[i], minVals[i], maxVals[i]); err != nil {
+			return fmt.Errorf("字段[%s]验证失败: %v", fieldNames[i], err)
+		}
+	}
+
+	return nil
+}
+
+// validateCronField 验证单个Cron字段
+func validateCronField(field, fieldName string, minVal, maxVal int) error {
+	// 支持的特殊字符: * / , -
+	// 正则表达式验证字段格式
+	validPattern := regexp.MustCompile(`^[\d*,/-]+$`)
+	if !validPattern.MatchString(field) {
+		return fmt.Errorf("包含非法字符")
+	}
+
+	// 处理特殊值
+	if field == "*" {
+		return nil // * 表示任意值，始终有效
+	}
+
+	// 处理列表 (e.g., "1,2,3")
+	if strings.Contains(field, ",") {
+		parts := strings.Split(field, ",")
+		for _, part := range parts {
+			if err := validateCronField(part, fieldName, minVal, maxVal); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// 处理范围 (e.g., "1-5")
+	if strings.Contains(field, "-") {
+		parts := strings.Split(field, "-")
+		if len(parts) != 2 {
+			return fmt.Errorf("范围格式错误")
+		}
+		start, err1 := strconv.Atoi(parts[0])
+		end, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("范围值必须是数字")
+		}
+		if start < minVal || end > maxVal || start > end {
+			return fmt.Errorf("范围值必须在%d-%d之间", minVal, maxVal)
+		}
+		return nil
+	}
+
+	// 处理步长 (e.g., "*/5" or "1-5/2")
+	if strings.Contains(field, "/") {
+		parts := strings.Split(field, "/")
+		if len(parts) != 2 {
+			return fmt.Errorf("步长格式错误")
+		}
+		step, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return fmt.Errorf("步长必须是数字")
+		}
+		if step <= 0 {
+			return fmt.Errorf("步长必须大于0")
+		}
+		// 验证步长前的部分
+		if parts[0] != "*" {
+			if err := validateCronField(parts[0], fieldName, minVal, maxVal); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// 处理单个数字
+	val, err := strconv.Atoi(field)
+	if err != nil {
+		return fmt.Errorf("必须是数字或特殊字符")
+	}
+	if val < minVal || val > maxVal {
+		return fmt.Errorf("值必须在%d-%d之间", minVal, maxVal)
+	}
+
+	return nil
+}
 
 func (m *Manager) luaRegisterInterval(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
@@ -71,6 +188,11 @@ func (m *Manager) luaRegisterCron(instance *LuaPluginInstance) func(*lua.LState)
 		cronExpr, err := validateStringParam(L, 1, "cron", true)
 		if err != nil {
 			return luaAPIError(L, err, "注册Cron任务失败")
+		}
+
+		// 验证Cron表达式有效性
+		if err := validateCronExpression(cronExpr); err != nil {
+			return luaAPIError(L, err, "Cron表达式无效")
 		}
 
 		if L.Get(2).Type() != lua.LTFunction {

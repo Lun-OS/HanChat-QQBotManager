@@ -173,6 +173,13 @@ func main() {
 	// 启动定期清理任务（每5分钟清理一次过期连接）
 	reverseWS.StartCleanupTask(5*time.Minute, 10*time.Minute)
 
+	// ========== WebSocket调试服务 ==========
+	// 创建WebSocket调试服务
+	wsDebugService := services.NewWSDebugService(baseLogger, reverseWS)
+	// 注册调试路由 /debug/{self_id}
+	r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
+	appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
+
 	// ========== 插件系统（多账号隔离）==========
 	// 使用新的反向WebSocket服务
 	pm := plugins.NewManager(cfg, nil)

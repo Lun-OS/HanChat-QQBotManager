@@ -81,19 +81,25 @@ function on_init()
             }
         end
         
-        -- 验证times范围
+        -- 验证times范围（与API限制保持一致：1-10）
         if times < 1 then
             times = 1
-        elseif times > 20 then
-            times = 20
+        elseif times > 10 then
+            times = 10
         end
         
         log.info("准备点赞用户主页: user_id=" .. tostring(userId) .. ", times=" .. tostring(times))
         
         -- 调用点赞接口
-        local success, result = user.send_like(userId, times)
+        local likeSuccess, likeResult = pcall(function()
+            if user and type(user.send_like) == "function" then
+                return user.send_like(userId, times)
+            else
+                error("user.send_like API 未实现")
+            end
+        end)
         
-        if success then
+        if likeSuccess and likeResult then
             log.info("点赞成功: user_id=" .. tostring(userId) .. ", times=" .. tostring(times))
             return {
                 status = 200,
@@ -104,13 +110,14 @@ function on_init()
                     tostring(userId), times)
             }
         else
-            log.error("点赞失败: " .. tostring(result))
+            local errMsg = tostring(likeResult or "API 调用失败")
+            log.error("点赞失败: " .. errMsg)
             return {
                 status = 500,
                 headers = {
                     ["Content-Type"] = "application/json"
                 },
-                body = string.format('{"success":false,"message":"点赞失败: %s"}', tostring(result))
+                body = string.format('{"success":false,"message":"点赞失败: %s"}', errMsg)
             }
         end
     end, {"POST"})
@@ -141,9 +148,9 @@ on_message(function(event)
             helpMsg = helpMsg .. "请求格式：\n"
             helpMsg = helpMsg .. "POST /plugins/" .. selfId .. "/likeuser\n"
             helpMsg = helpMsg .. "Content-Type: application/json\n\n"
-            helpMsg = helpMsg .. "{\n"
+            helpMsg = helpMsg .. '{\n'
             helpMsg = helpMsg .. '  "user_id": 目标用户id,\n'
-            helpMsg = helpMsg .. '  "times": 数量（1-20）\n'
+            helpMsg = helpMsg .. '  "times": 数量（1-10）\n'
             helpMsg = helpMsg .. "}"
             
             local success, result = message.send_private(userId, helpMsg)

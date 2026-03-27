@@ -10,46 +10,96 @@ import (
 )
 
 // luaAPIError 统一的Lua API错误返回
-// 返回 nil 和错误信息字符串
+// 统一返回包含 success=false 和错误信息的表类型
 func luaAPIError(L *lua.LState, err error, context string) int {
 	errMsg := fmt.Sprintf("%s: %v", context, err)
-	L.Push(lua.LNil)
-	L.Push(lua.LString(errMsg))
-	return 2
+
+	// 统一返回表类型格式
+	table := L.CreateTable(0, 3)
+	table.RawSetString("success", lua.LFalse)
+	table.RawSetString("error", lua.LString(errMsg))
+	table.RawSetString("message", lua.LString(context))
+
+	L.Push(table)
+	return 1
 }
 
 // luaAPISuccess 统一的Lua API成功返回（单个结果）
-// 返回结果值
+// 统一返回包含 success=true 和数据的表类型
 func luaAPISuccess(L *lua.LState, m *Manager, result interface{}) int {
-	L.Push(m.convertToLuaValue(L, result))
+	// 统一返回表类型格式
+	table := L.CreateTable(0, 3)
+	table.RawSetString("success", lua.LTrue)
+
+	if result != nil {
+		// 将结果数据放入表的 data 字段
+		table.RawSetString("data", m.convertToLuaValue(L, result))
+	}
+
+	L.Push(table)
 	return 1
 }
 
 // luaAPISuccessWithTable 统一的Lua API成功返回（表格结果）
-// 返回结果表
+// 返回包含 success=true 和数据的表类型
 func luaAPISuccessWithTable(L *lua.LState, m *Manager, result map[string]interface{}) int {
-	L.Push(m.convertToLuaTable(L, result))
+	// 统一返回表类型格式
+	table := L.CreateTable(0, 3)
+	table.RawSetString("success", lua.LTrue)
+
+	if result != nil {
+		// 将结果数据放入表的 data 字段
+		resultTable := m.convertToLuaTable(L, result)
+		table.RawSetString("data", resultTable)
+
+		// 同时保留常用字段在顶层，方便访问
+		for key, value := range result {
+			table.RawSetString(key, m.convertToLuaValue(L, value))
+		}
+	}
+
+	L.Push(table)
 	return 1
 }
 
 // luaAPIBoolSuccess 统一的Lua API布尔成功返回
-// 返回 true 和结果表
+// 返回包含 success=true 和数据的表类型
 func luaAPIBoolSuccess(L *lua.LState, m *Manager, result map[string]interface{}) int {
-	L.Push(lua.LTrue)
+	// 统一返回表类型格式
+	table := L.CreateTable(0, 3)
+	table.RawSetString("success", lua.LTrue)
+
 	if result != nil {
-		L.Push(m.convertToLuaTable(L, result))
-		return 2
+		// 将结果数据放入表的 data 字段
+		resultTable := m.convertToLuaTable(L, result)
+		table.RawSetString("data", resultTable)
+
+		// 同时保留常用字段在顶层，方便访问
+		if messageId, ok := result["message_id"]; ok {
+			table.RawSetString("message_id", m.convertToLuaValue(L, messageId))
+		}
+		if status, ok := result["status"]; ok {
+			table.RawSetString("status", m.convertToLuaValue(L, status))
+		}
 	}
+
+	L.Push(table)
 	return 1
 }
 
 // luaAPIBoolError 统一的Lua API布尔错误返回
-// 返回 false 和错误信息
+// 返回包含 success=false 和错误信息的表类型
 func luaAPIBoolError(L *lua.LState, err error, context string) int {
 	errMsg := fmt.Sprintf("%s: %v", context, err)
-	L.Push(lua.LFalse)
-	L.Push(lua.LString(errMsg))
-	return 2
+
+	// 统一返回表类型格式
+	table := L.CreateTable(0, 3)
+	table.RawSetString("success", lua.LFalse)
+	table.RawSetString("error", lua.LString(errMsg))
+	table.RawSetString("message", lua.LString(context))
+
+	L.Push(table)
+	return 1
 }
 
 // checkLLService 检查服务是否已初始化（优先使用新的ReverseWebSocketService）

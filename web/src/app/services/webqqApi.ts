@@ -1,5 +1,6 @@
 // WebQQ API 工具函数 - 对接后端 API
 import axios, { AxiosError } from 'axios'
+import type { GroupMemberItem, FriendCategory as WebqqFriendCategory, GroupItem } from '../types/webqq'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -42,18 +43,9 @@ export interface FriendInfo {
   avatar?: string
 }
 
-export interface GroupInfo {
-  group_id: string
-  group_name: string
-  member_count: number
-}
-
-export interface GroupMemberInfo {
-  user_id: string
-  nickname: string
-  card: string
-  role: 'owner' | 'admin' | 'member'
-}
+// 使用 webqq.ts 中定义的类型
+export type GroupInfo = GroupItem
+export type GroupMemberInfo = GroupMemberItem
 
 export interface Message {
   message_id: string
@@ -256,7 +248,14 @@ export async function getLoginInfo(): Promise<LoginInfo> {
 
 // ==================== 好友列表 ====================
 
-export async function getFriends(): Promise<{ categories: FriendCategory[]; friends: FriendInfo[] }> {
+// 内部使用的原始好友分类接口
+interface RawFriendCategory {
+  categoryId: number
+  categoryName: string
+  friends: FriendInfo[]
+}
+
+export async function getFriends(): Promise<{ categories: RawFriendCategory[]; friends: FriendInfo[] }> {
   const data = await callBotAPI<any>('get_friends_with_category')
   // 确保返回正确的格式
   if (data && Array.isArray(data.categories) && Array.isArray(data.friends)) {
@@ -269,11 +268,8 @@ export async function getFriends(): Promise<{ categories: FriendCategory[]; frie
   return { categories: [], friends: [] }
 }
 
-export interface FriendCategory {
-  categoryId: number
-  categoryName: string
-  friends: FriendInfo[]
-}
+// 使用 webqq.ts 中定义的 FriendCategory 类型
+export type FriendCategory = WebqqFriendCategory
 
 export async function getFriendList(): Promise<FriendInfo[]> {
   const data = await callBotAPI<any>('get_friend_list')
@@ -414,9 +410,11 @@ export async function sendMessage(request: {
   }
 
   if (request.chatType === 1 || request.chatType === 100) {
-    return sendPrivateMessage(request.peerId, content)
+    const result = await sendPrivateMessage(request.peerId, content)
+    return { msgId: result.message_id }
   } else {
-    return sendGroupMessage(request.peerId, content)
+    const result = await sendGroupMessage(request.peerId, content)
+    return { msgId: result.message_id }
   }
 }
 
@@ -506,7 +504,7 @@ export async function getUserProfile(uid?: string, uin?: string, groupId?: strin
       const memberInfo = await getGroupMemberInfo(groupId, targetUin)
       if (memberInfo) {
         profile.remark = memberInfo.card || ''
-        profile.uid = memberInfo.user_id || profile.uid
+        profile.uid = memberInfo.uid || profile.uid
       }
     } catch {
       // 忽略错误
@@ -739,7 +737,7 @@ export function formatMessageTime(timestamp: number): string {
 export function filterGroups(groups: GroupInfo[], query: string): GroupInfo[] {
   if (!query.trim()) return groups
   return groups.filter(
-    (g) => g.group_name.toLowerCase().includes(query.toLowerCase()) || g.group_id.includes(query)
+    (g) => g.groupName.toLowerCase().includes(query.toLowerCase()) || g.groupCode.includes(query)
   )
 }
 
@@ -749,7 +747,7 @@ export function filterMembers(members: GroupMemberInfo[], query: string): GroupM
     (m) =>
       m.nickname.toLowerCase().includes(query.toLowerCase()) ||
       m.card?.toLowerCase().includes(query.toLowerCase()) ||
-      m.user_id.includes(query)
+      m.uin.includes(query)
   )
 }
 

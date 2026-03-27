@@ -9,9 +9,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 type ScriptInfo struct {
@@ -22,12 +25,27 @@ type ScriptInfo struct {
 }
 
 type LuaScriptCache struct {
-	scripts map[string]*ScriptInfo
-	cacheMu sync.RWMutex
-	logger  *zap.SugaredLogger
+	scripts  map[string]*ScriptInfo
+	cacheMu  sync.RWMutex
+	logger   *zap.SugaredLogger
 	cacheDir string
 	enabled  bool
 	maxAge   time.Duration
+}
+
+func readFileUTF8(path string) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !utf8.Valid(content) {
+		utf8Content, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), content)
+		if err != nil {
+			return content, err
+		}
+		return utf8Content, nil
+	}
+	return content, nil
 }
 
 // NewLuaScriptCache 创建Lua脚本缓存管理器
@@ -120,7 +138,7 @@ func (c *LuaScriptCache) LoadAndCompileScript(L *lua.LState, scriptPath string) 
 		content = cachedContent
 	} else {
 		var err error
-		content, err = os.ReadFile(scriptPath)
+		content, err = readFileUTF8(scriptPath)
 		if err != nil {
 			return nil, fmt.Errorf("读取Lua脚本失败: %w", err)
 		}
@@ -171,7 +189,7 @@ func (c *LuaScriptCache) PrecompileScripts(scriptsDir string) error {
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := readFileUTF8(path)
 		if err != nil {
 			c.logger.Warnw("读取Lua脚本失败", "path", path, "error", err)
 			return nil

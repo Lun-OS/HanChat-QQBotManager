@@ -587,7 +587,7 @@ func (m *Manager) scanAccountPlugins(selfID string) ([]*PluginInfo, error) {
 // parsePluginInfoFromLua 从Lua文件中解析插件信息（版本和备注）
 // 查找 plugin.version = "x.x.x" 和 plugin.description = "xxx" 格式的定义
 func (m *Manager) parsePluginInfoFromLua(luaPath string) (version, remark string) {
-	content, err := os.ReadFile(luaPath)
+	content, err := readFileUTF8(luaPath)
 	if err != nil {
 		return "", ""
 	}
@@ -902,6 +902,23 @@ func (m *Manager) loadLuaRuntimeLibrary(L *lua.LState, instance *LuaPluginInstan
 if msg == nil then msg = {} end
 if db == nil then db = {} end
 if file == nil then file = {} end
+if __blc_var___ == nil then __blc_var___ = {} end
+
+-- 通用类型转换函数：将字符串 "true"/"false" 或其他值转换为布尔值
+local function toboolean(value)
+	if value == nil then return false end
+	if type(value) == "boolean" then return value end
+	if type(value) == "number" then return value ~= 0 end
+	if type(value) == "string" then
+		local lower = string.lower(value)
+		if lower == "true" or lower == "1" or lower == "yes" then return true end
+		if lower == "false" or lower == "0" or lower == "no" then return false end
+	end
+	return false
+end
+
+-- 将 toboolean 注册为全局函数
+toboolean = toboolean
 
 -- 安全获取嵌套字段
 local function safe_get(t, ...)
@@ -1474,16 +1491,35 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(messageTable, "send_group_forward", L.NewFunction(m.luaSendGroupForwardMessage(instance)))
 	L.SetField(messageTable, "send_private_forward", L.NewFunction(m.luaSendPrivateForwardMessage(instance)))
 	L.SetField(messageTable, "get_msg", L.NewFunction(m.luaGetMsg(instance)))
+	L.SetField(messageTable, "get_forward_msg", L.NewFunction(m.luaGetForwardMsg(instance)))
 	L.SetField(messageTable, "voice_to_text", L.NewFunction(m.luaVoiceMsgToText(instance)))
-	L.SetField(messageTable, "get_image", L.NewFunction(m.luaGetMsgImage(instance)))
+	L.SetField(messageTable, "get_image", L.NewFunction(m.luaGetImage(instance)))
+	L.SetField(messageTable, "get_msg_image", L.NewFunction(m.luaGetMsgImage(instance)))
 	L.SetField(messageTable, "get_file", L.NewFunction(m.luaGetMsgFile(instance)))
 	L.SetField(messageTable, "get_video", L.NewFunction(m.luaGetVideo(instance)))
+	L.SetField(messageTable, "get_record", L.NewFunction(m.luaGetRecord(instance)))
 	L.SetField(messageTable, "ocr_image", L.NewFunction(m.luaOcrImage(instance)))
+	L.SetField(messageTable, "scan_qrcode", L.NewFunction(m.luaScanQRCode(instance)))
+	L.SetField(messageTable, "image_has_qrcode", L.NewFunction(m.luaImageHasQRCode(instance)))
+	L.SetField(messageTable, "image_count_qrcodes", L.NewFunction(m.luaImageCountQRCodes(instance)))
+	L.SetField(messageTable, "image_get_qrcodes", L.NewFunction(m.luaImageGetQRCodes(instance)))
 	L.SetField(messageTable, "delete_msg", L.NewFunction(m.luaDeleteMsg(instance)))
 	L.SetField(messageTable, "set_essence", L.NewFunction(m.luaSetEssenceMsg(instance)))
+	L.SetField(messageTable, "delete_essence_msg", L.NewFunction(m.luaDeleteEssenceMsg(instance)))
 	L.SetField(messageTable, "get_essence_list", L.NewFunction(m.luaGetEssenceMsgList(instance)))
 	L.SetField(messageTable, "check_url_safely", L.NewFunction(m.luaCheckUrlSafely(instance)))
 	L.SetField(messageTable, "send_like", L.NewFunction(m.luaSendLike(instance)))
+	L.SetField(messageTable, "send_group_image", L.NewFunction(m.luaSendGroupImage(instance)))
+	L.SetField(messageTable, "send_private_image", L.NewFunction(m.luaSendPrivateImage(instance)))
+	L.SetField(messageTable, "mark_msg_as_read", L.NewFunction(m.luaMarkMsgAsRead(instance)))
+	L.SetField(messageTable, "forward_group_single_msg", L.NewFunction(m.luaForwardGroupSingleMsg(instance)))
+	L.SetField(messageTable, "forward_friend_single_msg", L.NewFunction(m.luaForwardFriendSingleMsg(instance)))
+	L.SetField(messageTable, "get_group_msg_history", L.NewFunction(m.luaGetGroupMsgHistory(instance)))
+	L.SetField(messageTable, "get_friend_msg_history", L.NewFunction(m.luaGetFriendMsgHistory(instance)))
+	L.SetField(messageTable, "set_msg_emoji_like", L.NewFunction(m.luaSetMsgEmojiLike(instance)))
+	L.SetField(messageTable, "unset_msg_emoji_like", L.NewFunction(m.luaUnsetMsgEmojiLike(instance)))
+	L.SetField(messageTable, "send_group_ai_record", L.NewFunction(m.luaSendGroupAIRecord(instance)))
+	L.SetField(messageTable, "get_ai_characters", L.NewFunction(m.luaGetAICharacters(instance)))
 	L.SetField(messageTable, "create_image_processor", L.NewFunction(m.luaCreateImageProcessor(instance)))
 	L.SetGlobal("message", messageTable)
 
@@ -1491,14 +1527,23 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	userTable := L.NewTable()
 	L.SetField(userTable, "get_info", L.NewFunction(m.luaGetUserInfo(instance)))
 	L.SetField(userTable, "get_friends", L.NewFunction(m.luaGetFriends(instance)))
+	L.SetField(userTable, "get_friend_list", L.NewFunction(m.luaGetFriends(instance))) // 别名，兼容Blockly
 	L.SetField(userTable, "set_remark", L.NewFunction(m.luaSetFriendRemark(instance)))
 	L.SetField(userTable, "poke", L.NewFunction(m.luaFriendPoke(instance)))
+	L.SetField(userTable, "send_like", L.NewFunction(m.luaSendLike(instance)))
+	L.SetField(userTable, "delete_friend", L.NewFunction(m.luaDeleteFriend(instance)))
+	L.SetField(userTable, "get_friend_info", L.NewFunction(m.luaGetFriendInfo(instance)))
+	L.SetField(userTable, "get_stranger_info", L.NewFunction(m.luaGetStrangerInfo(instance)))
+	L.SetField(userTable, "upload_file", L.NewFunction(m.luaUploadPrivateFile(instance)))
+	L.SetField(userTable, "set_qq_profile", L.NewFunction(m.luaSetQQProfile(instance)))
 	L.SetGlobal("user", userTable)
 
 	// 群组API
 	groupTable := L.NewTable()
 	L.SetField(groupTable, "get_list", L.NewFunction(m.luaGetGroupList(instance)))
+	L.SetField(groupTable, "get_info", L.NewFunction(m.luaGetGroupInfo(instance)))
 	L.SetField(groupTable, "get_members", L.NewFunction(m.luaGetGroupMembers(instance)))
+	L.SetField(groupTable, "get_member_info", L.NewFunction(m.luaGetGroupMemberInfo(instance)))
 	L.SetField(groupTable, "set_ban", L.NewFunction(m.luaSetGroupBan(instance)))
 	L.SetField(groupTable, "set_whole_ban", L.NewFunction(m.luaSetGroupWholeBan(instance)))
 	L.SetField(groupTable, "set_admin", L.NewFunction(m.luaSetGroupAdmin(instance)))
@@ -1506,6 +1551,14 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(groupTable, "kick", L.NewFunction(m.luaSetGroupKick(instance)))
 	L.SetField(groupTable, "poke", L.NewFunction(m.luaGroupPoke(instance)))
 	L.SetField(groupTable, "set_name", L.NewFunction(m.luaSetGroupName(instance)))
+	L.SetField(groupTable, "set_special_title", L.NewFunction(m.luaSetGroupSpecialTitle(instance)))
+	L.SetField(groupTable, "set_leave", L.NewFunction(m.luaSetGroupLeave(instance)))
+	L.SetField(groupTable, "get_file_url", L.NewFunction(m.luaGetGroupFileUrl(instance)))
+	L.SetField(groupTable, "get_file_system_info", L.NewFunction(m.luaGetGroupFileSystemInfo(instance)))
+	L.SetField(groupTable, "get_root_files", L.NewFunction(m.luaGetGroupRootFiles(instance)))
+	L.SetField(groupTable, "get_files_by_folder", L.NewFunction(m.luaGetGroupFilesByFolder(instance)))
+	L.SetField(groupTable, "upload_file", L.NewFunction(m.luaUploadGroupFile(instance)))
+	L.SetField(groupTable, "get_honor_info", L.NewFunction(m.luaGetGroupHonorInfo(instance)))
 	L.SetGlobal("group", groupTable)
 
 	// 存储API
@@ -1530,12 +1583,18 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(fileTable, "get_group_file_system_info", L.NewFunction(m.luaGetGroupFileSystemInfo(instance)))
 	L.SetField(fileTable, "get_group_root_files", L.NewFunction(m.luaGetGroupRootFiles(instance)))
 	L.SetField(fileTable, "get_group_files_by_folder", L.NewFunction(m.luaGetGroupFilesByFolder(instance)))
+	L.SetField(fileTable, "create_group_file_folder", L.NewFunction(m.luaCreateGroupFileFolder(instance)))
+	L.SetField(fileTable, "delete_group_folder", L.NewFunction(m.luaDeleteGroupFolder(instance)))
+	L.SetField(fileTable, "move_group_file", L.NewFunction(m.luaMoveGroupFile(instance)))
+	L.SetField(fileTable, "download_file", L.NewFunction(m.luaDownloadFile(instance)))
 	L.SetGlobal("file", fileTable)
 
 	// 网络请求API
 	httpTable := L.NewTable()
 	L.SetField(httpTable, "request", L.NewFunction(m.luaHttpRequest(selfID, pluginName)))
 	L.SetField(httpTable, "download_base64", L.NewFunction(m.luaHttpDownloadBase64(pluginName)))
+	L.SetField(httpTable, "get", L.NewFunction(m.luaHttpGet(pluginName)))
+	L.SetField(httpTable, "post", L.NewFunction(m.luaHttpPost(pluginName)))
 	L.SetGlobal("http", httpTable)
 
 	requestTable := L.NewTable()
@@ -1560,6 +1619,8 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(systemTable, "call_api", L.NewFunction(m.luaSystemCallAPI(instance)))
 	L.SetField(systemTable, "get_timestamp_seconds", L.NewFunction(m.luaGetTimestampSeconds()))
 	L.SetField(systemTable, "get_timestamp_milliseconds", L.NewFunction(m.luaGetTimestampMilliseconds()))
+	L.SetField(systemTable, "get_login_info", L.NewFunction(m.luaGetLoginInfo(instance)))
+	L.SetField(systemTable, "get_version_info", L.NewFunction(m.luaGetVersionInfo(instance)))
 	L.SetGlobal("system", systemTable)
 
 	// 工具/编码API
@@ -1596,7 +1657,38 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(msgTable, "has_image", L.NewFunction(m.luaMsgHasImage()))
 	L.SetField(msgTable, "has_voice", L.NewFunction(m.luaMsgHasVoice()))
 	L.SetField(msgTable, "get_reply_id", L.NewFunction(m.luaMsgGetReplyId()))
+	// 新增：前端需要的msg.*函数
+	L.SetField(msgTable, "is_group_message", L.NewFunction(m.luaMsgIsGroupMessage()))
+	L.SetField(msgTable, "is_private_message", L.NewFunction(m.luaMsgIsPrivateMessage()))
+	L.SetField(msgTable, "get_type", L.NewFunction(m.luaMsgGetType()))
+	L.SetField(msgTable, "get_first_image", L.NewFunction(m.luaMsgGetFirstImage()))
+	L.SetField(msgTable, "get_sender_id", L.NewFunction(m.luaMsgGetSenderId()))
+	L.SetField(msgTable, "get_sender_nickname", L.NewFunction(m.luaMsgGetSenderNickname()))
+	L.SetField(msgTable, "get_group_id", L.NewFunction(m.luaMsgGetGroupId()))
+	L.SetField(msgTable, "get_time", L.NewFunction(m.luaMsgGetTime()))
+	L.SetField(msgTable, "get_message_type", L.NewFunction(m.luaMsgGetMessageType()))
+	L.SetField(msgTable, "has_video", L.NewFunction(m.luaMsgHasVideo()))
+	L.SetField(msgTable, "has_face", L.NewFunction(m.luaMsgHasFace()))
+	L.SetField(msgTable, "is_at_all", L.NewFunction(m.luaMsgIsAtAll()))
+	L.SetField(msgTable, "has_url", L.NewFunction(m.luaMsgHasURL()))
+	L.SetField(msgTable, "count_urls", L.NewFunction(m.luaMsgCountURLs()))
+	L.SetField(msgTable, "get_urls", L.NewFunction(m.luaMsgGetURLs()))
+	L.SetField(msgTable, "has_json", L.NewFunction(m.luaMsgHasJSON()))
+	L.SetField(msgTable, "is_contact_card", L.NewFunction(m.luaMsgIsContactCard()))
+	L.SetField(msgTable, "is_group_card", L.NewFunction(m.luaMsgIsGroupCard()))
+	L.SetField(msgTable, "is_channel_card", L.NewFunction(m.luaMsgIsChannelCard()))
+	L.SetField(msgTable, "get_json_data", L.NewFunction(m.luaMsgGetJSONData()))
+	L.SetField(msgTable, "parse_card", L.NewFunction(m.luaMsgParseCard()))
+	L.SetField(msgTable, "get_card_info", L.NewFunction(m.luaMsgGetCardInfo()))
+	L.SetField(msgTable, "json_has_app", L.NewFunction(m.luaMsgJSONHasApp()))
+	L.SetField(msgTable, "get_json_app_type", L.NewFunction(m.luaMsgGetJSONAppType()))
+	L.SetField(msgTable, "get_json_field", L.NewFunction(m.luaMsgGetJSONField()))
+	L.SetField(msgTable, "get_card_id_from_url", L.NewFunction(m.luaMsgGetCardIDFromURL()))
+	L.SetField(msgTable, "parse_card_full", L.NewFunction(m.luaMsgParseCardFull()))
 	L.SetGlobal("msg", msgTable)
+
+	// 管理员验证API
+	L.SetField(msgTable, "is_group_admin", L.NewFunction(m.luaIsGroupAdmin(instance)))
 
 	// 事件注册API
 	L.SetGlobal("on_message", L.NewFunction(m.luaOnMessage(instance)))
@@ -1635,6 +1727,7 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(botTable, "is_online", L.NewFunction(m.luaIsBotOnline(instance)))
 	L.SetField(botTable, "disconnect", L.NewFunction(m.luaDisconnectBot()))
 	L.SetField(botTable, "get_status", L.NewFunction(m.luaGetBotStatus(instance)))
+	L.SetField(botTable, "get_version", L.NewFunction(m.luaGetVersionInfo(instance)))
 	L.SetGlobal("bot", botTable)
 
 	// 当前插件管理API
@@ -1786,6 +1879,11 @@ func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
 
 	// 关闭Lua状态机（在确保没有代码在执行后）
 	instance.L.Close()
+
+	// 清理该插件的storage锁，防止内存泄漏
+	pluginDir := filepath.Join("plugins", selfID, name)
+	dataFile := filepath.Join(pluginDir, "data.json")
+	deleteStorageLock(dataFile)
 
 	m.logger.Infow("Lua插件已卸载", "self_id", selfID, "name", name)
 	return nil
@@ -2015,6 +2113,9 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 		// 将eventData直接转换为Lua表传递（保持JSON数据结构，无需序列化/反序列化）
 		luaEventTable := m.convertToLuaTable(L, processedEventData)
 		L.Push(luaEventTable)
+
+		// 设置全局变量 __blc_var___ 供插件内的函数使用
+		L.SetGlobal("__blc_var___", luaEventTable)
 
 		if err := L.PCall(1, 0, nil); err != nil {
 			atomic.AddInt64(&instance.errorCount, 1)

@@ -300,8 +300,13 @@ function checkEndMatching(code: string, lines: string[], issues: LuaIssue[]): vo
       const pattern = new RegExp(`\\b${keyword}\\b`);
       if (pattern.test(codeWithoutStrings)) {
         // 检查是否是 elseif，这不需要新的 end
-        if (keyword === 'if' && /\belseif\b/.test(codeWithoutStrings)) {
-          continue;
+        // elseif 包含 if 单词，需要特殊处理避免误判
+        if (keyword === 'if') {
+          // 使用单词边界精确匹配 elseif，确保不会误判包含if的单词
+          const elseifPattern = /\belseif\b/;
+          if (elseifPattern.test(codeWithoutStrings)) {
+            continue;
+          }
         }
         stack.push({ keyword, line: lineNum });
         break;

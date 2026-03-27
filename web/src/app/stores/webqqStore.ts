@@ -407,7 +407,7 @@ export const useWebQQStore = create<WebQQState>()(
           })
 
           set({
-            friendCategories: categoriesData.categories || [],
+            friendCategories: (categoriesData.categories || []) as unknown as FriendCategory[],
             groups: groupsData,
             recentChats: mergedRecent,
             groupLastTimeMap,
@@ -483,7 +483,7 @@ export const useWebQQStore = create<WebQQState>()(
           })
 
           set({
-            friendCategories: categoriesData.categories || [],
+            friendCategories: (categoriesData.categories || []) as unknown as FriendCategory[],
             groups: groupsData,
             recentChats: mergedRecent,
             groupLastTimeMap,

@@ -42,6 +42,7 @@ func NewLLOneBotService(selfID string, base *zap.Logger, reverseWS *ReverseWebSo
 }
 
 // CallAPI 调用 LLOneBot 通用接口，返回解析后的map
+// 修复问题20：添加安全的类型断言和响应验证
 func (s *LLOneBotService) CallAPI(endpoint string, params interface{}, method string) (map[string]interface{}, error) {
 	rawResp, err := s.CallAPIRaw(endpoint, params, method)
 	if err != nil {
@@ -51,6 +52,30 @@ func (s *LLOneBotService) CallAPI(endpoint string, params interface{}, method st
 	var result map[string]interface{}
 	if err := json.Unmarshal(rawResp, &result); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 验证响应结构
+	if result == nil {
+		return nil, fmt.Errorf("响应为空")
+	}
+
+	// 安全获取status字段
+	status, ok := result["status"].(string)
+	if !ok {
+		status = "unknown"
+	}
+
+	// 安全获取retcode字段
+	retcode := -1.0
+	if rc, ok := result["retcode"].(float64); ok {
+		retcode = rc
+	} else if rcInt, ok := result["retcode"].(int); ok {
+		retcode = float64(rcInt)
+	}
+
+	// 如果响应状态不是ok，返回错误
+	if status != "ok" && retcode != 0 {
+		return result, fmt.Errorf("API返回错误: status=%s, retcode=%v", status, retcode)
 	}
 
 	return result, nil

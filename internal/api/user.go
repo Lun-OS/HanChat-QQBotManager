@@ -89,6 +89,16 @@ func RegisterUserRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *
 		if times == nil {
 			times = 1
 		}
+		// 验证times参数范围（1-10）
+		timesNum, ok := times.(float64)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "times参数必须是数字"})
+			return
+		}
+		if timesNum < 1 || timesNum > 10 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "times参数必须在1-10之间"})
+			return
+		}
 		logger.Infow("点赞好友", "requestId", c.GetString("requestId"), "userId", userID, "times", times)
 		res, err := ll.CallAPI("/send_like", map[string]interface{}{
 			"user_id": userID,

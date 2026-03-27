@@ -161,7 +161,6 @@ func (him *HTTPInterfaceManager) HandleHTTPRequest(c *utils.HTTPRequestContext) 
 
 	// 设置Lua状态机的上下文，使其可以被中断
 	L.SetContext(ctx)
-	defer L.RemoveContext() // 清理上下文
 
 	resultChan := make(chan *utils.HTTPResponse, 1)
 	errorChan := make(chan error, 1)
@@ -169,6 +168,8 @@ func (him *HTTPInterfaceManager) HandleHTTPRequest(c *utils.HTTPRequestContext) 
 
 	go func() {
 		defer close(doneChan)
+		// 确保在goroutine结束时清理上下文
+		defer L.RemoveContext()
 		defer func() {
 			if r := recover(); r != nil {
 				errorChan <- fmt.Errorf("处理器panic: %v", r)

@@ -121,11 +121,11 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
       }
 
       setStats({
-        uptime: formatUptime(stat.startup_time),
-        msg_received: stat.message_received || 0,
-        msg_sent: stat.message_sent || 0,
+        uptime: formatUptime((stat as any).startup_time),
+        msg_received: (stat as any).message_received || 0,
+        msg_sent: (stat as any).message_sent || 0,
         lua_memory: luaMemory,
-        llbot_version: versionData.app_version || versionData.version || '-',
+        llbot_version: (versionData as any).app_version || (versionData as any).version || '-',
         ws_name: wsName,
       });
     } catch (error) {
@@ -467,10 +467,10 @@ const ApiDebug = ({ botId }: { botId: string }) => {
             )}
           </div>
           
-          <div className="flex flex-col">
+          <div className="flex flex-col h-full overflow-hidden">
             <label className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">响应结果</label>
             <div className="flex-1 w-full p-4 font-mono text-sm bg-gray-900 text-green-400 rounded-lg overflow-auto">
-              {response ? <pre>{response}</pre> : <span className="text-gray-500 select-none">等待请求...</span>}
+              {response ? <pre className="whitespace-pre-wrap break-all">{response}</pre> : <span className="text-gray-500 select-none">等待请求...</span>}
             </div>
           </div>
         </div>
@@ -488,11 +488,20 @@ const Plugins = ({ selfId }: { selfId: string }) => {
   const [selectedPlugin, setSelectedPlugin] = useState<PluginInfo | null>(null);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [pluginConfig, setPluginConfig] = useState<Record<string, any>>({});
+  const [pluginConfigText, setPluginConfigText] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
-  // 插件日志相关状态
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [pluginLogs, setPluginLogs] = useState<string[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // 当配置弹窗打开时，同步文本
+  useEffect(() => {
+    if (configModalOpen && selectedPlugin) {
+      setPluginConfigText(JSON.stringify(pluginConfig, null, 2));
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [configModalOpen, selectedPlugin, pluginConfig]);
 
   const fetchPlugins = useCallback(async () => {
     try {
@@ -572,11 +581,15 @@ const Plugins = ({ selfId }: { selfId: string }) => {
       // 获取指定账号的插件配置
       const res = await pluginApi.getPluginConfig(selfId, plugin.name);
       if (res.success) {
-        setPluginConfig(res.data || {});
+        const config = res.data || {};
+        setPluginConfig(config);
+        setPluginConfigText(JSON.stringify(config, null, 2));
       }
     } catch (error) {
       toast.error('获取配置失败');
-      setPluginConfig(plugin.config || {});
+      const config = plugin.config || {};
+      setPluginConfig(config);
+      setPluginConfigText(JSON.stringify(config, null, 2));
     }
   };
 
@@ -779,14 +792,18 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               </div>
               <div className="flex-1 overflow-auto p-4">
                 <textarea
-                  value={JSON.stringify(pluginConfig, null, 2)}
+                  ref={textareaRef}
+                  value={pluginConfigText}
                   onChange={e => {
+                    setPluginConfigText(e.target.value);
                     try {
                       setPluginConfig(JSON.parse(e.target.value));
-                    } catch {}
+                    } catch {
+                      // 继续允许编辑
+                    }
                   }}
-                  className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-none text-gray-900 dark:text-white"
-                  spellCheck={false}
+                  className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-y text-gray-900 dark:text-white focus:ring-2 focus:ring-[#165DFF] focus:border-transparent"
+                  style={{ display: 'block' }}
                 />
               </div>
               <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800">

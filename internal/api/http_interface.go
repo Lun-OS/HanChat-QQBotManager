@@ -37,27 +37,39 @@ func RegisterHTTPInterfaceRoutes(r *gin.Engine, base *zap.Logger) {
 
 // parsePluginPath 解析插件路径
 // 支持格式: /plugins/xxx (全局接口) 或 /plugins/123/xxx (账号隔离接口)
+// selfID格式: 纯数字且长度>=5（QQ号通常是5-11位数字）
 func parsePluginPath(path string) (selfID string, externalName string) {
 	// 移除前导斜杠
 	path = strings.TrimPrefix(path, "/")
-	
+
 	// 分割路径
 	parts := strings.SplitN(path, "/", 2)
-	
+
 	if len(parts) == 1 {
 		// 只有接口名称，全局接口
 		return "", parts[0]
 	}
-	
-	// 检查第一部分是否是数字(selfID)
-	if _, err := strconv.Atoi(parts[0]); err == nil {
-		// 是数字，认为是账号隔离接口 /plugins/{selfID}/{externalName}
+
+	// 检查第一部分是否是有效的selfID（纯数字且长度>=5）
+	// QQ号通常是5-11位数字，这样可以避免接口名称以数字开头被误判
+	if isValidSelfID(parts[0]) {
+		// 是有效的selfID，认为是账号隔离接口 /plugins/{selfID}/{externalName}
 		return parts[0], parts[1]
 	}
-	
-	// 不是数字，认为是全局接口 /plugins/{externalName}
-	// 但路径中有斜杠，这种情况不太正常，返回空selfID和完整路径
+
+	// 不是有效的selfID，认为是全局接口 /plugins/{externalName}
+	// 路径中有斜杠，将第一部分也作为接口名称的一部分
 	return "", path
+}
+
+// isValidSelfID 检查字符串是否是有效的selfID格式
+// QQ号规则：纯数字，长度5-11位
+func isValidSelfID(s string) bool {
+	if len(s) < 5 || len(s) > 11 {
+		return false
+	}
+	_, err := strconv.ParseUint(s, 10, 64)
+	return err == nil
 }
 
 // handleHTTPRequest 处理HTTP请求

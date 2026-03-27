@@ -13,9 +13,9 @@ import type {
   MarketFaceElement,
   MessageElement,
   RawMessage,
-} from '@ntqqapi/types'
-
-export { ChatType, ElementType } from '@ntqqapi/types'
+  ChatType,
+  ElementType,
+} from '../../types/ntqqapi-types'
 export type {
   TextElement,
   PicElement,
@@ -98,6 +98,22 @@ export interface GroupMemberItem {
   role: 'owner' | 'admin' | 'member'
   level?: number
   specialTitle?: string
+}
+
+// 合并转发消息元素
+export interface MultiForwardMsgElement {
+  type: 'forward'
+  id: string
+  fileName: string
+  content: string
+  preview: string
+  summary: string
+  source: string
+  multiForwardMsgElement?: {
+    resId: string
+  }
+  // 允许任意属性
+  [key: string]: any
 }
 
 // API 响应类型

@@ -8,25 +8,172 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	"HanChat-QQBotManager/internal/utils"
 )
 
+// ========== 预编译正则表达式（性能优化）==========
+var (
+	// CQ码相关正则表达式
+	cqAtPattern     = regexp.MustCompile(`\[CQ:at,qq=(\d+)[^\]]*\]`)
+	cqReplyPattern  = regexp.MustCompile(`\[CQ:reply,id=([^,\]]+)`)
+	cqReplyPattern2 = regexp.MustCompile(`\[CQ:reply,[^\]]*id=([^,\]]+)`)
+	cqCodePattern   = regexp.MustCompile(`\[CQ:[^\]]+\]`)
+	cqExtractPattern= regexp.MustCompile(`\[CQ:([^\]]+)\]`)
+
+	// URL提取正则表达式
+	urlExtractPattern = regexp.MustCompile(`(https?://[\w\-+&@#/%?=~_|!:,.;]*[\w\-+&@#/%=~_|])`)
+
+	// 存储API文件锁（保护并发访问）
+	storageLocks      = make(map[string]*sync.RWMutex)
+	storageLocksMutex sync.Mutex
+)
+
+// getStorageLock 获取指定存储文件的锁
+// 注意：锁对象会在插件卸载时自动清理（通过DeleteStorageLock）
+func getStorageLock(dataFile string) *sync.RWMutex {
+	storageLocksMutex.Lock()
+	defer storageLocksMutex.Unlock()
+
+	if lock, exists := storageLocks[dataFile]; exists {
+		return lock
+	}
+
+	lock := &sync.RWMutex{}
+	storageLocks[dataFile] = lock
+	return lock
+}
+
+// deleteStorageLock 删除指定存储文件的锁（插件卸载时调用）
+func deleteStorageLock(dataFile string) {
+	storageLocksMutex.Lock()
+	defer storageLocksMutex.Unlock()
+
+	delete(storageLocks, dataFile)
+}
+
+// cleanupStorageLocks 清理所有存储文件锁（用于测试或重置）
+func cleanupStorageLocks() {
+	storageLocksMutex.Lock()
+	defer storageLocksMutex.Unlock()
+
+	storageLocks = make(map[string]*sync.RWMutex)
+}
+
 // ========== 日志API ==========
+
+// formatLogValue 格式化日志值，支持自动类型转换
+// - 表(table)类型自动转换为JSON格式
+// - 二进制数据自动转换为Base64编码
+func (m *Manager) formatLogValue(L *lua.LState, idx int) string {
+	val := L.Get(idx)
+	
+	switch val.Type() {
+	case lua.LTTable:
+		// 将Lua表转换为Go的interface{}
+		table := val.(*lua.LTable)
+		goVal := luaTableToInterface(L, table)
+		
+		// 检查是否为二进制数据（包含字节数组特征）
+		if isBinaryData(goVal) {
+			// 转换为Base64
+			base64Str := convertToBase64(goVal)
+			return "[Base64] " + base64Str
+		}
+		
+		// 转换为JSON
+		jsonBytes, err := json.Marshal(goVal)
+		if err != nil {
+			return fmt.Sprintf("[表转换错误: %v]", err)
+		}
+		return string(jsonBytes)
+		
+	case lua.LTString:
+		return string(val.(lua.LString))
+		
+	case lua.LTNumber:
+		return fmt.Sprintf("%v", val.(lua.LNumber))
+		
+	case lua.LTBool:
+		// 返回JSON格式的布尔值（不带引号）
+		if val.(lua.LBool) {
+			return "true"
+		}
+		return "false"
+		
+	case lua.LTNil:
+		return "nil"
+		
+	default:
+		return val.String()
+	}
+}
+
+// isBinaryData 检查数据是否为二进制数据
+func isBinaryData(v interface{}) bool {
+	switch data := v.(type) {
+	case []byte:
+		return true
+	case []interface{}:
+		// 检查是否为字节数组（所有元素都是0-255的数字）
+		if len(data) > 0 && len(data) <= 1024*1024 { // 最大1MB
+			for _, item := range data {
+				switch num := item.(type) {
+				case float64:
+					if num < 0 || num > 255 || num != float64(int64(num)) {
+						return false
+					}
+				case int:
+					if num < 0 || num > 255 {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// convertToBase64 将数据转换为Base64编码
+func convertToBase64(v interface{}) string {
+	switch data := v.(type) {
+	case []byte:
+		return base64.StdEncoding.EncodeToString(data)
+	case []interface{}:
+		bytes := make([]byte, len(data))
+		for i, item := range data {
+			switch num := item.(type) {
+			case float64:
+				bytes[i] = byte(num)
+			case int:
+				bytes[i] = byte(num)
+			}
+		}
+		return base64.StdEncoding.EncodeToString(bytes)
+	default:
+		return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%v", v)))
+	}
+}
 
 func (m *Manager) luaLogInfo(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		msg := L.ToString(1)
+		msg := m.formatLogValue(L, 1)
 		m.logger.Infow("插件日志", "plugin", pluginName, "level", "info", "message", msg)
 		m.addPluginLog(selfID, pluginName, "INFO", msg)
 		return 0
@@ -35,7 +182,7 @@ func (m *Manager) luaLogInfo(selfID string, pluginName string) func(*lua.LState)
 
 func (m *Manager) luaLogWarn(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		msg := L.ToString(1)
+		msg := m.formatLogValue(L, 1)
 		m.logger.Warnw("插件日志", "plugin", pluginName, "level", "warn", "message", msg)
 		m.addPluginLog(selfID, pluginName, "WARN", msg)
 		return 0
@@ -44,7 +191,7 @@ func (m *Manager) luaLogWarn(selfID string, pluginName string) func(*lua.LState)
 
 func (m *Manager) luaLogError(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		msg := L.ToString(1)
+		msg := m.formatLogValue(L, 1)
 		m.logger.Errorw("插件日志", "plugin", pluginName, "level", "error", "message", msg)
 		m.addPluginLog(selfID, pluginName, "ERROR", msg)
 		return 0
@@ -53,7 +200,7 @@ func (m *Manager) luaLogError(selfID string, pluginName string) func(*lua.LState
 
 func (m *Manager) luaLogDebug(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		msg := L.ToString(1)
+		msg := m.formatLogValue(L, 1)
 		m.logger.Debugw("插件日志", "plugin", pluginName, "level", "debug", "message", msg)
 		m.addPluginLog(selfID, pluginName, "DEBUG", msg)
 		return 0
@@ -479,6 +626,116 @@ func (m *Manager) luaDeleteGroupFolder(instance *LuaPluginInstance) func(*lua.LS
 		result, err := callBotAPI(instance, "delete_group_folder", map[string]interface{}{"group_id": groupIDInt, "folder_id": folderId})
 		if err != nil {
 			return luaAPIError(L, err, fmt.Sprintf("删除群文件夹失败 [group_id=%d, folder_id=%s]", groupIDInt, folderId))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 移动群文件
+func (m *Manager) luaMoveGroupFile(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "移动群文件失败")
+		}
+
+		// 验证参数
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		fileId, err := validateStringParam(L, 2, "file_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 可选参数：parent_directory
+		parentDirectory := ""
+		if L.GetTop() >= 3 {
+			parentDirectory = L.ToString(3)
+		}
+
+		// 可选参数：target_directory
+		targetDirectory := ""
+		if L.GetTop() >= 4 {
+			targetDirectory = L.ToString(4)
+		}
+
+		// 调用服务
+		groupIDInt := int64(groupId)
+		params := map[string]interface{}{
+			"group_id": groupIDInt,
+			"file_id":  fileId,
+		}
+		if parentDirectory != "" {
+			params["parent_directory"] = parentDirectory
+		}
+		if targetDirectory != "" {
+			params["target_directory"] = targetDirectory
+		}
+
+		result, err := callBotAPI(instance, "move_group_file", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("移动群文件失败 [group_id=%d, file_id=%s]", groupIDInt, fileId))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 下载文件到缓存目录
+func (m *Manager) luaDownloadFile(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "下载文件失败")
+		}
+
+		// 可选参数：url
+		url := ""
+		if L.GetTop() >= 1 {
+			url = L.ToString(1)
+		}
+
+		// 可选参数：base64
+		base64Data := ""
+		if L.GetTop() >= 2 {
+			base64Data = L.ToString(2)
+		}
+
+		// 可选参数：name
+		name := ""
+		if L.GetTop() >= 3 {
+			name = L.ToString(3)
+		}
+
+		// 可选参数：headers
+		var headers interface{}
+		if L.GetTop() >= 4 && L.Get(4).Type() == lua.LTTable {
+			headers = luaTableToInterface(L, L.ToTable(4))
+		}
+
+		// 构建参数
+		params := make(map[string]interface{})
+		if url != "" {
+			params["url"] = url
+		}
+		if base64Data != "" {
+			params["base64"] = base64Data
+		}
+		if name != "" {
+			params["name"] = name
+		}
+		if headers != nil {
+			params["headers"] = headers
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "download_file", params)
+		if err != nil {
+			return luaAPIError(L, err, "下载文件失败")
 		}
 
 		return luaAPISuccessWithTable(L, m, result)
@@ -2076,6 +2333,11 @@ func (m *Manager) luaStorageSet(selfID string, pluginName string) func(*lua.LSta
 			return luaAPIBoolError(L, err, fmt.Sprintf("创建插件目录失败 [key=%s]", key))
 		}
 
+		// 获取文件锁，保护并发访问
+		lock := getStorageLock(dataFile)
+		lock.Lock()
+		defer lock.Unlock()
+
 		data := make(map[string]interface{})
 		if content, err := os.ReadFile(dataFile); err == nil {
 			if err := json.Unmarshal(content, &data); err != nil {
@@ -2113,6 +2375,11 @@ func (m *Manager) luaStorageGet(selfID string, pluginName string) func(*lua.LSta
 		pluginDir := filepath.Join("plugins", selfID, pluginName)
 		dataFile := filepath.Join(pluginDir, "data.json")
 
+		// 获取文件锁，保护并发访问（读锁）
+		lock := getStorageLock(dataFile)
+		lock.RLock()
+		defer lock.RUnlock()
+
 		data := make(map[string]interface{})
 		if content, err := os.ReadFile(dataFile); err == nil {
 			_ = json.Unmarshal(content, &data)
@@ -2141,6 +2408,11 @@ func (m *Manager) luaStorageDelete(selfID string, pluginName string) func(*lua.L
 		// 路径: plugins/{selfID}/{pluginName}/data.json
 		pluginDir := filepath.Join("plugins", selfID, pluginName)
 		dataFile := filepath.Join(pluginDir, "data.json")
+
+		// 获取文件锁，保护并发访问
+		lock := getStorageLock(dataFile)
+		lock.Lock()
+		defer lock.Unlock()
 
 		data := make(map[string]interface{})
 		if content, err := os.ReadFile(dataFile); err == nil {
@@ -3392,7 +3664,24 @@ func (m *Manager) convertToLuaValue(L *lua.LState, v interface{}) lua.LValue {
 			}
 			return tbl
 		}
-		return lua.LString(fmt.Sprintf("%v", val))
+		// 处理可能的布尔值指针或其他类型
+		switch reflect.TypeOf(val).Kind() {
+		case reflect.Bool:
+			if reflect.ValueOf(val).Bool() {
+				return lua.LTrue
+			}
+			return lua.LFalse
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return lua.LNumber(reflect.ValueOf(val).Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return lua.LNumber(reflect.ValueOf(val).Uint())
+		case reflect.Float32, reflect.Float64:
+			return lua.LNumber(reflect.ValueOf(val).Float())
+		case reflect.String:
+			return lua.LString(reflect.ValueOf(val).String())
+		default:
+			return lua.LString(fmt.Sprintf("%v", val))
+		}
 	}
 }
 
@@ -3420,14 +3709,38 @@ func luaTableToString(L *lua.LState, table *lua.LTable, key string) (string, boo
 	return "", false
 }
 
-// 辅助函数：将Lua表转换为Go map
+// 辅助函数：将Lua表转换为Go map（保留混合表结构）
 func luaTableToMap(L *lua.LState, table *lua.LTable) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	// 使用 ForEach 遍历表
+	// 首先检查是否有数组部分，如果有，将其作为"_array"键保存
+	arrayLen := table.Len()
+	if arrayLen > 0 {
+		arr := make([]interface{}, arrayLen)
+		hasArrayData := false
+		for i := 1; i <= arrayLen; i++ {
+			val := L.RawGetInt(table, i)
+			if val != lua.LNil {
+				hasArrayData = true
+			}
+			arr[i-1] = luaValueToGo(L, val)
+		}
+		if hasArrayData {
+			result["_array"] = arr
+		}
+	}
+
+	// 使用 ForEach 遍历表，处理非数组键
 	table.ForEach(func(key lua.LValue, value lua.LValue) {
-		// 跳过数组索引（数字键），只处理字符串键
+		// 跳过数组索引（数字键在1到arrayLen范围内）
 		if key.Type() == lua.LTNumber {
+			numKey := int(key.(lua.LNumber))
+			if numKey >= 1 && numKey <= arrayLen {
+				return // 跳过已处理的数组索引
+			}
+			// 超出数组范围的数字键，转换为字符串键
+			keyStr := strconv.FormatInt(int64(numKey), 10)
+			result[keyStr] = luaValueToGo(L, value)
 			return
 		}
 		keyStr := key.String()
@@ -3449,17 +3762,38 @@ func luaValueToGo(L *lua.LState, val lua.LValue) interface{} {
 	case lua.LNumber:
 		return float64(v)
 	case *lua.LTable:
-		// 检查是否为数组
+		// 检查表的结构：纯数组、纯map或混合表
 		arrayLen := v.Len()
-		if arrayLen > 0 {
-			// 作为数组处理
+		hasArrayPart := arrayLen > 0
+		hasMapPart := false
+
+		// 检查是否有非数组键
+		v.ForEach(func(key lua.LValue, value lua.LValue) {
+			if key.Type() != lua.LTNumber {
+				hasMapPart = true
+			} else {
+				numKey := int(key.(lua.LNumber))
+				if numKey < 1 || numKey > arrayLen {
+					hasMapPart = true
+				}
+			}
+		})
+
+		// 纯数组：只有数组部分，没有map部分
+		if hasArrayPart && !hasMapPart {
 			arr := make([]interface{}, arrayLen)
 			for i := 1; i <= arrayLen; i++ {
 				arr[i-1] = luaValueToGo(L, L.RawGetInt(v, i))
 			}
 			return arr
 		}
-		// 作为表处理
+
+		// 纯map：没有数组部分，只有map部分
+		if !hasArrayPart && hasMapPart {
+			return luaTableToMap(L, v)
+		}
+
+		// 混合表：同时有数组和map部分，使用luaTableToMap处理（它会保留数组数据到_array键）
 		return luaTableToMap(L, v)
 	default:
 		return v.String()
@@ -4036,6 +4370,444 @@ func (m *Manager) luaGetBotStatus(instance *LuaPluginInstance) func(*lua.LState)
 	}
 }
 
+// 获取图片
+func (m *Manager) luaGetImage(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取图片失败")
+		}
+
+		// 验证参数
+		file, err := validateStringParam(L, 1, "file", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_image", map[string]interface{}{"file": file})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取图片失败 [file=%s]", file))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 获取语音
+func (m *Manager) luaGetRecord(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取语音失败")
+		}
+
+		// 验证参数
+		file, err := validateStringParam(L, 1, "file", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 可选参数：out_format
+		outFormat := L.OptString(2, "mp3")
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_record", map[string]interface{}{
+			"file":       file,
+			"out_format": outFormat,
+		})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取语音失败 [file=%s]", file))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 扫码
+func (m *Manager) luaScanQRCode(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "扫码失败")
+		}
+
+		// 解析参数表
+		params := make(map[string]interface{})
+		if L.GetTop() >= 1 {
+			tbl := L.OptTable(1, nil)
+			if tbl != nil {
+				params = luaTableToMap(L, tbl)
+			}
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "scan_qrcode", params)
+		if err != nil {
+			return luaAPIError(L, err, "扫码失败")
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// ========== 管理员验证API ==========
+
+// luaIsGroupAdmin 检查指定用户是否为群管理员
+func (m *Manager) luaIsGroupAdmin(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 验证参数
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		userId, err := validateNumberParam(L, 2, "user_id", true)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 调用服务获取群成员信息
+		groupIDInt := int64(groupId)
+		userIDInt := int64(userId)
+		result, err := callBotAPI(instance, "get_group_member_info", map[string]interface{}{
+			"group_id": groupIDInt,
+			"user_id":  userIDInt,
+			"no_cache": true,
+		})
+		if err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 检查是否为管理员（role字段：owner表示群主，admin表示管理员）
+		if result == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 转换结果为Lua表进行字段检查
+		resultTable := m.convertToLuaValue(L, result)
+		if resultTable.Type() == lua.LTTable {
+			role := L.GetField(resultTable, "role")
+			if role.Type() == lua.LTString {
+				roleStr := role.String()
+				if roleStr == "owner" || roleStr == "admin" {
+					L.Push(lua.LBool(true))
+					return 1
+				}
+			}
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// ========== URL检测与提取API ==========
+
+// luaMsgHasURL 检查消息是否包含URL
+func (m *Manager) luaMsgHasURL() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 获取纯文本消息
+		plainText := ""
+		messageField := L.GetField(event, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			var textBuilder strings.Builder
+			messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "text" {
+					segData := L.GetField(segmentTable, "data")
+					if segData.Type() == lua.LTTable {
+						segDataTable := segData.(*lua.LTable)
+						textContent := L.GetField(segDataTable, "text")
+						if textContent.Type() == lua.LTString {
+							textBuilder.WriteString(textContent.String())
+						}
+					}
+				}
+			})
+			plainText = textBuilder.String()
+		} else if messageField.Type() == lua.LTString {
+			plainText = messageField.String()
+		}
+
+		// 使用预编译的正则表达式检测URL
+		hasURL := urlExtractPattern.MatchString(plainText)
+		L.Push(lua.LBool(hasURL))
+		return 1
+	}
+}
+
+// luaMsgCountURLs 统计消息中URL的数量
+func (m *Manager) luaMsgCountURLs() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		// 获取纯文本消息
+		plainText := ""
+		messageField := L.GetField(event, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			var textBuilder strings.Builder
+			messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "text" {
+					segData := L.GetField(segmentTable, "data")
+					if segData.Type() == lua.LTTable {
+						segDataTable := segData.(*lua.LTable)
+						textContent := L.GetField(segDataTable, "text")
+						if textContent.Type() == lua.LTString {
+							textBuilder.WriteString(textContent.String())
+						}
+					}
+				}
+			})
+			plainText = textBuilder.String()
+		} else if messageField.Type() == lua.LTString {
+			plainText = messageField.String()
+		}
+
+		// 使用预编译的正则表达式提取URL并计数
+		links := urlExtractPattern.FindAllString(plainText, -1)
+		L.Push(lua.LNumber(len(links)))
+		return 1
+	}
+}
+
+// luaMsgGetURLs 获取消息中的所有URL（支持可选的索引参数）
+func (m *Manager) luaMsgGetURLs() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(L.NewTable())
+			return 1
+		}
+
+		// 可选的索引参数（从1开始）
+		index := 0
+		if L.GetTop() >= 2 {
+			index = int(L.ToNumber(2))
+		}
+
+		// 获取纯文本消息
+		plainText := ""
+		messageField := L.GetField(event, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			var textBuilder strings.Builder
+			messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "text" {
+					segData := L.GetField(segmentTable, "data")
+					if segData.Type() == lua.LTTable {
+						segDataTable := segData.(*lua.LTable)
+						textContent := L.GetField(segDataTable, "text")
+						if textContent.Type() == lua.LTString {
+							textBuilder.WriteString(textContent.String())
+						}
+					}
+				}
+			})
+			plainText = textBuilder.String()
+		} else if messageField.Type() == lua.LTString {
+			plainText = messageField.String()
+		}
+
+		// 使用预编译的正则表达式提取URL
+		links := urlExtractPattern.FindAllString(plainText, -1)
+
+		// 如果指定了索引，返回指定位置的URL（索引从1开始）
+		if index > 0 && index <= len(links) {
+			L.Push(lua.LString(links[index-1]))
+			return 1
+		}
+
+		// 如果没有指定索引或索引无效，返回所有URL组成的表
+		resultTable := L.NewTable()
+		for i, link := range links {
+			L.SetField(resultTable, strconv.Itoa(i+1), lua.LString(link))
+		}
+		L.Push(resultTable)
+		return 1
+	}
+}
+
+// ========== 二维码检测与解析API ==========
+
+// luaImageHasQRCode 检查图片是否包含二维码
+func (m *Manager) luaImageHasQRCode(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 验证参数
+		image, err := validateStringParam(L, 1, "image", true)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 调用扫码API检测二维码
+		result, err := callBotAPI(instance, "scan_qrcode", map[string]interface{}{
+			"image": image,
+		})
+		if err != nil || result == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 检查结果中是否有二维码数据
+		if resultArray, ok := result["data"].([]interface{}); ok && len(resultArray) > 0 {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// luaImageCountQRCodes 统计图片中二维码的数量
+func (m *Manager) luaImageCountQRCodes(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		// 验证参数
+		image, err := validateStringParam(L, 1, "image", true)
+		if err != nil {
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		// 调用扫码API
+		result, err := callBotAPI(instance, "scan_qrcode", map[string]interface{}{
+			"image": image,
+		})
+		if err != nil || result == nil {
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		// 检查结果中二维码的数量
+		if resultArray, ok := result["data"].([]interface{}); ok {
+			L.Push(lua.LNumber(len(resultArray)))
+			return 1
+		}
+
+		L.Push(lua.LNumber(0))
+		return 1
+	}
+}
+
+// luaImageGetQRCodes 获取图片中二维码的内容（支持可选的索引参数）
+func (m *Manager) luaImageGetQRCodes(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			L.Push(L.NewTable())
+			return 1
+		}
+
+		// 验证参数
+		image, err := validateStringParam(L, 1, "image", true)
+		if err != nil {
+			L.Push(L.NewTable())
+			return 1
+		}
+
+		// 可选的索引参数（从1开始）
+		index := 0
+		if L.GetTop() >= 2 {
+			index = int(L.ToNumber(2))
+		}
+
+		// 调用扫码API
+		result, err := callBotAPI(instance, "scan_qrcode", map[string]interface{}{
+			"image": image,
+		})
+		if err != nil || result == nil {
+			L.Push(L.NewTable())
+			return 1
+		}
+
+		// 解析结果
+		resultArray, ok := result["data"].([]interface{})
+		if !ok || len(resultArray) == 0 {
+			L.Push(L.NewTable())
+			return 1
+		}
+
+		// 如果指定了索引，返回指定位置的二维码内容
+		if index > 0 && index <= len(resultArray) {
+			item := resultArray[index-1]
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				if rawURL, ok := itemMap["raw_url"].(string); ok {
+					L.Push(lua.LString(rawURL))
+					return 1
+				}
+			}
+			// 如果不是map，尝试直接转为字符串
+			L.Push(m.convertToLuaValue(L, item))
+			return 1
+		}
+
+		// 如果没有指定索引或索引无效，返回所有二维码内容组成的表
+		resultTable := L.NewTable()
+		for i, item := range resultArray {
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				if rawURL, ok := itemMap["raw_url"].(string); ok {
+					L.SetField(resultTable, strconv.Itoa(i+1), lua.LString(rawURL))
+				} else {
+					L.SetField(resultTable, strconv.Itoa(i+1), m.convertToLuaValue(L, item))
+				}
+			} else {
+				L.SetField(resultTable, strconv.Itoa(i+1), m.convertToLuaValue(L, item))
+			}
+		}
+		L.Push(resultTable)
+		return 1
+	}
+}
+
 // ========== 消息解析API ==========
 
 // getEventTable 辅助函数：从Lua栈获取事件数据，支持表或JSON字符串
@@ -4129,8 +4901,7 @@ func (m *Manager) luaMsgIsAtBot() func(*lua.LState) int {
 		rawMessageField := L.GetField(event, "raw_message")
 		if rawMessageField.Type() == lua.LTString {
 			rawMessage := rawMessageField.String()
-			// 匹配 [CQ:at,qq=123456] 或 [CQ:at,qq=123456,name=昵称]
-			cqAtPattern := regexp.MustCompile(`\[CQ:at,qq=(\d+)[^\]]*\]`)
+			// 使用预编译的正则表达式匹配 [CQ:at,qq=123456] 或 [CQ:at,qq=123456,name=昵称]
 			matches := cqAtPattern.FindAllStringSubmatch(rawMessage, -1)
 			for _, match := range matches {
 				if len(match) > 1 && match[1] == botIdStr {
@@ -4252,20 +5023,18 @@ func (m *Manager) luaMsgGetReplyId() func(*lua.LState) int {
 
 // 从raw_message中解析reply信息
 func parseReplyFromRawMessage(L *lua.LState, rawMessage string) lua.LValue {
-	// 正则表达式匹配[CQ:reply,id=xxx]格式的CQ码
-	re := regexp.MustCompile(`\[CQ:reply,id=([^,\]]+)`)
-	matches := re.FindStringSubmatch(rawMessage)
+	// 使用预编译的正则表达式匹配[CQ:reply,id=xxx]格式的CQ码
+	matches := cqReplyPattern.FindStringSubmatch(rawMessage)
 	if len(matches) > 1 {
 		return lua.LString(matches[1])
 	}
-	
+
 	// 如果上面的正则没匹配到，尝试更通用的匹配方式
-	re2 := regexp.MustCompile(`\[CQ:reply,[^\]]*id=([^,\]]+)`)
-	matches2 := re2.FindStringSubmatch(rawMessage)
+	matches2 := cqReplyPattern2.FindStringSubmatch(rawMessage)
 	if len(matches2) > 1 {
 		return lua.LString(matches2[1])
 	}
-	
+
 	return lua.LNil
 }
 
@@ -4283,9 +5052,8 @@ func (m *Manager) luaMsgContainsKeyword() func(*lua.LState) int {
 		rawMessageField := L.GetField(event, "raw_message")
 		if rawMessageField.Type() == lua.LTString {
 			rawMessage := rawMessageField.String()
-			// 移除所有CQ码，只保留纯文本
-			cqPattern := regexp.MustCompile(`\[CQ:[^\]]+\]`)
-			cleanMessage := cqPattern.ReplaceAllString(rawMessage, "")
+			// 使用预编译的正则表达式移除所有CQ码，只保留纯文本
+			cleanMessage := cqCodePattern.ReplaceAllString(rawMessage, "")
 			// 去除可能的多余空格
 			cleanMessage = strings.TrimSpace(cleanMessage)
 			if strings.Contains(cleanMessage, keyword) {
@@ -4521,6 +5289,261 @@ func (m *Manager) luaMsgGetMetadata() func(*lua.LState) int {
 	}
 }
 
+// 获取群消息历史
+func (m *Manager) luaGetGroupMsgHistory(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取群消息历史失败")
+		}
+
+		// 验证参数
+		groupID, err := validateIntParam(L, 1, "group_id", true, 0, 0)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 可选参数：message_seq
+		messageSeq := L.OptString(2, "")
+
+		// 可选参数：count
+		count := L.OptInt(3, 20)
+
+		// 可选参数：reverseOrder
+		reverseOrder := L.OptBool(4, false)
+
+		params := map[string]interface{}{
+			"group_id": groupID,
+			"count":    count,
+		}
+		if messageSeq != "" {
+			params["message_seq"] = messageSeq
+		}
+		params["reverseOrder"] = reverseOrder
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_group_msg_history", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取群消息历史失败 [group_id=%d]", groupID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 获取好友消息历史
+func (m *Manager) luaGetFriendMsgHistory(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取好友消息历史失败")
+		}
+
+		// 验证参数
+		userID, err := validateIntParam(L, 1, "user_id", true, 0, 0)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 可选参数：message_seq
+		messageSeq := L.OptString(2, "")
+
+		// 可选参数：count
+		count := L.OptInt(3, 20)
+
+		// 可选参数：reverseOrder
+		reverseOrder := L.OptBool(4, false)
+
+		params := map[string]interface{}{
+			"user_id": userID,
+			"count":   count,
+		}
+		if messageSeq != "" {
+			params["message_seq"] = messageSeq
+		}
+		params["reverseOrder"] = reverseOrder
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_friend_msg_history", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取好友消息历史失败 [user_id=%d]", userID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 设置消息表情点赞
+func (m *Manager) luaSetMsgEmojiLike(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置消息表情点赞失败")
+		}
+
+		// 验证参数
+		messageID, err := validateIntParam(L, 1, "message_id", true, 0, 0)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		emojiID, err := validateStringParam(L, 2, "emoji_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "set_msg_emoji_like", map[string]interface{}{
+			"message_id": messageID,
+			"emoji_id":   emojiID,
+		})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置消息表情点赞失败 [message_id=%d]", messageID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 取消消息表情点赞
+func (m *Manager) luaUnsetMsgEmojiLike(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "取消消息表情点赞失败")
+		}
+
+		// 验证参数
+		messageID, err := validateIntParam(L, 1, "message_id", true, 0, 0)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		emojiID, err := validateStringParam(L, 2, "emoji_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "unset_msg_emoji_like", map[string]interface{}{
+			"message_id": messageID,
+			"emoji_id":   emojiID,
+		})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("取消消息表情点赞失败 [message_id=%d]", messageID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 发送群AI语音
+func (m *Manager) luaSendGroupAIRecord(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "发送群AI语音失败")
+		}
+
+		// 验证参数 - group_id必须大于0
+		groupID, err := validateIntParam(L, 1, "group_id", true, 1, math.MaxInt32)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		text, err := validateStringParam(L, 2, "text", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		character, err := validateStringParam(L, 3, "character", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 可选参数：chat_type
+		chatType := L.OptInt(4, 1)
+
+		// 调用服务
+		result, err := callBotAPI(instance, "send_group_ai_record", map[string]interface{}{
+			"group_id":  groupID,
+			"text":      text,
+			"character": character,
+			"chat_type": chatType,
+		})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("发送群AI语音失败 [group_id=%d]", groupID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 获取AI角色列表
+func (m *Manager) luaGetAICharacters(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取AI角色列表失败")
+		}
+
+		// 可选参数：group_id
+		var groupID int64
+		if L.GetTop() >= 1 {
+			groupID = L.OptInt64(1, 0)
+		}
+
+		// 可选参数：chat_type
+		chatType := L.OptInt(2, 1)
+
+		params := make(map[string]interface{})
+		if groupID != 0 {
+			params["group_id"] = groupID
+		}
+		params["chat_type"] = chatType
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_ai_characters", params)
+		if err != nil {
+			return luaAPIError(L, err, "获取AI角色列表失败")
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 获取群荣誉信息
+func (m *Manager) luaGetGroupHonorInfo(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取群荣誉信息失败")
+		}
+
+		// 验证参数
+		groupID, err := validateIntParam(L, 1, "group_id", true, 0, 0)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		type_, err := validateStringParam(L, 2, "type", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "get_group_honor_info", map[string]interface{}{
+			"group_id": groupID,
+			"type":     type_,
+		})
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取群荣誉信息失败 [group_id=%d]", groupID))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
 // 获取图片URL列表
 func (m *Manager) luaMsgGetImageUrls() func(*lua.LState) int {
 	return func(L *lua.LState) int {
@@ -4570,7 +5593,7 @@ func (m *Manager) luaMsgGetImageUrls() func(*lua.LState) int {
 	}
 }
 
-// 获取消息中的所有图片
+// 获取消息中的所有图片（支持可选的索引参数）
 func (m *Manager) luaMsgGetImages() func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		event := m.getEventTable(L, 1)
@@ -4579,16 +5602,26 @@ func (m *Manager) luaMsgGetImages() func(*lua.LState) int {
 			return 1
 		}
 
+		// 可选的索引参数（从1开始）
+		index := 0
+		if L.GetTop() >= 2 {
+			index = int(L.ToNumber(2))
+		}
+
 		// 从message字段获取消息段
 		messageField := L.GetField(event, "message")
 		if messageField.Type() != lua.LTTable {
+			if index > 0 {
+				L.Push(lua.LNil)
+				return 1
+			}
 			L.Push(L.NewTable())
 			return 1
 		}
 
 		messageTable := messageField.(*lua.LTable)
 		result := L.NewTable()
-		index := 1
+		idx := 1
 
 		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
 			if segment.Type() != lua.LTTable {
@@ -4610,17 +5643,31 @@ func (m *Manager) luaMsgGetImages() func(*lua.LState) int {
 			segDataTable := segData.(*lua.LTable)
 			urlContent := L.GetField(segDataTable, "url")
 			if urlContent.Type() == lua.LTString {
-				L.RawSetInt(result, index, urlContent)
-				index++
+				// 如果指定了索引，检查是否匹配
+				if index > 0 && idx == index {
+					L.Push(urlContent)
+					return
+				}
+				L.RawSetInt(result, idx, urlContent)
+				idx++
 			}
 		})
 
+		// 如果指定了索引但没找到，返回nil；否则返回表
+		if index > 0 && idx <= index {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		if index > 0 {
+			return 1
+		}
 		L.Push(result)
 		return 1
 	}
 }
 
-// 获取消息中@的用户列表
+// 获取消息中@的用户列表（支持可选的索引参数）
 func (m *Manager) luaMsgGetAtUsers() func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		event := m.getEventTable(L, 1)
@@ -4629,16 +5676,26 @@ func (m *Manager) luaMsgGetAtUsers() func(*lua.LState) int {
 			return 1
 		}
 
+		// 可选的索引参数（从1开始）
+		index := 0
+		if L.GetTop() >= 2 {
+			index = int(L.ToNumber(2))
+		}
+
 		// 从message字段获取消息段
 		messageField := L.GetField(event, "message")
 		if messageField.Type() != lua.LTTable {
+			if index > 0 {
+				L.Push(lua.LNil)
+				return 1
+			}
 			L.Push(L.NewTable())
 			return 1
 		}
 
 		messageTable := messageField.(*lua.LTable)
 		result := L.NewTable()
-		index := 1
+		idx := 1
 
 		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
 			if segment.Type() != lua.LTTable {
@@ -4660,11 +5717,25 @@ func (m *Manager) luaMsgGetAtUsers() func(*lua.LState) int {
 			segDataTable := segData.(*lua.LTable)
 			qqContent := L.GetField(segDataTable, "qq")
 			if qqContent.Type() == lua.LTString || qqContent.Type() == lua.LTNumber {
-				L.RawSetInt(result, index, qqContent)
-				index++
+				// 如果指定了索引，检查是否匹配
+				if index > 0 && idx == index {
+					L.Push(qqContent)
+					return
+				}
+				L.RawSetInt(result, idx, qqContent)
+				idx++
 			}
 		})
 
+		// 如果指定了索引但没找到，返回nil；否则返回表
+		if index > 0 && idx <= index {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		if index > 0 {
+			return 1
+		}
 		L.Push(result)
 		return 1
 	}
@@ -4870,9 +5941,8 @@ func (m *Manager) luaMsgGetLinks() func(*lua.LState) int {
 			plainText = messageField.String()
 		}
 		
-		// 简单的URL提取正则
-		linkRegex := regexp.MustCompile(`(https?://[\w\-+&@#/%?=~_|!:,.;]*[\w\-+&@#/%=~_|])`)
-		links := linkRegex.FindAllString(plainText, -1)
+		// 使用预编译的正则表达式提取URL
+		links := urlExtractPattern.FindAllString(plainText, -1)
 		
 		// 转换为Lua表
 		resultTable := L.NewTable()
@@ -4998,9 +6068,8 @@ func (m *Manager) luaMsgGetCQCodes() func(*lua.LState) int {
 			}
 		}
 		
-		// 提取CQ码
-		cqRegex := regexp.MustCompile(`\[CQ:([^\]]+)\]`)
-		cqCodes := cqRegex.FindAllString(rawMessage, -1)
+		// 使用预编译的正则表达式提取CQ码
+		cqCodes := cqExtractPattern.FindAllString(rawMessage, -1)
 		
 		// 转换为Lua表
 		resultTable := L.NewTable()
@@ -5203,6 +6272,1262 @@ func (m *Manager) luaMsgHasCQType() func(*lua.LState) int {
 		})
 		
 		L.Push(lua.LBool(hasType))
+		return 1
+	}
+}
+
+// 检查是否为群消息
+func (m *Manager) luaMsgIsGroupMessage() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		messageType := L.GetField(event, "message_type")
+		if messageType.Type() == lua.LTString && messageType.String() == "group" {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		// 检查是否有group_id字段
+		groupId := L.GetField(event, "group_id")
+		if groupId.Type() == lua.LTNumber || groupId.Type() == lua.LTString {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// 检查是否为私聊消息
+func (m *Manager) luaMsgIsPrivateMessage() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		messageType := L.GetField(event, "message_type")
+		if messageType.Type() == lua.LTString && messageType.String() == "private" {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		// 检查是否有group_id字段，如果没有则为私聊
+		groupId := L.GetField(event, "group_id")
+		if groupId.Type() == lua.LTNil {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// 获取消息类型
+func (m *Manager) luaMsgGetType() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LString(""))
+			return 1
+		}
+
+		messageType := L.GetField(event, "message_type")
+		if messageType.Type() == lua.LTString {
+			L.Push(messageType)
+			return 1
+		}
+
+		// 如果没有message_type，根据group_id判断
+		groupId := L.GetField(event, "group_id")
+		if groupId.Type() == lua.LTNumber || groupId.Type() == lua.LTString {
+			L.Push(lua.LString("group"))
+			return 1
+		}
+
+		L.Push(lua.LString("private"))
+		return 1
+	}
+}
+
+// ========== 卡片消息判断与解析 ==========
+
+// msg.has_json - 检查消息是否包含JSON卡片
+func (m *Manager) luaMsgHasJSON() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		found := false
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if found {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				found = true
+			}
+		})
+
+		L.Push(lua.LBool(found))
+		return 1
+	}
+}
+
+// msg.is_contact_card - 检查消息是否为联系人名片
+func (m *Manager) luaMsgIsContactCard() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		found := false
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if found {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					dataTable := segData.(*lua.LTable)
+					// 尝试从内嵌JSON字符串中获取 bizsrc
+					if bizsrc := L.GetField(dataTable, "data"); bizsrc.Type() == lua.LTString {
+						jsonStr := html.UnescapeString(bizsrc.String())
+						var parsedData map[string]interface{}
+						if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+							if b, ok := parsedData["bizsrc"].(string); ok {
+								if b == "cardshare.cardshare" {
+									found = true
+									return
+								}
+							}
+						}
+					}
+				}
+			}
+		})
+
+		L.Push(lua.LBool(found))
+		return 1
+	}
+}
+
+// msg.is_group_card - 检查消息是否为群名片
+func (m *Manager) luaMsgIsGroupCard() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		found := false
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if found {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					dataTable := segData.(*lua.LTable)
+					// 尝试从内嵌JSON字符串中获取 bizsrc
+					if bizsrc := L.GetField(dataTable, "data"); bizsrc.Type() == lua.LTString {
+						jsonStr := html.UnescapeString(bizsrc.String())
+						var parsedData map[string]interface{}
+						if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+							if b, ok := parsedData["bizsrc"].(string); ok {
+								if b == "qun.share" || strings.Contains(b, "group") {
+									found = true
+									return
+								}
+							}
+							if t, ok := parsedData["tag"].(string); ok {
+								if strings.Contains(t, "群名片") {
+									found = true
+									return
+								}
+							}
+						}
+					}
+				}
+			}
+		})
+
+		L.Push(lua.LBool(found))
+		return 1
+	}
+}
+
+// msg.is_channel_card - 检查消息是否为频道名片
+func (m *Manager) luaMsgIsChannelCard() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		found := false
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if found {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					dataTable := segData.(*lua.LTable)
+					// 尝试从内嵌JSON字符串中获取 bizsrc
+					if bizsrc := L.GetField(dataTable, "data"); bizsrc.Type() == lua.LTString {
+						jsonStr := html.UnescapeString(bizsrc.String())
+						var parsedData map[string]interface{}
+						if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+							if b, ok := parsedData["bizsrc"].(string); ok {
+								if b == "pindao.home" {
+									found = true
+									return
+								}
+							}
+							if t, ok := parsedData["tag"].(string); ok {
+								if strings.Contains(t, "频道名片") {
+									found = true
+									return
+								}
+							}
+						}
+					}
+				}
+			}
+		})
+
+		L.Push(lua.LBool(found))
+		return 1
+	}
+}
+
+// getNestedFieldFromTable - 从表中获取嵌套字段，支持 data.data 字符串解析
+func (m *Manager) getNestedFieldFromTable(L *lua.LState, table *lua.LTable, path string) lua.LValue {
+	parts := strings.Split(path, ".")
+
+	// 首先检查表中是否有该字段
+	current := lua.LValue(table)
+	for _, part := range parts {
+		if current.Type() != lua.LTTable {
+			break
+		}
+		next := L.GetField(current.(*lua.LTable), part)
+		if next == lua.LNil {
+			// 字段不存在，尝试从内嵌JSON中查找
+			// 先尝试从当前表的data字段获取
+			if dataField := L.GetField(current.(*lua.LTable), "data"); dataField.Type() == lua.LTString {
+				jsonStr := dataField.String()
+				jsonStr = html.UnescapeString(jsonStr)
+				var parsedData map[string]interface{}
+				if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+					return m.getValueFromParsedData(L, parsedData, parts)
+				}
+			}
+			// 再尝试从原始table的data字段获取（兼容处理）
+			if dataField := L.GetField(table, "data"); dataField.Type() == lua.LTString {
+				jsonStr := dataField.String()
+				jsonStr = html.UnescapeString(jsonStr)
+				var parsedData map[string]interface{}
+				if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+					return m.getValueFromParsedData(L, parsedData, parts)
+				}
+			}
+			return nil
+		}
+		current = next
+	}
+
+	// 如果当前值是 Lua 字符串
+	if current.Type() == lua.LTString {
+		strValue := current.String()
+		// 尝试解析为 JSON（可能是内嵌的 JSON 字符串）
+		if jsonStr := html.UnescapeString(strValue); len(parts) > 1 {
+			var parsedData map[string]interface{}
+			if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+				return m.getValueFromParsedData(L, parsedData, parts[1:])
+			}
+		}
+		// 如果不是 JSON 或已经是最终字段，返回字符串值
+		return current
+	}
+
+	// 如果当前值不是表也不是字符串，说明路径中间某个节点不是表结构，返回nil
+	return nil
+}
+
+// getValueFromParsedData - 从解析后的JSON数据中获取值
+func (m *Manager) getValueFromParsedData(L *lua.LState, parsedData map[string]interface{}, pathParts []string) lua.LValue {
+	if len(pathParts) == 0 {
+		return nil
+	}
+
+	current := parsedData
+	for i, part := range pathParts {
+		if i == len(pathParts)-1 {
+			// 最后一个字段
+			if val, ok := current[part]; ok {
+				return convertGoValueToLua(L, val)
+			}
+			return nil
+		}
+
+		// 不是最后一个字段，继续深入
+		if next, ok := current[part].(map[string]interface{}); ok {
+			current = next
+		} else {
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// msg.get_json_data - 获取消息中的JSON数据，并解析内嵌的JSON字符串
+func (m *Manager) luaMsgGetJSONData() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		resultTable := L.NewTable()
+		foundCount := 0
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					dataTable := segData.(*lua.LTable)
+
+					// 检查 data.data 字段 - 它可能是字符串(需要解析)或表(直接使用)
+					dataDataField := L.GetField(dataTable, "data")
+					var parsedData map[string]interface{}
+
+					if dataDataField.Type() == lua.LTString {
+						// data.data 是字符串，需要解析
+						jsonStr := dataDataField.String()
+						// 先进行HTML实体解码 (如 &#44; -> ,)
+						jsonStr = html.UnescapeString(jsonStr)
+						if json.Unmarshal([]byte(jsonStr), &parsedData) != nil {
+							return
+						}
+						foundCount++
+						L.SetField(resultTable, "count", lua.LNumber(foundCount))
+						// 将解析后的数据展开放入resultTable
+						for k, v := range parsedData {
+							L.SetField(resultTable, k, convertGoValueToLua(L, v))
+						}
+						// 同时保存原始数据表
+						L.SetField(resultTable, "_raw", dataTable)
+					} else if dataDataField.Type() == lua.LTTable {
+						// data.data 已经是表
+						foundCount++
+						dataDataTable := dataDataField.(*lua.LTable)
+						L.SetField(resultTable, "count", lua.LNumber(foundCount))
+						L.SetField(resultTable, "_raw", dataDataTable)
+						// 复制所有字段
+						dataDataTable.ForEach(func(key lua.LValue, value lua.LValue) {
+							L.SetField(resultTable, key.String(), value)
+						})
+					}
+
+					// 从原始data表复制顶层字段
+					dataTable.ForEach(func(key lua.LValue, value lua.LValue) {
+						if key.String() != "data" {
+							L.SetField(resultTable, key.String(), value)
+						}
+					})
+				}
+			}
+		})
+
+		if foundCount == 0 {
+			L.Push(lua.LNil)
+		} else {
+			L.Push(resultTable)
+		}
+		return 1
+	}
+}
+
+// convertGoValueToLua 将 Go 值转换为 Lua 值
+func convertGoValueToLua(L *lua.LState, v interface{}) lua.LValue {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		t := L.NewTable()
+		for k, v := range val {
+			L.SetField(t, k, convertGoValueToLua(L, v))
+		}
+		return t
+	case []interface{}:
+		t := L.NewTable()
+		for i, v := range val {
+			t.RawSetInt(i+1, convertGoValueToLua(L, v))
+		}
+		return t
+	case string:
+		return lua.LString(val)
+	case float64:
+		return lua.LNumber(val)
+	case bool:
+		return lua.LBool(val)
+	case nil:
+		return lua.LNil
+	default:
+		return lua.LString(fmt.Sprintf("%v", val))
+	}
+}
+
+// msg.parse_card - 解析消息中的名片
+func (m *Manager) luaMsgParseCard() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		var jsonData *lua.LTable
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if jsonData != nil {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					jsonData = segData.(*lua.LTable)
+				}
+			}
+		})
+
+		if jsonData == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		cardTable := L.NewTable()
+
+		app := L.GetField(jsonData, "app")
+		if app.Type() == lua.LTString {
+			L.SetField(cardTable, "tag", app)
+		}
+
+		desc := L.GetField(jsonData, "desc")
+		if desc.Type() == lua.LTString {
+			L.SetField(cardTable, "nickname", desc)
+		}
+
+		prompt := L.GetField(jsonData, "prompt")
+		if prompt.Type() == lua.LTString {
+			L.SetField(cardTable, "source", prompt)
+		}
+
+		bizsrc := L.GetField(jsonData, "bizsrc")
+		if bizsrc.Type() == lua.LTString {
+			L.SetField(cardTable, "source", bizsrc)
+		}
+
+		dataDataField := L.GetField(jsonData, "data")
+		var parsedData map[string]interface{}
+
+		if dataDataField.Type() == lua.LTString {
+			jsonStr := dataDataField.String()
+			jsonStr = html.UnescapeString(jsonStr)
+			if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+				if meta, ok := parsedData["meta"].(map[string]interface{}); ok {
+					if contact, ok := meta["contact"].(map[string]interface{}); ok {
+						contactTable := L.NewTable()
+						for k, v := range contact {
+							L.SetField(contactTable, k, convertGoValueToLua(L, v))
+						}
+						L.SetField(cardTable, "contact", contactTable)
+
+						if nickname, ok := contact["nickname"].(string); ok {
+							L.SetField(cardTable, "nickname", lua.LString(nickname))
+						}
+						if avatar, ok := contact["avatar"].(string); ok {
+							L.SetField(cardTable, "avatar", lua.LString(avatar))
+						}
+						if contactInfo, ok := contact["contact"].(string); ok {
+							L.SetField(cardTable, "contactInfo", lua.LString(contactInfo))
+						}
+						if tag, ok := contact["tag"].(string); ok {
+							L.SetField(cardTable, "tag", lua.LString(tag))
+						}
+						if jumpUrl, ok := contact["jumpUrl"].(string); ok {
+							L.SetField(cardTable, "jumpUrl", lua.LString(jumpUrl))
+							decodedUrl := html.UnescapeString(jumpUrl)
+							decodedUrl = normalizeTencentURL(decodedUrl)
+							if strings.Contains(decodedUrl, "uin=") {
+								start := strings.Index(decodedUrl, "uin=") + 4
+								end := start
+								for end < len(decodedUrl) && decodedUrl[end] >= '0' && decodedUrl[end] <= '9' {
+									end++
+								}
+								if end > start {
+									L.SetField(cardTable, "uin", lua.LString(decodedUrl[start:end]))
+								}
+							}
+							if strings.Contains(decodedUrl, "card_type=group") {
+								L.SetField(cardTable, "cardType", lua.LString("group"))
+							}
+						}
+						// 处理 pcJumpUrl (tencent协议，PC端使用)
+						if pcJumpUrl, ok := contact["pcJumpUrl"].(string); ok {
+							decodedPcUrl := html.UnescapeString(pcJumpUrl)
+							decodedPcUrl = normalizeTencentURL(decodedPcUrl)
+							L.SetField(cardTable, "pcJumpUrl", lua.LString(decodedPcUrl))
+							// 如果还没找到uin，尝试从pcJumpUrl解析
+							if uin := L.GetField(cardTable, "uin"); uin == lua.LNil {
+								if strings.Contains(decodedPcUrl, "uin=") {
+									start := strings.Index(decodedPcUrl, "uin=") + 4
+									end := start
+									for end < len(decodedPcUrl) && decodedPcUrl[end] >= '0' && decodedPcUrl[end] <= '9' {
+										end++
+									}
+									if end > start {
+										L.SetField(cardTable, "uin", lua.LString(decodedPcUrl[start:end]))
+									}
+								}
+							}
+						}
+					}
+
+					if news, ok := meta["news"].(map[string]interface{}); ok {
+						if title, ok := news["title"].(string); ok {
+							L.SetField(cardTable, "title", lua.LString(title))
+						}
+						if desc, ok := news["desc"].(string); ok {
+							L.SetField(cardTable, "description", lua.LString(desc))
+						}
+						if jumpUrl, ok := news["jumpUrl"].(string); ok {
+							L.SetField(cardTable, "articleUrl", lua.LString(jumpUrl))
+						}
+						if preview, ok := news["preview"].(string); ok {
+							L.SetField(cardTable, "previewImage", lua.LString(preview))
+						}
+					}
+
+					if Location, ok := meta["Location"].(map[string]interface{}); ok {
+						if Search, ok := Location["Search"].(map[string]interface{}); ok {
+							if name, ok := Search["name"].(string); ok {
+								L.SetField(cardTable, "locationName", lua.LString(name))
+							}
+							if address, ok := Search["address"].(string); ok {
+								L.SetField(cardTable, "address", lua.LString(address))
+							}
+							if lat, ok := Search["lat"].(string); ok {
+								if f, err := strconv.ParseFloat(lat, 64); err == nil {
+									L.SetField(cardTable, "latitude", lua.LNumber(f))
+								}
+							}
+							if lng, ok := Search["lng"].(string); ok {
+								if f, err := strconv.ParseFloat(lng, 64); err == nil {
+									L.SetField(cardTable, "longitude", lua.LNumber(f))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		L.Push(cardTable)
+		return 1
+	}
+}
+
+// msg.get_card_info - 从事件或卡片数据中获取指定字段
+func (m *Manager) luaMsgGetCardInfo() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		firstArg := L.CheckTable(1)
+		field := L.CheckString(2)
+
+		var jsonData *lua.LTable
+
+		// 检查是否是事件对象
+		messageField := L.GetField(firstArg, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+				if jsonData != nil {
+					return
+				}
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "json" {
+					segData := L.GetField(segmentTable, "data")
+					if segData.Type() == lua.LTTable {
+						jsonData = segData.(*lua.LTable)
+					}
+				}
+			})
+		} else {
+			jsonData = firstArg
+		}
+
+		if jsonData == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		value := m.getNestedFieldFromTable(L, jsonData, field)
+		if value == nil {
+			L.Push(lua.LNil)
+		} else {
+			L.Push(value)
+		}
+		return 1
+	}
+}
+
+// msg.json_has_app - 检查JSON卡片来源是否匹配（使用bizsrc判断）
+func (m *Manager) luaMsgJSONHasApp() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		jsonData := L.CheckTable(1)
+		expectedBizsrc := L.CheckString(2)
+
+		// 首先尝试直接从表中获取 bizsrc
+		if bizsrc := L.GetField(jsonData, "bizsrc"); bizsrc.Type() == lua.LTString {
+			if strings.Contains(bizsrc.String(), expectedBizsrc) {
+				L.Push(lua.LTrue)
+				return 1
+			}
+		}
+
+		// 尝试从内嵌JSON字符串中获取 bizsrc
+		if dataField := L.GetField(jsonData, "data"); dataField.Type() == lua.LTString {
+			jsonStr := html.UnescapeString(dataField.String())
+			var parsedData map[string]interface{}
+			if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+				if b, ok := parsedData["bizsrc"].(string); ok {
+					if strings.Contains(b, expectedBizsrc) {
+						L.Push(lua.LTrue)
+						return 1
+					}
+				}
+			}
+		}
+
+		L.Push(lua.LFalse)
+		return 1
+	}
+}
+
+// msg.get_json_app_type - 获取JSON卡片的来源类型（bizsrc）
+func (m *Manager) luaMsgGetJSONAppType() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		jsonData := L.CheckTable(1)
+
+		// 首先尝试直接从表中获取 bizsrc
+		if bizsrc := L.GetField(jsonData, "bizsrc"); bizsrc.Type() == lua.LTString {
+			L.Push(bizsrc)
+			return 1
+		}
+
+		// 尝试从内嵌JSON字符串中获取 bizsrc
+		if dataField := L.GetField(jsonData, "data"); dataField.Type() == lua.LTString {
+			jsonStr := html.UnescapeString(dataField.String())
+			var parsedData map[string]interface{}
+			if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+				if b, ok := parsedData["bizsrc"].(string); ok {
+					L.Push(lua.LString(b))
+					return 1
+				}
+			}
+		}
+
+		L.Push(lua.LString(""))
+		return 1
+	}
+}
+
+// msg.get_json_field - 从JSON卡片中获取嵌套字段
+func (m *Manager) luaMsgGetJSONField() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		firstArg := L.CheckTable(1)
+		fieldPath := L.CheckString(2)
+
+		var jsonData *lua.LTable
+
+		// 检查是否是事件对象（通过检查是否有message字段）
+		messageField := L.GetField(firstArg, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+				if jsonData != nil {
+					return
+				}
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "json" {
+					segData := L.GetField(segmentTable, "data")
+					if segData.Type() == lua.LTTable {
+						jsonData = segData.(*lua.LTable)
+					}
+				}
+			})
+		} else {
+			jsonData = firstArg
+		}
+
+		if jsonData == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		value := m.getNestedFieldFromTable(L, jsonData, fieldPath)
+		if value == nil {
+			L.Push(lua.LNil)
+		} else {
+			L.Push(value)
+		}
+		return 1
+	}
+}
+
+// msg.get_card_id_from_url - 从卡片URL中提取ID（群号/用户QQ/频道ID等）
+// 支持 mqqapi:// 和 tencent:// 两种协议
+func (m *Manager) luaMsgGetCardIDFromURL() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		url := L.CheckString(1)
+		idType := L.CheckString(2)
+
+		// 规范化URL：先进行HTML解码，再处理tencent协议的额外转义
+		url = html.UnescapeString(url)
+		url = normalizeTencentURL(url)
+
+		var result string
+		var found bool
+
+		switch idType {
+		case "uin", "qq":
+			result, found = extractIDFromURL(url, "uin=")
+		case "group", "groupUin":
+			result, found = extractGroupIDFromURL(url)
+		case "guild", "guildId":
+			result, found = extractIDFromURL(url, "guild_id=")
+		case "inviteCode":
+			result, found = extractIDFromURL(url, "inviteCode=")
+		}
+
+		if found {
+			L.Push(lua.LString(result))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}
+}
+
+// normalizeTencentURL - 规范化tencent协议的URL
+// tencent:// 协议的URL中，反斜杠被转义为 \\/，需要去除多余的 \
+func normalizeTencentURL(url string) string {
+	// 处理 tencent:// 协议中的 \/ -> /
+	url = strings.ReplaceAll(url, "\\/", "/")
+	// 去除多余的反斜杠
+	url = strings.ReplaceAll(url, "\\", "")
+	return url
+}
+
+// extractIDFromURL - 从URL中提取指定类型的ID
+func extractIDFromURL(url, prefix string) (string, bool) {
+	if strings.Contains(url, prefix) {
+		start := strings.Index(url, prefix) + len(prefix)
+		end := start
+		for end < len(url) && (url[end] >= '0' && url[end] <= '9' || url[end] >= 'a' && url[end] <= 'z' || url[end] >= 'A' && url[end] <= 'Z') {
+			end++
+		}
+		if end > start {
+			return url[start:end], true
+		}
+	}
+	return "", false
+}
+
+// extractGroupIDFromURL - 从URL中提取群号
+func extractGroupIDFromURL(url string) (string, bool) {
+	// 如果包含 card_type=group 或 group= 参数
+	if strings.Contains(url, "card_type=group") || strings.Contains(url, "groupUin=") {
+		return extractIDFromURL(url, "uin=")
+	}
+	// 否则尝试直接从 URL 中找数字（群号通常是比较长的数字）
+	if strings.Contains(url, "uin=") {
+		start := strings.Index(url, "uin=") + 4
+		end := start
+		// 群号通常大于10000
+		for end < len(url) && url[end] >= '0' && url[end] <= '9' {
+			end++
+		}
+		if end > start && end-start >= 5 {
+			return url[start:end], true
+		}
+	}
+	return "", false
+}
+
+// msg.parse_card_full - 完整解析卡片信息，返回结构化数据
+func (m *Manager) luaMsgParseCardFull() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+		var jsonData *lua.LTable
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if jsonData != nil {
+				return
+			}
+			if segment.Type() != lua.LTTable {
+				return
+			}
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() == lua.LTString && segType.String() == "json" {
+				segData := L.GetField(segmentTable, "data")
+				if segData.Type() == lua.LTTable {
+					jsonData = segData.(*lua.LTable)
+				}
+			}
+		})
+
+		if jsonData == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		cardTable := L.NewTable()
+
+		app := L.GetField(jsonData, "app")
+		if app.Type() == lua.LTString {
+			L.SetField(cardTable, "tag", app)
+		}
+
+		desc := L.GetField(jsonData, "desc")
+		if desc.Type() == lua.LTString {
+			L.SetField(cardTable, "name", desc)
+		}
+
+		prompt := L.GetField(jsonData, "prompt")
+		if prompt.Type() == lua.LTString {
+			L.SetField(cardTable, "prompt", prompt)
+		}
+
+		bizsrc := L.GetField(jsonData, "bizsrc")
+		if bizsrc.Type() == lua.LTString {
+			L.SetField(cardTable, "source", bizsrc)
+		}
+
+		dataDataField := L.GetField(jsonData, "data")
+		var parsedData map[string]interface{}
+
+		if dataDataField.Type() == lua.LTString {
+			jsonStr := dataDataField.String()
+			jsonStr = html.UnescapeString(jsonStr)
+			if json.Unmarshal([]byte(jsonStr), &parsedData) == nil {
+				if meta, ok := parsedData["meta"].(map[string]interface{}); ok {
+					if contact, ok := meta["contact"].(map[string]interface{}); ok {
+						contactTable := L.NewTable()
+						for k, v := range contact {
+							L.SetField(contactTable, k, convertGoValueToLua(L, v))
+						}
+						L.SetField(cardTable, "contact", contactTable)
+
+						if nickname, ok := contact["nickname"].(string); ok {
+							L.SetField(cardTable, "nickname", lua.LString(nickname))
+						}
+						if avatar, ok := contact["avatar"].(string); ok {
+							L.SetField(cardTable, "avatar", lua.LString(avatar))
+						}
+						if contactInfo, ok := contact["contact"].(string); ok {
+							L.SetField(cardTable, "contactInfo", lua.LString(contactInfo))
+						}
+						if tag, ok := contact["tag"].(string); ok {
+							L.SetField(cardTable, "tag", lua.LString(tag))
+						}
+						if jumpUrl, ok := contact["jumpUrl"].(string); ok {
+							L.SetField(cardTable, "jumpUrl", lua.LString(jumpUrl))
+							decodedUrl := html.UnescapeString(jumpUrl)
+							decodedUrl = normalizeTencentURL(decodedUrl)
+							if strings.Contains(decodedUrl, "uin=") {
+								start := strings.Index(decodedUrl, "uin=") + 4
+								end := start
+								for end < len(decodedUrl) && decodedUrl[end] >= '0' && decodedUrl[end] <= '9' {
+									end++
+								}
+								if end > start {
+									L.SetField(cardTable, "uin", lua.LString(decodedUrl[start:end]))
+								}
+							}
+							if strings.Contains(decodedUrl, "card_type=group") {
+								L.SetField(cardTable, "cardType", lua.LString("group"))
+							}
+						}
+						// 处理 pcJumpUrl (tencent协议，PC端使用)
+						if pcJumpUrl, ok := contact["pcJumpUrl"].(string); ok {
+							decodedPcUrl := html.UnescapeString(pcJumpUrl)
+							decodedPcUrl = normalizeTencentURL(decodedPcUrl)
+							L.SetField(cardTable, "pcJumpUrl", lua.LString(decodedPcUrl))
+							// 如果还没找到uin，尝试从pcJumpUrl解析
+							if uin := L.GetField(cardTable, "uin"); uin == lua.LNil {
+								if strings.Contains(decodedPcUrl, "uin=") {
+									start := strings.Index(decodedPcUrl, "uin=") + 4
+									end := start
+									for end < len(decodedPcUrl) && decodedPcUrl[end] >= '0' && decodedPcUrl[end] <= '9' {
+										end++
+									}
+									if end > start {
+										L.SetField(cardTable, "uin", lua.LString(decodedPcUrl[start:end]))
+									}
+								}
+							}
+						}
+					}
+
+					if news, ok := meta["news"].(map[string]interface{}); ok {
+						if title, ok := news["title"].(string); ok {
+							L.SetField(cardTable, "title", lua.LString(title))
+						}
+						if desc, ok := news["desc"].(string); ok {
+							L.SetField(cardTable, "description", lua.LString(desc))
+						}
+						if jumpUrl, ok := news["jumpUrl"].(string); ok {
+							L.SetField(cardTable, "articleUrl", lua.LString(jumpUrl))
+						}
+						if preview, ok := news["preview"].(string); ok {
+							L.SetField(cardTable, "previewImage", lua.LString(preview))
+						}
+					}
+
+					if Location, ok := meta["Location"].(map[string]interface{}); ok {
+						if Search, ok := Location["Search"].(map[string]interface{}); ok {
+							if name, ok := Search["name"].(string); ok {
+								L.SetField(cardTable, "locationName", lua.LString(name))
+							}
+							if address, ok := Search["address"].(string); ok {
+								L.SetField(cardTable, "address", lua.LString(address))
+							}
+							if lat, ok := Search["lat"].(string); ok {
+								if f, err := strconv.ParseFloat(lat, 64); err == nil {
+									L.SetField(cardTable, "latitude", lua.LNumber(f))
+								}
+							}
+							if lng, ok := Search["lng"].(string); ok {
+								if f, err := strconv.ParseFloat(lng, 64); err == nil {
+									L.SetField(cardTable, "longitude", lua.LNumber(f))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		L.Push(cardTable)
+		return 1
+	}
+}
+
+// getNestedField - 获取嵌套表中的字段，支持点号路径如 "meta.news.title"
+func (m *Manager) getNestedField(L *lua.LState, table *lua.LTable, path string) lua.LValue {
+	parts := strings.Split(path, ".")
+	current := lua.LValue(table)
+
+	for _, part := range parts {
+		if current.Type() != lua.LTTable {
+			return nil
+		}
+		current = L.GetField(current.(*lua.LTable), part)
+		if current == lua.LNil {
+			return nil
+		}
+	}
+
+	return current
+}
+
+// 获取第一张图片
+func (m *Manager) luaMsgGetFirstImage() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// 从message字段获取消息段
+		messageField := L.GetField(event, "message")
+		if messageField.Type() != lua.LTTable {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		messageTable := messageField.(*lua.LTable)
+
+		messageTable.ForEach(func(_ lua.LValue, segment lua.LValue) {
+			if segment.Type() != lua.LTTable {
+				return
+			}
+
+			segmentTable := segment.(*lua.LTable)
+			segType := L.GetField(segmentTable, "type")
+			if segType.Type() != lua.LTString || segType.String() != "image" {
+				return
+			}
+
+			// 获取图片数据
+			segData := L.GetField(segmentTable, "data")
+			if segData.Type() != lua.LTTable {
+				return
+			}
+
+			segDataTable := segData.(*lua.LTable)
+			urlContent := L.GetField(segDataTable, "url")
+			if urlContent.Type() == lua.LTString {
+				L.Push(urlContent)
+				L.SetTop(1) // 只保留返回值
+			}
+		})
+
+		if L.GetTop() == 0 {
+			L.Push(lua.LNil)
+		}
+
+		return 1
+	}
+}
+
+// 获取发送者ID
+func (m *Manager) luaMsgGetSenderId() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// 优先从user_id字段获取
+		userId := L.GetField(event, "user_id")
+		if userId.Type() == lua.LTNumber || userId.Type() == lua.LTString {
+			L.Push(userId)
+			return 1
+		}
+
+		// 从sender对象获取
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			senderId := L.GetField(sender.(*lua.LTable), "user_id")
+			if senderId.Type() == lua.LTNumber || senderId.Type() == lua.LTString {
+				L.Push(senderId)
+				return 1
+			}
+		}
+
+		L.Push(lua.LNil)
+		return 1
+	}
+}
+
+// 获取发送者昵称
+func (m *Manager) luaMsgGetSenderNickname() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LString(""))
+			return 1
+		}
+
+		// 从sender对象获取
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			senderTable := sender.(*lua.LTable)
+			nickname := L.GetField(senderTable, "nickname")
+			if nickname.Type() == lua.LTString {
+				L.Push(nickname)
+				return 1
+			}
+			card := L.GetField(senderTable, "card")
+			if card.Type() == lua.LTString {
+				L.Push(card)
+				return 1
+			}
+		}
+
+		L.Push(lua.LString(""))
+		return 1
+	}
+}
+
+// 获取群ID
+func (m *Manager) luaMsgGetGroupId() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		groupId := L.GetField(event, "group_id")
+		if groupId.Type() == lua.LTNumber || groupId.Type() == lua.LTString {
+			L.Push(groupId)
+			return 1
+		}
+
+		L.Push(lua.LNil)
+		return 1
+	}
+}
+
+// 获取消息时间
+func (m *Manager) luaMsgGetTime() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		time := L.GetField(event, "time")
+		if time.Type() == lua.LTNumber || time.Type() == lua.LTString {
+			L.Push(time)
+			return 1
+		}
+
+		L.Push(lua.LNil)
+		return 1
+	}
+}
+
+// 获取消息类型（与get_type相同，用于兼容）
+func (m *Manager) luaMsgGetMessageType() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LString(""))
+			return 1
+		}
+
+		messageType := L.GetField(event, "message_type")
+		if messageType.Type() == lua.LTString {
+			L.Push(messageType)
+			return 1
+		}
+
+		// 如果没有message_type，根据group_id判断
+		groupId := L.GetField(event, "group_id")
+		if groupId.Type() == lua.LTNumber || groupId.Type() == lua.LTString {
+			L.Push(lua.LString("group"))
+			return 1
+		}
+
+		L.Push(lua.LString("private"))
 		return 1
 	}
 }

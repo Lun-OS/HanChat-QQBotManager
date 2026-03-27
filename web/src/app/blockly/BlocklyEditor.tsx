@@ -33,7 +33,9 @@ import {
   PanelLeftClose,
   PanelLeft,
   Upload,
-  Fullscreen
+  Fullscreen,
+  Copy,
+  Clipboard
 } from 'lucide-react';
 import { defineCustomBlocks, getToolboxCategories } from './blocks';
 import { initLuaGenerator, generateLuaCode, getLuaGenerator } from './generator';
@@ -81,6 +83,8 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirmStep, setDeleteConfirmStep] = useState(1);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -92,7 +96,44 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
   const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [helpContent, setHelpContent] = useState<string>('');
   const [helpTitle, setHelpTitle] = useState<string>('帮助文档');
-  
+
+  // 剪贴板状态
+  const [blockClipboard, setBlockClipboard] = useState<string | null>(null);
+  const blockClipboardRef = useRef<string | null>(null);
+
+  // 剪贴板大小限制（防止内存溢出）
+  const CLIPBOARD_MAX_SIZE = 1024 * 1024; // 1MB
+
+  // 安全地设置剪贴板内容
+  const setClipboardContent = (content: string | null) => {
+    // 如果内容过大，进行截断或清理
+    if (content && content.length > CLIPBOARD_MAX_SIZE) {
+      console.warn('剪贴板内容过大，已截断');
+      content = content.substring(0, CLIPBOARD_MAX_SIZE);
+    }
+    setBlockClipboard(content);
+    blockClipboardRef.current = content;
+  };
+
+  // 清理剪贴板
+  const clearClipboard = () => {
+    setClipboardContent(null);
+  };
+
+  // 是否有选中的积木（用于控制复制按钮）
+  const [hasSelectedBlocks, setHasSelectedBlocks] = useState(false);
+
+  // 是否正在删除积木（用于阻止bump行为）
+  const isDeletingRef = useRef(false);
+
+  // 长按拖拽工作区相关 refs
+  const isDraggingWorkspaceRef = useRef(false);
+  const dragWorkspaceStartRef = useRef({ x: 0, y: 0 });
+  const workspaceScrollStartRef = useRef({ x: 0, y: 0 });
+  const mouseMoveHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+  const mouseUpHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+  const mouseDownHandlerRef = useRef<((e: MouseEvent) => void) | null>(null);
+
   // 帮助文档内容 - 零基础新手版
   const helpDocumentation = `
 # 📚 Blockly 积木编程完全指南（零基础版）
@@ -1444,6 +1485,12 @@ end)
   const [canRedo, setCanRedo] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+
+  // 预览模式拖拽 refs
+  const isPreviewDraggingRef = useRef(false);
+  const previewDragStartRef = useRef({ x: 0, y: 0 });
+  const previewScrollStartRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     loadProjects();
@@ -1456,6 +1503,18 @@ end)
     }
     return () => {
       if (workspaceRef.current) {
+        const ws = workspaceRef.current as any;
+        const blocklySvg = containerRef.current?.querySelector('.blocklySvg');
+        if (blocklySvg && ws.workspaceDragMouseDownHandler) {
+          blocklySvg.removeEventListener('mousedown', ws.workspaceDragMouseDownHandler);
+          blocklySvg.removeEventListener('contextmenu', ws.workspaceDragContextMenuHandler);
+        }
+        if (ws.workspaceDragMouseMoveHandler) {
+          document.removeEventListener('mousemove', ws.workspaceDragMouseMoveHandler);
+        }
+        if (ws.workspaceDragMouseUpHandler) {
+          document.removeEventListener('mouseup', ws.workspaceDragMouseUpHandler);
+        }
         workspaceRef.current.dispose();
         workspaceRef.current = null;
       }
@@ -1477,6 +1536,16 @@ end)
       resizeObserver.disconnect();
     };
   }, [workspaceRef.current]);
+
+  useEffect(() => {
+    if (!workspaceRef.current) return;
+    const ws = workspaceRef.current as Blockly.WorkspaceSvg;
+    if (previewMode) {
+      document.body.style.cursor = 'grab';
+    } else {
+      document.body.style.cursor = '';
+    }
+  }, [previewMode]);
 
   useEffect(() => {
     if (currentProject) {
@@ -1553,9 +1622,311 @@ end)
         updateGeneratedCode();
       }
       updateUndoRedoState();
+
+      // 更新选中积木状态
+      if (event.type === Blockly.Events.SELECTED) {
+        const selected = Blockly.common.getSelected();
+        setHasSelectedBlocks(!!selected);
+      }
+
+      // 拦截 BLOCK_DELETE 事件，阻止 bump 行为导致视角跳动
+      if (event.type === Blockly.Events.BLOCK_DELETE) {
+        isDeletingRef.current = true;
+        setTimeout(() => {
+          isDeletingRef.current = false;
+        }, 0);
+      }
+    });
+
+    // 拦截 bump 行为：当 isDeletingRef 为 true 时，跳过 bump
+    const originalBumpHandler = Blockly.bumpObjects.bumpIntoBoundsHandler(workspace);
+    workspace.addChangeListener((event: Blockly.Events.Abstract) => {
+      if (isDeletingRef.current) {
+        return;
+      }
+      originalBumpHandler(event);
     });
 
     workspaceRef.current = workspace;
+
+    // 取消注册默认的复制（Duplicate）右键菜单
+    try {
+      Blockly.ContextMenuRegistry.registry.unregister('blockDuplicate');
+    } catch (e) {
+      // 忽略错误
+    }
+
+    // 注册右键菜单复制选项（只复制到剪贴板，不自动粘贴）
+    if (!Blockly.ContextMenuRegistry.registry.getItem('blockCopy')) {
+      Blockly.ContextMenuRegistry.registry.register({
+        displayText: () => '复制',
+        preconditionFn: (scope: any) => {
+          return scope.block && scope.block.isDuplicatable() ? 'enabled' : 'disabled';
+        },
+        callback: (scope: any) => {
+          if (!scope.block) return;
+          try {
+            const xmlElement = Blockly.Xml.blockToDomWithXY(scope.block);
+            const xmlDoc = document.implementation.createDocument('', '', null);
+            const root = xmlDoc.createElement('xml');
+            root.appendChild(xmlElement);
+            const serializer = new XMLSerializer();
+            const text = serializer.serializeToString(root);
+            setClipboardContent(text);
+            toast.success('已复制到剪贴板');
+          } catch (error) {
+            toast.error('复制失败');
+          }
+        },
+        scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
+        id: 'blockCopy',
+        weight: 1,
+      });
+    }
+
+    // 注册右键菜单粘贴选项（工作区空白处）
+    if (!Blockly.ContextMenuRegistry.registry.getItem('blocklyPaste')) {
+      Blockly.ContextMenuRegistry.registry.register({
+        displayText: () => '粘贴',
+        preconditionFn: (scope: any) => {
+          return blockClipboardRef.current ? 'enabled' : 'disabled';
+        },
+        callback: (scope: any) => {
+          if (!blockClipboardRef.current) return;
+          try {
+            const xml = Blockly.utils.xml.textToDom(blockClipboardRef.current);
+            const blockElements = xml.getElementsByTagName('block');
+            const blockCount = blockElements.length;
+
+            if (blockCount > 50) {
+              toast.info(`正在粘贴 ${blockCount} 个积木，请稍候...`);
+            }
+
+            if (blockCount > 100) {
+              // 大量积木时分批处理
+              const BATCH_SIZE = 30;
+              const BATCH_DELAY = 50;
+              const blocksArray = Array.from(blockElements);
+              let currentIndex = 0;
+
+              const processBatch = () => {
+                const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
+                batch.forEach((blockEl) => {
+                  const newXml = document.implementation.createDocument('', '', null);
+                  const root = newXml.createElement('xml');
+                  root.appendChild(newXml.importNode(blockEl, true));
+                  try {
+                    Blockly.Xml.domToWorkspace(root.firstChild as Element, workspace);
+                  } catch (e) {
+                    console.warn('粘贴单个积木失败:', e);
+                  }
+                });
+                currentIndex += BATCH_SIZE;
+                if (currentIndex < blocksArray.length) {
+                  setTimeout(processBatch, BATCH_DELAY);
+                } else {
+                  toast.success(`成功粘贴 ${blockCount} 个积木`);
+                }
+              };
+
+              processBatch();
+            } else {
+              Blockly.Xml.domToWorkspace(xml, workspace);
+              toast.success('粘贴成功');
+            }
+          } catch (error) {
+            console.error('粘贴失败:', error);
+            toast.error('粘贴失败');
+          }
+        },
+        scopeType: Blockly.ContextMenuRegistry.ScopeType.WORKSPACE,
+        id: 'blocklyPaste',
+        weight: 101,
+      });
+    }
+
+    // 取消注册默认的复制粘贴快捷键（检查是否存在）
+    try {
+      const registry = Blockly.ShortcutRegistry.registry;
+      const shortcuts = registry.getRegistry();
+      if (shortcuts['blockly_copy']) {
+        registry.unregister('blockly_copy');
+      }
+      if (shortcuts['blockly_paste']) {
+        registry.unregister('blockly_paste');
+      }
+    } catch (e) {
+      // 忽略错误
+    }
+
+    // 拖拽工作区功能 - 右键长按拖动视角，不动积木
+    let isRightClickDragging = false;
+    let rightClickStartPos = { x: 0, y: 0 };
+    let scrollStartPos = { x: 0, y: 0 };
+    let rightClickTimer: number | null = null;
+    let isLongPress = false;
+    const LONG_PRESS_THRESHOLD = 300;
+
+    const handleContextMenu = (e: MouseEvent) => {
+      if (isLongPress) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const handleRightMouseDown = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      const target = e.target as Element;
+      if (target.closest('.blocklyWidgetDiv') || target.closest('.blocklyTooltip')) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      isLongPress = false;
+      rightClickStartPos = { x: e.clientX, y: e.clientY };
+      scrollStartPos = {
+        x: (workspace as any).scrollX || 0,
+        y: (workspace as any).scrollY || 0
+      };
+
+      rightClickTimer = window.setTimeout(() => {
+        isLongPress = true;
+        isRightClickDragging = true;
+        isDraggingWorkspaceRef.current = true;
+        document.body.style.cursor = 'grabbing';
+        rightClickTimer = null;
+      }, LONG_PRESS_THRESHOLD);
+    };
+
+    const handleRightMouseMove = (e: MouseEvent) => {
+      if (rightClickTimer !== null) {
+        const dx = Math.abs(e.clientX - rightClickStartPos.x);
+        const dy = Math.abs(e.clientY - rightClickStartPos.y);
+        if (dx > 5 || dy > 5) {
+          window.clearTimeout(rightClickTimer);
+          rightClickTimer = null;
+          isLongPress = false;
+        }
+      }
+
+      if (!isRightClickDragging) return;
+
+      const dx = e.clientX - rightClickStartPos.x;
+      const dy = e.clientY - rightClickStartPos.y;
+
+      const ws = workspace as any;
+      const metrics = ws.getMetrics();
+      if (!metrics) return;
+
+      const newScrollX = scrollStartPos.x - dx;
+      const newScrollY = scrollStartPos.y - dy;
+
+      const maxScrollX = Math.max(0, metrics.contentWidth - metrics.viewWidth);
+      const maxScrollY = Math.max(0, metrics.contentHeight - metrics.viewHeight);
+
+      ws.scrollX = Math.max(0, Math.min(newScrollX, maxScrollX));
+      ws.scrollY = Math.max(0, Math.min(newScrollY, maxScrollY));
+
+      const scrollbarX = ws.scrollbarX;
+      const scrollbarY = ws.scrollbarY;
+      if (scrollbarX) scrollbarX.setPosition(ws.scrollX);
+      if (scrollbarY) scrollbarY.setPosition(ws.scrollY);
+    };
+
+    const handleRightMouseUp = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+
+      if (rightClickTimer !== null) {
+        window.clearTimeout(rightClickTimer);
+        rightClickTimer = null;
+      }
+
+      if (isRightClickDragging) {
+        isRightClickDragging = false;
+        isDraggingWorkspaceRef.current = false;
+        document.body.style.cursor = '';
+      }
+
+      setTimeout(() => {
+        isLongPress = false;
+      }, 50);
+    };
+
+    const handlePreviewMouseDown = (e: MouseEvent) => {
+      if (!previewMode) return;
+      if (e.button !== 0) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      isPreviewDraggingRef.current = true;
+      previewDragStartRef.current = { x: e.clientX, y: e.clientY };
+      previewScrollStartRef.current = {
+        x: (workspace as any).scrollX || 0,
+        y: (workspace as any).scrollY || 0
+      };
+      document.body.style.cursor = 'grabbing';
+    };
+
+    const handlePreviewMouseMove = (e: MouseEvent) => {
+      if (!isPreviewDraggingRef.current) return;
+
+      const dx = e.clientX - previewDragStartRef.current.x;
+      const dy = e.clientY - previewDragStartRef.current.y;
+
+      const ws = workspace as any;
+      const metrics = ws.getMetrics();
+      if (!metrics) return;
+
+      const newScrollX = previewScrollStartRef.current.x - dx;
+      const newScrollY = previewScrollStartRef.current.y - dy;
+
+      const maxScrollX = Math.max(0, metrics.contentWidth - metrics.viewWidth);
+      const maxScrollY = Math.max(0, metrics.contentHeight - metrics.viewHeight);
+
+      ws.scrollX = Math.max(0, Math.min(newScrollX, maxScrollX));
+      ws.scrollY = Math.max(0, Math.min(newScrollY, maxScrollY));
+
+      const scrollbarX = ws.scrollbarX;
+      const scrollbarY = ws.scrollbarY;
+      if (scrollbarX) scrollbarX.setPosition(ws.scrollX);
+      if (scrollbarY) scrollbarY.setPosition(ws.scrollY);
+    };
+
+    const handlePreviewMouseUp = (e: MouseEvent) => {
+      if (!isPreviewDraggingRef.current) return;
+
+      isPreviewDraggingRef.current = false;
+      document.body.style.cursor = previewMode ? 'grab' : '';
+    };
+
+    mouseDownHandlerRef.current = handleRightMouseDown;
+    mouseMoveHandlerRef.current = handleRightMouseMove;
+    mouseUpHandlerRef.current = handleRightMouseUp;
+
+    const blocklySvg = containerRef.current?.querySelector('.blocklySvg');
+    if (blocklySvg) {
+      blocklySvg.addEventListener('contextmenu', handleContextMenu as any);
+      blocklySvg.addEventListener('mousedown', handleRightMouseDown as any);
+      blocklySvg.addEventListener('mousedown', handlePreviewMouseDown as any);
+      document.addEventListener('mousemove', handleRightMouseMove);
+      document.addEventListener('mousemove', handlePreviewMouseMove);
+      document.addEventListener('mouseup', handleRightMouseUp);
+      document.addEventListener('mouseup', handlePreviewMouseUp);
+    }
+
+    (workspace as any).workspaceDragMouseDownHandler = handleRightMouseDown;
+    (workspace as any).workspaceDragMouseMoveHandler = handleRightMouseMove;
+    (workspace as any).workspaceDragMouseUpHandler = handleRightMouseUp;
+    (workspace as any).workspaceDragContextMenuHandler = handleContextMenu;
+
+    workspace.cleanUp_ = function() {
+      Blockly.WorkspaceSvg.prototype.cleanUp_.call(this);
+      (this as any).scrollX = 0;
+      (this as any).scrollY = 0;
+    };
   };
 
   const updateUndoRedoState = useCallback(() => {
@@ -1602,6 +1973,100 @@ end)
       setZoomLevel(1.0);
     }
   }, []);
+
+  // 复制积木到剪贴板
+  const handleCopyBlocks = useCallback(() => {
+    const workspace = workspaceRef.current as Blockly.WorkspaceSvg | null;
+    if (!workspace) return;
+
+    const selectedBlock = Blockly.common.getSelected();
+    if (!selectedBlock) {
+      toast.warning('请先选择要复制的积木');
+      return;
+    }
+
+    try {
+      // 只序列化选中的积木
+      const xmlElement = Blockly.Xml.blockToDomWithXY(selectedBlock);
+
+      // 创建临时文档片段
+      const xmlDoc = document.implementation.createDocument('', '', null);
+      const root = xmlDoc.createElement('xml');
+      root.appendChild(xmlElement);
+
+      const serializer = new XMLSerializer();
+      const text = serializer.serializeToString(root);
+      setClipboardContent(text);
+
+      // 重新选中积木
+      selectedBlock.select();
+      toast.success('已复制积木到剪贴板');
+    } catch (error) {
+      toast.error('复制失败');
+    }
+  }, []);
+
+  // 从剪贴板粘贴积木 - 优化版，支持大量积木分批处理
+  const handlePasteBlocks = useCallback(() => {
+    const workspace = workspaceRef.current as Blockly.WorkspaceSvg | null;
+    if (!workspace) return;
+
+    if (!blockClipboard) {
+      toast.warning('剪贴板为空，请先复制积木');
+      return;
+    }
+
+    try {
+      const xml = Blockly.utils.xml.textToDom(blockClipboard);
+      const blockElements = xml.getElementsByTagName('block');
+      const blockCount = blockElements.length;
+
+      if (blockCount > 50) {
+        toast.info(`正在粘贴 ${blockCount} 个积木，请稍候...`);
+      }
+
+      if (blockCount > 100) {
+        // 大量积木时分批处理，避免 DOM 操作过载
+        const BATCH_SIZE = 30;
+        const BATCH_DELAY = 50;
+        const blocksArray = Array.from(blockElements);
+
+        let currentIndex = 0;
+
+        const processBatch = () => {
+          const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
+
+          batch.forEach((blockEl) => {
+            const newXml = document.implementation.createDocument('', '', null);
+            const root = newXml.createElement('xml');
+            root.appendChild(newXml.importNode(blockEl, true));
+            try {
+              Blockly.Xml.domToWorkspace(root.firstChild as Element, workspace);
+            } catch (e) {
+              console.warn('粘贴单个积木失败:', e);
+            }
+          });
+
+          currentIndex += BATCH_SIZE;
+
+          if (currentIndex < blocksArray.length) {
+            setTimeout(processBatch, BATCH_DELAY);
+          } else {
+            toast.success(`成功粘贴 ${blockCount} 个积木`);
+          }
+        };
+
+        processBatch();
+      } else {
+        // 小量积木直接粘贴
+        Blockly.Xml.domToWorkspace(xml, workspace);
+        toast.success('粘贴成功');
+      }
+    } catch (error) {
+      console.error('粘贴失败:', error);
+      toast.error('粘贴失败');
+    }
+  }, [blockClipboard]);
 
   // 全屏切换功能
   const toggleFullscreen = useCallback(() => {
@@ -1794,6 +2259,10 @@ end)
             e.preventDefault();
             handleRedo();
             break;
+          case 'p':
+            e.preventDefault();
+            setPreviewMode(prev => !prev);
+            break;
         }
       }
     };
@@ -1804,6 +2273,15 @@ end)
 
   const handleDeleteProject = async () => {
     if (!projectToDelete) return;
+
+    if (deleteConfirmStep === 1) {
+      setDeleteConfirmStep(2);
+      return;
+    }
+
+    if (deleteConfirmStep === 2 && deleteConfirmInput !== projectToDelete.name) {
+      return;
+    }
 
     setLoading(true);
     try {
@@ -1819,6 +2297,8 @@ end)
         await loadProjects();
         setShowDeleteDialog(false);
         setProjectToDelete(null);
+        setDeleteConfirmStep(1);
+        setDeleteConfirmInput('');
       } else {
         toast.error(result.message || '删除失败');
       }
@@ -1873,12 +2353,24 @@ end)
 
     setLoading(true);
     try {
-      updateGeneratedCode();
+      // 立即同步生成代码（不使用防抖）
+      const projectName = currentProject?.name?.trim();
+      const metadata: PluginMetadata = {
+        name: projectName || 'untitled',
+        version: currentProject?.version || '1.0.0',
+        description: currentProject?.description || ''
+      };
+      const freshCode = generateLuaCode(workspaceRef.current!, metadata);
+      const freshGeneratedCode = freshCode.full;
+
+      // 从生成的代码中提取 BLOCKLY_CONFIG（单行格式）
+      const configMatch = freshGeneratedCode.match(/-- \[BLOCKLY_CONFIG\] (.+?)(?:\n|$)/);
+      const configContent = configMatch ? configMatch[1].trim() : '{}';
       const result = await exportPlugin(
-        generatedCode,
+        freshGeneratedCode,
         selectedAccountId,
         exportMetadata.name.trim(),
-        undefined,
+        configContent,
         forceOverwrite
       );
       
@@ -1943,23 +2435,55 @@ end)
           const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
           project.name = `${project.name}_${timestamp}`;
         }
-        
-        // 保存导入的项目
-        const savedProject = await createBlocklyProject(project.name, project.description, project.version);
-        if (savedProject) {
-          await saveBlocklyProject(savedProject.id, project.xmlContent, project.description, project.version);
-          
-          // 刷新项目列表
+
+        // 创建项目文件夹
+        const createResult = await createBlocklyProject(project.name);
+        if (createResult.success) {
+          // 刷新项目列表获取新项目的路径
           const updatedProjects = await listBlocklyProjects();
           setProjects(updatedProjects);
-          
-          // 打开导入的项目
-          await loadProject(savedProject);
-          
-          toast.success('项目导入成功');
-          setShowImportDialog(false);
+
+          // 找到新创建的项目
+          const newProject = updatedProjects.find(p => p.name === project.name);
+          if (newProject) {
+            // 加载项目并设置内容
+            const loadedProject = await loadBlocklyProject(newProject.path);
+            if (loadedProject) {
+              // 更新项目内容
+              const projectToSave = {
+                ...loadedProject,
+                xmlContent: project.xmlContent,
+                description: project.description,
+                version: project.version,
+              };
+
+              const saveResult = await saveBlocklyProject(projectToSave);
+              if (saveResult.success) {
+                // 加载到工作区
+                setCurrentProject(projectToSave);
+                if (workspaceRef.current && project.xmlContent) {
+                  workspaceRef.current.clear();
+                  const xml = Blockly.utils.xml.textToDom(project.xmlContent);
+                  Blockly.Xml.domToWorkspace(xml, workspaceRef.current);
+                }
+                setHasUnsavedChanges(false);
+                updateGeneratedCode();
+
+                toast.success('项目导入成功');
+                setShowImportDialog(false);
+              } else {
+                toast.error(saveResult.message || '保存项目失败');
+              }
+            } else {
+              toast.error('加载新项目失败');
+            }
+          } else {
+            toast.error('找不到新创建的项目');
+          }
+        } else if (createResult.exists) {
+          toast.error('项目已存在');
         } else {
-          toast.error('保存导入的项目失败');
+          toast.error(createResult.message || '创建项目失败');
         }
       }
     } catch (error) {
@@ -2137,6 +2661,25 @@ end)
               <div className="w-px h-4 bg-gray-600 mx-1" />
               <div className="flex items-center gap-0.5">
                 <button
+                  onClick={handleCopyBlocks}
+                  disabled={!hasSelectedBlocks}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="复制积木"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handlePasteBlocks}
+                  disabled={!blockClipboard}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="粘贴积木"
+                >
+                  <Clipboard className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="w-px h-4 bg-gray-600 mx-1" />
+              <div className="flex items-center gap-0.5">
+                <button
                   onClick={handleZoomOut}
                   className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
                   title="缩小"
@@ -2162,6 +2705,19 @@ end)
                 </button>
               </div>
               <div className="w-px h-4 bg-gray-600 mx-1" />
+              <button
+                onClick={() => setPreviewMode(!previewMode)}
+                className={`px-2 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1 ${
+                  previewMode
+                    ? 'bg-orange-500 text-white hover:bg-orange-600'
+                    : 'bg-gray-600 text-white hover:bg-gray-700'
+                }`}
+                title="预览模式 (Ctrl+P)"
+              >
+                <Eye className="w-4 h-4" />
+                <span className="hidden sm:inline">预览</span>
+              </button>
+
               <button
                 onClick={toggleFullscreen}
                 className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
@@ -2233,9 +2789,9 @@ end)
           </div>
 
           <div className="flex-1 relative">
-            <div 
+            <div
               ref={containerRef}
-              className="w-full h-full"
+              className={`w-full h-full ${previewMode ? 'preview-mode' : ''}`}
               style={{ overflow: 'visible', touchAction: 'none' }}
             />
             
@@ -2444,7 +3000,11 @@ end)
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setShowDeleteDialog(false)}
+            onClick={() => {
+              setShowDeleteDialog(false);
+              setProjectToDelete(null);
+              setDeleteConfirmStep(1);
+            }}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -2458,17 +3018,35 @@ end)
                   <div className="p-2 rounded-full bg-red-100 text-red-600">
                     <AlertTriangle className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-bold text-white">确认删除</h3>
+                  <h3 className="text-lg font-bold text-white">
+                    {deleteConfirmStep === 1 ? '确认删除' : '最终确认'}
+                  </h3>
                 </div>
                 <p className="text-gray-400">
-                  确定要删除项目 "{projectToDelete.name}" 吗？此操作不可恢复。
+                  {deleteConfirmStep === 1
+                    ? `确定要删除项目 "${projectToDelete.name}" 吗？此操作不可恢复。`
+                    : `您即将永久删除 "${projectToDelete.name}"。请输入项目名称以确认。`
+                  }
                 </p>
+                {deleteConfirmStep === 2 && (
+                  <div className="mt-4">
+                    <input
+                      type="text"
+                      value={deleteConfirmInput}
+                      onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#2A2E38] border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-red-500 outline-none"
+                      placeholder={`输入 "${projectToDelete.name}"`}
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-3 p-4 border-t border-gray-700">
                 <button
                   onClick={() => {
                     setShowDeleteDialog(false);
                     setProjectToDelete(null);
+                    setDeleteConfirmInput('');
+                    setDeleteConfirmStep(1);
                   }}
                   className="px-4 py-2 text-gray-400 hover:text-white rounded-lg transition-colors"
                 >
@@ -2476,9 +3054,10 @@ end)
                 </button>
                 <button
                   onClick={handleDeleteProject}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                  disabled={deleteConfirmStep === 2 && deleteConfirmInput !== projectToDelete.name}
+                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
                 >
-                  删除
+                  {deleteConfirmStep === 1 ? '继续' : '永久删除'}
                 </button>
               </div>
             </motion.div>

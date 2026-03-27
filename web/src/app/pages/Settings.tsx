@@ -134,7 +134,7 @@ export function Settings() {
 
         toast.success('浏览器缓存已清除（包括JS资源）');
         // 强制刷新页面（不使用缓存）
-        window.location.reload(true);
+        window.location.reload();
       } catch (error) {
         console.error('清除缓存失败:', error);
         toast.error('清除缓存失败');
@@ -283,7 +283,7 @@ export function Settings() {
           </div>
 
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            LLBot 是一个基于 Go + Lua 开发的高性能 QQ 机器人框架，支持多账号管理、插件热更新等特性。
+            OVO 偷懒的第N天
           </p>
           <div className="flex flex-wrap gap-3">
             <motion.a
