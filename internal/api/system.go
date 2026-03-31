@@ -641,7 +641,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 		// 从环境变量获取版本号，默认为v3.6
 		version := os.Getenv("LLBOT_VERSION")
 		if version == "" {
-			version = "v3.6"
+			version = "v4.5"
 		}
 
 		c.JSON(http.StatusOK, gin.H{

@@ -126,7 +126,7 @@ func validateCronField(field, fieldName string, minVal, maxVal int) error {
 
 func (m *Manager) luaRegisterInterval(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "注册间隔任务失败")
@@ -179,7 +179,7 @@ func (m *Manager) luaRegisterInterval(instance *LuaPluginInstance) func(*lua.LSt
 
 func (m *Manager) luaRegisterCron(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "注册Cron任务失败")
@@ -230,7 +230,7 @@ func (m *Manager) luaRegisterCron(instance *LuaPluginInstance) func(*lua.LState)
 
 func (m *Manager) luaRegisterAt(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "注册定时任务失败")
@@ -263,7 +263,7 @@ func (m *Manager) luaRegisterAt(instance *LuaPluginInstance) func(*lua.LState) i
 
 func (m *Manager) luaRegisterDelay(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "注册延迟任务失败")
@@ -296,7 +296,7 @@ func (m *Manager) luaRegisterDelay(instance *LuaPluginInstance) func(*lua.LState
 
 func (m *Manager) luaRegisterOnce(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "注册一次性任务失败")
@@ -329,7 +329,7 @@ func (m *Manager) luaRegisterOnce(instance *LuaPluginInstance) func(*lua.LState)
 
 func (m *Manager) luaCancelTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "取消任务失败")
@@ -349,7 +349,7 @@ func (m *Manager) luaCancelTask(instance *LuaPluginInstance) func(*lua.LState) i
 
 func (m *Manager) luaGetTaskStatus(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "获取任务状态失败")
@@ -383,7 +383,7 @@ func (m *Manager) luaGetTaskStatus(instance *LuaPluginInstance) func(*lua.LState
 
 func (m *Manager) luaListTasks(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "列出任务失败")
@@ -421,7 +421,7 @@ func (m *Manager) luaListTasks(instance *LuaPluginInstance) func(*lua.LState) in
 
 func (m *Manager) luaPauseTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "暂停任务失败")
@@ -441,7 +441,7 @@ func (m *Manager) luaPauseTask(instance *LuaPluginInstance) func(*lua.LState) in
 
 func (m *Manager) luaResumeTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "恢复任务失败")
@@ -461,7 +461,7 @@ func (m *Manager) luaResumeTask(instance *LuaPluginInstance) func(*lua.LState) i
 
 func (m *Manager) luaCancelAllTasks(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		pluginName := instance.Name
+		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.timerSystem == nil {
 			return luaAPIError(L, fmt.Errorf("定时任务系统未初始化"), "取消所有任务失败")

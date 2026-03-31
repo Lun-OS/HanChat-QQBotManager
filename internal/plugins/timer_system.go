@@ -41,9 +41,11 @@ type TimerSystem struct {
 	taskSemaphore      chan struct{}
 	// 任务统计信息
 	stats TimerStats
-	// 用于计算平均执行时间
+	// 用于计算平均执行时间 - 使用环形缓冲区实现O(1)操作
 	execTimes    []time.Duration
-	maxExecTimes int // 保存的最大执行时间记录数
+	execTimesIdx int          // 环形缓冲区当前索引
+	execTimesLen int          // 当前有效元素数量
+	maxExecTimes int          // 保存的最大执行时间记录数
 }
 
 func NewTimerSystem(manager *Manager, logger *zap.SugaredLogger) *TimerSystem {
@@ -63,7 +65,9 @@ func NewTimerSystem(manager *Manager, logger *zap.SugaredLogger) *TimerSystem {
 		maxConcurrentTasks: maxConcurrent,
 		taskSemaphore:      make(chan struct{}, maxConcurrent),
 		maxExecTimes:       maxExecTimes,
-		execTimes:          make([]time.Duration, 0, maxExecTimes),
+		execTimes:          make([]time.Duration, maxExecTimes),
+		execTimesIdx:       0,
+		execTimesLen:       0,
 		stats: TimerStats{
 			StartTime:        time.Now(),
 			LastTaskCreated:  time.Time{},
@@ -74,6 +78,8 @@ func NewTimerSystem(manager *Manager, logger *zap.SugaredLogger) *TimerSystem {
 	ts.timeWheel = NewMultiLevelTimeWheel(logger)
 	ts.taskManager = NewTaskManager(ts, logger)
 
+	// 短暂延迟后启动，确保系统完全初始化
+	time.Sleep(10 * time.Millisecond)
 	ts.timeWheel.Start()
 
 	logger.Info("定时任务系统已启动")
@@ -88,11 +94,11 @@ func (ts *TimerSystem) GetStats() TimerStats {
 
 	// 计算平均执行时间
 	var totalExecTime time.Duration
-	if len(ts.execTimes) > 0 {
-		for _, t := range ts.execTimes {
-			totalExecTime += t
+	if ts.execTimesLen > 0 {
+		for i := 0; i < ts.execTimesLen; i++ {
+			totalExecTime += ts.execTimes[i]
 		}
-		ts.stats.AvgExecTime = totalExecTime / time.Duration(len(ts.execTimes))
+		ts.stats.AvgExecTime = totalExecTime / time.Duration(ts.execTimesLen)
 	}
 
 	// 更新任务数量统计
@@ -117,12 +123,12 @@ func (ts *TimerSystem) UpdateStats(task *PluginTimerTask, success bool, execTime
 	ts.stats.TotalExecCount++
 	ts.stats.LastTaskExecuted = time.Now()
 
-	// 更新执行时间统计
-	if len(ts.execTimes) >= ts.maxExecTimes {
-		// 移除最旧的记录
-		ts.execTimes = ts.execTimes[1:]
+	// 使用环形缓冲区更新执行时间统计 - O(1)操作
+	ts.execTimes[ts.execTimesIdx] = execTime
+	ts.execTimesIdx = (ts.execTimesIdx + 1) % ts.maxExecTimes
+	if ts.execTimesLen < ts.maxExecTimes {
+		ts.execTimesLen++
 	}
-	ts.execTimes = append(ts.execTimes, execTime)
 
 	// 更新最大和最小执行时间
 	if execTime > ts.stats.MaxExecTime {
@@ -150,7 +156,9 @@ func (ts *TimerSystem) ResetStats() {
 		LastTaskCreated:  time.Time{},
 		LastTaskExecuted: time.Time{},
 	}
-	ts.execTimes = make([]time.Duration, 0, ts.maxExecTimes)
+	ts.execTimes = make([]time.Duration, ts.maxExecTimes)
+	ts.execTimesIdx = 0
+	ts.execTimesLen = 0
 }
 
 // LogStats 记录定时任务系统统计信息

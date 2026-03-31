@@ -55,6 +55,9 @@ import {
 import { BlocklyProject, BlocklyProjectFile, PluginMetadata } from './types';
 import { pluginManagerApi, AccountInfo } from '../services/api';
 import Editor from '@monaco-editor/react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Button } from '../components/ui/button';
+import { multilineEditorBridge } from './multilineEditorBridge';
 
 initChineseLocale();
 defineCustomBlocks();
@@ -100,6 +103,12 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
   // 剪贴板状态
   const [blockClipboard, setBlockClipboard] = useState<string | null>(null);
   const blockClipboardRef = useRef<string | null>(null);
+
+  // 多行编辑器状态
+  const [showMultilineEditor, setShowMultilineEditor] = useState(false);
+  const [multilineEditorValue, setMultilineEditorValue] = useState('');
+  const [multilineEditorLanguage, setMultilineEditorLanguage] = useState('lua');
+  const multilineEditorFieldRef = useRef<Blockly.Field | null>(null);
 
   // 剪贴板大小限制（防止内存溢出）
   const CLIPBOARD_MAX_SIZE = 1024 * 1024; // 1MB
@@ -1497,6 +1506,32 @@ end)
     loadAvailableAccounts();
   }, []);
 
+  // 设置多行编辑器回调
+  useEffect(() => {
+    multilineEditorBridge.setCallbacks({
+      openEditor: (value: string, field: Blockly.Field, language: string) => {
+        setMultilineEditorValue(value);
+        setMultilineEditorLanguage(language);
+        multilineEditorFieldRef.current = field;
+        setShowMultilineEditor(true);
+      },
+    });
+  }, []);
+
+  // 保存多行编辑器内容
+  const handleSaveMultilineEditor = useCallback(() => {
+    if (multilineEditorFieldRef.current) {
+      multilineEditorFieldRef.current.setValue(multilineEditorValue);
+    }
+    setShowMultilineEditor(false);
+  }, [multilineEditorValue]);
+
+  // 取消多行编辑器
+  const handleCancelMultilineEditor = useCallback(() => {
+    setShowMultilineEditor(false);
+    multilineEditorFieldRef.current = null;
+  }, []);
+
   useEffect(() => {
     if (containerRef.current && !workspaceRef.current) {
       initWorkspace();
@@ -1693,6 +1728,10 @@ end)
         },
         callback: (scope: any) => {
           if (!blockClipboardRef.current) return;
+          if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
+            toast.error('工作区已失效，请刷新页面');
+            return;
+          }
           try {
             const xml = Blockly.utils.xml.textToDom(blockClipboardRef.current);
             const blockElements = xml.getElementsByTagName('block');
@@ -1710,13 +1749,17 @@ end)
               let currentIndex = 0;
 
               const processBatch = () => {
+                if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
+                  toast.error('工作区已失效，请刷新页面');
+                  return;
+                }
                 const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
                 batch.forEach((blockEl) => {
                   const newXml = document.implementation.createDocument('', '', null);
                   const root = newXml.createElement('xml');
                   root.appendChild(newXml.importNode(blockEl, true));
                   try {
-                    Blockly.Xml.domToWorkspace(root.firstChild as Element, workspace);
+                    Blockly.Xml.domToWorkspace(root.firstChild as Element, workspaceRef.current);
                   } catch (e) {
                     console.warn('粘贴单个积木失败:', e);
                   }
@@ -1725,13 +1768,15 @@ end)
                 if (currentIndex < blocksArray.length) {
                   setTimeout(processBatch, BATCH_DELAY);
                 } else {
+                  workspaceRef.current.render();
                   toast.success(`成功粘贴 ${blockCount} 个积木`);
                 }
               };
 
               processBatch();
             } else {
-              Blockly.Xml.domToWorkspace(xml, workspace);
+              Blockly.Xml.domToWorkspace(xml, workspaceRef.current);
+              workspaceRef.current.render();
               toast.success('粘贴成功');
             }
           } catch (error) {
@@ -2009,7 +2054,10 @@ end)
   // 从剪贴板粘贴积木 - 优化版，支持大量积木分批处理
   const handlePasteBlocks = useCallback(() => {
     const workspace = workspaceRef.current as Blockly.WorkspaceSvg | null;
-    if (!workspace) return;
+    if (!workspace) {
+      toast.error('工作区未初始化');
+      return;
+    }
 
     if (!blockClipboard) {
       toast.warning('剪贴板为空，请先复制积木');
@@ -2034,6 +2082,11 @@ end)
         let currentIndex = 0;
 
         const processBatch = () => {
+          if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
+            toast.error('工作区已失效，请刷新页面');
+            return;
+          }
+
           const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
 
           batch.forEach((blockEl) => {
@@ -2041,7 +2094,7 @@ end)
             const root = newXml.createElement('xml');
             root.appendChild(newXml.importNode(blockEl, true));
             try {
-              Blockly.Xml.domToWorkspace(root.firstChild as Element, workspace);
+              Blockly.Xml.domToWorkspace(root.firstChild as Element, workspaceRef.current);
             } catch (e) {
               console.warn('粘贴单个积木失败:', e);
             }
@@ -2052,6 +2105,7 @@ end)
           if (currentIndex < blocksArray.length) {
             setTimeout(processBatch, BATCH_DELAY);
           } else {
+            workspaceRef.current.render();
             toast.success(`成功粘贴 ${blockCount} 个积木`);
           }
         };
@@ -2060,6 +2114,7 @@ end)
       } else {
         // 小量积木直接粘贴
         Blockly.Xml.domToWorkspace(xml, workspace);
+        workspace.render();
         toast.success('粘贴成功');
       }
     } catch (error) {
@@ -3284,6 +3339,67 @@ end)
                 >
                   关闭
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* 多行编辑器对话框 */}
+        {showMultilineEditor && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={handleCancelMultilineEditor}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1D2129] rounded-xl shadow-xl max-w-5xl w-full h-[85vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-[#165DFF]" />
+                  编辑代码
+                </h3>
+                <button
+                  onClick={handleCancelMultilineEditor}
+                  className="p-1 text-gray-400 hover:text-white rounded"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden" style={{ minHeight: '500px' }}>
+                <Editor
+                  height="100%"
+                  defaultLanguage={multilineEditorLanguage}
+                  value={multilineEditorValue}
+                  onChange={(value) => setMultilineEditorValue(value || '')}
+                  theme="vs-dark"
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                  }}
+                />
+              </div>
+              <div className="p-4 border-t border-gray-700 flex justify-end gap-3">
+                <Button
+                  variant="secondary"
+                  onClick={handleCancelMultilineEditor}
+                >
+                  取消
+                </Button>
+                <Button
+                  onClick={handleSaveMultilineEditor}
+                >
+                  确定
+                </Button>
               </div>
             </motion.div>
           </motion.div>

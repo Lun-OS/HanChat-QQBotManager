@@ -203,7 +203,7 @@ func (him *HTTPInterfaceManager) HandleHTTPRequest(c *utils.HTTPRequestContext) 
 
 		L.Push(ctxTable)
 
-		if err := L.PCall(1, 1, nil); err != nil {
+		if err := instance.sandbox.SafeCall(L, handler.Handler, ctxTable); err != nil {
 			// 检查是否是上下文取消导致的错误
 			if ctx.Err() != nil {
 				errorChan <- fmt.Errorf("执行被中断: %w", ctx.Err())

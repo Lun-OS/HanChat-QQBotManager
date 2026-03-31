@@ -902,14 +902,20 @@ export function WebQQ() {
     if (!selectedBot) return;
     try {
       const response = await userApi.getFriendList(selectedBot);
-      // 后端返回格式：{status: 'ok', data: {data: [...], echo: ..., status: 'ok'}}
-      const botData = response.data?.data;
-      if (Array.isArray(botData)) {
-        setFriends(botData.map((f: any) => ({
+      // 后端返回格式：{status: 'ok', retcode: 0, data: [...]}
+      const outerStatus = response.status;
+      const outerRetcode = response.retcode;
+      const friendList = response.data;
+
+      if (outerStatus === 'ok' && outerRetcode === 0 && Array.isArray(friendList)) {
+        setFriends(friendList.map((f: any) => ({
           user_id: String(f.user_id),
           nickname: f.nickname,
           remark: f.remark,
         })));
+      } else if (outerStatus !== 'ok' || outerRetcode !== 0) {
+        console.error('加载好友列表失败:', response.message);
+        toast.error('加载好友列表失败: ' + (response.message || `API错误 (${outerRetcode})`));
       }
     } catch (error) {
       toast.error('加载好友列表失败');

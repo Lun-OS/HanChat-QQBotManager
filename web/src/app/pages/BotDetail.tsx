@@ -45,7 +45,6 @@ interface BotStats {
   uptime: string;
   msg_received: number;
   msg_sent: number;
-  lua_memory: string;
   llbot_version: string;
   ws_name: string;
 }
@@ -69,7 +68,6 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
     uptime: '-',
     msg_received: 0,
     msg_sent: 0,
-    lua_memory: '-',
     llbot_version: '-',
     ws_name: '-',
   });
@@ -104,15 +102,13 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
       console.log('提取的stat:', stat);
       console.log('提取的versionData:', versionData);
 
-      // 获取Lua内存和WS名称
-      let luaMemory = '-';
+      // 获取WS名称
       let wsName = '-';
       try {
         const containerRes = await pluginApi.getAccountContainers();
         if (containerRes.success && containerRes.data) {
           const container = containerRes.data.find((c: any) => c.self_id === selfId);
           if (container) {
-            luaMemory = formatBytes(container.memory_usage || 0);
             wsName = container.ws_name || bot?.custom_name || '-';
           }
         }
@@ -124,7 +120,6 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
         uptime: formatUptime((stat as any).startup_time),
         msg_received: (stat as any).message_received || 0,
         msg_sent: (stat as any).message_sent || 0,
-        lua_memory: luaMemory,
         llbot_version: (versionData as any).app_version || (versionData as any).version || '-',
         ws_name: wsName,
       });
@@ -135,15 +130,6 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
       setLoading(false);
     }
   }, [selfId, bot]);
-
-  // 格式化字节大小
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
 
   // 格式化运行时间
   const formatUptime = (startupTime: number): string => {
@@ -178,12 +164,11 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {[
           { label: '运行时间', value: stats.uptime, color: 'text-blue-600', icon: Activity },
           { label: '收到消息', value: stats.msg_received, color: 'text-green-600', icon: TrendingUp },
           { label: '发送消息', value: stats.msg_sent, color: 'text-purple-600', icon: Send },
-          { label: 'Lua内存', value: stats.lua_memory, color: 'text-orange-600', icon: Package },
           { label: 'LLBot版本', value: stats.llbot_version, color: 'text-cyan-600', icon: Settings },
           { label: 'WS名称', value: stats.ws_name, color: 'text-pink-600', icon: Power }
         ].map((stat, idx) => (
@@ -258,8 +243,14 @@ const ApiDebug = ({ botId }: { botId: string }) => {
   };
 
   const handleFormChange = (fieldName: string, value: any, type: string) => {
-    const newValue = type === 'integer' || type === 'number' ? 
-      (value === '' ? '' : Number(value)) : value;
+    let newValue: any;
+    if (type === 'integer' || type === 'number') {
+      newValue = value === '' ? '' : Number(value);
+    } else if (type === 'boolean') {
+      newValue = Boolean(value);
+    } else {
+      newValue = value;
+    }
     
     setFormData(prev => ({ ...prev, [fieldName]: newValue }));
     
@@ -426,7 +417,19 @@ const ApiDebug = ({ botId }: { botId: string }) => {
                               )}
                             </label>
                             <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
-                            {type === 'array' ? (
+                            {type === 'boolean' ? (
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={fieldValue === true || fieldValue === 'true'}
+                                  onChange={e => handleFormChange(fieldName, e.target.checked, type)}
+                                  className="w-4 h-4 text-[#165DFF] rounded border-gray-300 focus:ring-[#165DFF]"
+                                />
+                                <span className="text-sm text-gray-600 dark:text-gray-400">
+                                  {fieldValue === true || fieldValue === 'true' ? '是' : '否'}
+                                </span>
+                              </label>
+                            ) : type === 'array' ? (
                               <textarea
                                 value={fieldValue}
                                 onChange={e => handleFormChange(fieldName, e.target.value, type)}
@@ -494,11 +497,21 @@ const Plugins = ({ selfId }: { selfId: string }) => {
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [pluginLogs, setPluginLogs] = useState<string[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [configMode, setConfigMode] = useState<'simple' | 'advanced'>('simple');
+  const [isJsonValid, setIsJsonValid] = useState(true);
 
-  // 当配置弹窗打开时，同步文本
+  // 当配置弹窗打开时，同步文本并验证JSON格式
   useEffect(() => {
     if (configModalOpen && selectedPlugin) {
       setPluginConfigText(JSON.stringify(pluginConfig, null, 2));
+      // 验证JSON格式
+      try {
+        JSON.parse(JSON.stringify(pluginConfig, null, 2));
+        setIsJsonValid(true);
+      } catch {
+        setIsJsonValid(false);
+        setConfigMode('simple');
+      }
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
   }, [configModalOpen, selectedPlugin, pluginConfig]);
@@ -583,13 +596,28 @@ const Plugins = ({ selfId }: { selfId: string }) => {
       if (res.success) {
         const config = res.data || {};
         setPluginConfig(config);
-        setPluginConfigText(JSON.stringify(config, null, 2));
+        const configText = JSON.stringify(config, null, 2);
+        setPluginConfigText(configText);
+        // 验证JSON格式
+        try {
+          JSON.parse(configText);
+          setIsJsonValid(true);
+        } catch {
+          setIsJsonValid(false);
+        }
       }
     } catch (error) {
       toast.error('获取配置失败');
       const config = plugin.config || {};
       setPluginConfig(config);
-      setPluginConfigText(JSON.stringify(config, null, 2));
+      const configText = JSON.stringify(config, null, 2);
+      setPluginConfigText(configText);
+      try {
+        JSON.parse(configText);
+        setIsJsonValid(true);
+      } catch {
+        setIsJsonValid(false);
+      }
     }
   };
 
@@ -647,16 +675,17 @@ const Plugins = ({ selfId }: { selfId: string }) => {
   }
 
   return (
-    <motion.div 
-      className="space-y-6"
+    <motion.div
+      className="space-y-6 flex flex-col overflow-hidden"
+      style={{ maxHeight: 'calc(100vh - 280px)' }}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="flex justify-between items-center bg-white dark:bg-[#1D2129] p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800">
+      <div className="flex justify-between items-center bg-white dark:bg-[#1D2129] p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex-shrink-0">
         <div className="relative">
-          <input 
-            type="text" 
-            placeholder="搜索插件..." 
+          <input
+            type="text"
+            placeholder="搜索插件..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className="pl-10 pr-4 py-2 bg-gray-50 dark:bg-[#2A2E38] rounded-lg text-sm w-64 border-none outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
@@ -664,7 +693,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
           <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         </div>
         <div className="flex gap-2">
-          <motion.button 
+          <motion.button
             onClick={handleCheckPluginFiles}
             className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
             title="检查插件文件"
@@ -673,7 +702,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
           >
             <ShieldCheck className="w-5 h-5" />
           </motion.button>
-          <motion.button 
+          <motion.button
             onClick={fetchPlugins}
             className="p-2 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 rounded-lg transition-colors"
             whileHover={{ rotate: 180 }}
@@ -684,8 +713,9 @@ const Plugins = ({ selfId }: { selfId: string }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredPlugins.map((plugin, idx) => (
+      <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 350px)' }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 content-start">
+          {filteredPlugins.map((plugin, idx) => (
           <motion.div 
             key={`${plugin.self_id}/${plugin.name}`}
             className="bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-48 group hover:border-[#165DFF]/50 transition-all hover:shadow-lg"
@@ -752,6 +782,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
             </div>
           </motion.div>
         ))}
+        </div>
       </div>
 
       {filteredPlugins.length === 0 && (
@@ -776,13 +807,42 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col"
+              className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                  配置: {selectedPlugin.name}
-                </h3>
+                <div className="flex items-center gap-4">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                    配置: {selectedPlugin.name}
+                  </h3>
+                  <div className="flex bg-gray-100 dark:bg-[#2A2E38] rounded-lg p-1">
+                    <button
+                      onClick={() => setConfigMode('simple')}
+                      disabled={!isJsonValid}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+                        configMode === 'simple'
+                          ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      简易模式
+                    </button>
+                    <button
+                      onClick={() => setConfigMode('advanced')}
+                      disabled={!isJsonValid}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+                        configMode === 'advanced'
+                          ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      高级模式
+                    </button>
+                  </div>
+                  {!isJsonValid && (
+                    <span className="text-xs text-orange-500">配置文件格式异常，仅支持简易模式编辑</span>
+                  )}
+                </div>
                 <button
                   onClick={() => setConfigModalOpen(false)}
                   className="p-2 text-gray-500 hover:text-gray-700 rounded-lg"
@@ -791,20 +851,100 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                 </button>
               </div>
               <div className="flex-1 overflow-auto p-4">
-                <textarea
-                  ref={textareaRef}
-                  value={pluginConfigText}
-                  onChange={e => {
-                    setPluginConfigText(e.target.value);
-                    try {
-                      setPluginConfig(JSON.parse(e.target.value));
-                    } catch {
-                      // 继续允许编辑
-                    }
-                  }}
-                  className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-y text-gray-900 dark:text-white focus:ring-2 focus:ring-[#165DFF] focus:border-transparent"
-                  style={{ display: 'block' }}
-                />
+                {configMode === 'simple' ? (
+                  <div className="space-y-4">
+                    {Object.entries(pluginConfig).length === 0 ? (
+                      <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
+                        配置为空
+                      </div>
+                    ) : (
+                      Object.entries(pluginConfig).map(([key, value], idx) => (
+                        <div key={idx} className="space-y-1">
+                          <label className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+                            <span className="font-medium">{key}</span>
+                            <span className="ml-2 text-xs text-gray-500">
+                              ({typeof value === 'object' ? (Array.isArray(value) ? 'array' : 'object') : typeof value})
+                            </span>
+                          </label>
+                          {typeof value === 'boolean' ? (
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={value}
+                                onChange={e => {
+                                  const newConfig = { ...pluginConfig, [key]: e.target.checked };
+                                  setPluginConfig(newConfig);
+                                  setPluginConfigText(JSON.stringify(newConfig, null, 2));
+                                }}
+                                className="w-4 h-4 text-[#165DFF] rounded border-gray-300 focus:ring-[#165DFF]"
+                              />
+                              <span className="text-sm text-gray-600 dark:text-gray-400">
+                                {value ? '是' : '否'}
+                              </span>
+                            </label>
+                          ) : typeof value === 'number' ? (
+                            <input
+                              type="number"
+                              value={value}
+                              onChange={e => {
+                                const newValue = e.target.value === '' ? 0 : Number(e.target.value);
+                                const newConfig = { ...pluginConfig, [key]: newValue };
+                                setPluginConfig(newConfig);
+                                setPluginConfigText(JSON.stringify(newConfig, null, 2));
+                              }}
+                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
+                            />
+                          ) : typeof value === 'object' ? (
+                            <textarea
+                              value={Array.isArray(value) ? JSON.stringify(value, null, 2) : JSON.stringify(value, null, 2)}
+                              onChange={e => {
+                                try {
+                                  const parsed = JSON.parse(e.target.value);
+                                  const newConfig = { ...pluginConfig, [key]: parsed };
+                                  setPluginConfig(newConfig);
+                                  setPluginConfigText(JSON.stringify(newConfig, null, 2));
+                                } catch {
+                                  const newConfig = { ...pluginConfig, [key]: e.target.value };
+                                  setPluginConfig(newConfig);
+                                }
+                              }}
+                              rows={3}
+                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white resize-none font-mono"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={String(value)}
+                              onChange={e => {
+                                const newConfig = { ...pluginConfig, [key]: e.target.value };
+                                setPluginConfig(newConfig);
+                                setPluginConfigText(JSON.stringify(newConfig, null, 2));
+                              }}
+                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
+                            />
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <textarea
+                    ref={textareaRef}
+                    value={pluginConfigText}
+                    onChange={e => {
+                      setPluginConfigText(e.target.value);
+                      try {
+                        const parsed = JSON.parse(e.target.value);
+                        setPluginConfig(parsed);
+                        setIsJsonValid(true);
+                      } catch {
+                        setIsJsonValid(false);
+                      }
+                    }}
+                    className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-y text-gray-900 dark:text-white focus:ring-2 focus:ring-[#165DFF] focus:border-transparent"
+                    style={{ display: 'block' }}
+                  />
+                )}
               </div>
               <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800">
                 <button
@@ -1376,7 +1516,7 @@ export function BotDetail() {
 
       {/* Tab Content */}
       <AnimatePresence mode="wait">
-        <div className="flex-1 min-h-[400px]">
+        <div className="flex-1 min-h-[400px] overflow-hidden flex flex-col">
           {activeTab === 'overview' && <BotOverview selfId={bot.self_id} />}
           {activeTab === 'debug' && <ApiDebug botId={bot.self_id} />}
           {activeTab === 'plugins' && <Plugins selfId={bot.self_id} />}

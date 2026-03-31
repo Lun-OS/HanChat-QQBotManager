@@ -41,7 +41,6 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 		return
 	}
 
-	// 1. 校验账号是否存在
 	account, err := h.accountMgr.GetAccount(selfID)
 	if err != nil {
 		h.logger.Warnw("API请求失败：账号不存在",
@@ -51,7 +50,6 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 		return
 	}
 
-	// 2. 校验账号是否在线
 	if !account.IsOnline() {
 		h.logger.Warnw("API请求失败：账号离线",
 			"self_id", selfID,
@@ -65,28 +63,23 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 		return
 	}
 
-	// 3. 解析请求参数
 	var params map[string]interface{}
 	if err := c.ShouldBindJSON(&params); err != nil {
-		// 如果没有请求体，使用空参数
 		params = make(map[string]interface{})
 	}
 
-	// 4. 调用对应API
 	h.logger.Infow("调用API",
 		"self_id", selfID,
 		"api_name", apiName,
 		"params", params)
 
-	// 移除开头的斜杠
 	apiName = strings.TrimPrefix(apiName, "/")
 
-	h.logger.Infow("开始调用ReverseWebSocketService.CallBotAPI",
+	h.logger.Infow("开始调用ReverseWebSocketService.CallBotAPIRaw",
 		"self_id", selfID,
 		"api_name", apiName)
 
-	// 使用 ReverseWebSocketService 调用API
-	result, err := h.reverseWS.CallBotAPI(selfID, apiName, params)
+	rawResp, err := h.reverseWS.CallBotAPIRaw(selfID, apiName, params)
 	if err != nil {
 		h.logger.Errorw("API调用失败",
 			"self_id", selfID,
@@ -96,7 +89,7 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, result)
+	c.Data(http.StatusOK, "application/json", rawResp)
 }
 
 // GetAccountList 获取账号列表（包含插件目录中的离线账号）

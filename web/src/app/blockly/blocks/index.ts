@@ -1,17 +1,43 @@
 import * as Blockly from 'blockly';
 import 'blockly/blocks';
+import { multilineEditorBridge } from '../multilineEditorBridge';
 
 class FieldMultilineText extends Blockly.FieldTextInput {
   static CUSTOM_FIELD = true;
 
-  protected widgetCreate_(): HTMLTextAreaElement {
-    const textarea = super.widgetCreate_() as HTMLTextAreaElement;
-    if (textarea.tagName === 'TEXTAREA') {
-      textarea.style.whiteSpace = 'pre';
-      textarea.style.minHeight = '60px';
-      textarea.style.resize = 'vertical';
+  constructor(opt_value?: string, opt_validator?: any) {
+    super(opt_value, opt_validator);
+  }
+
+  static fromJson(options: any): FieldMultilineText {
+    return new FieldMultilineText(options['text']);
+  }
+
+  showEditor_(): void {
+    const value = this.getValue() || '';
+    multilineEditorBridge.openEditor(value, this, 'lua');
+  }
+
+  protected doClassValidation_(newValue: any): string | null {
+    if (newValue === null) {
+      return null;
     }
-    return textarea;
+    return String(newValue);
+  }
+
+  protected updateText_(): void {
+    const text = this.getText();
+    let displayText = text;
+    if (text) {
+      const lines = text.split('\n');
+      if (lines.length > 1) {
+        displayText = lines[0] + '...';
+      }
+      if (displayText.length > 30) {
+        displayText = displayText.substring(0, 30) + '...';
+      }
+    }
+    this.setText_?.(displayText || '(点击编辑)');
   }
 }
 
@@ -39,6 +65,8 @@ const COLOR_HUE = {
   bot: 240,      // 靛蓝色
   math: 230,     // 蓝色
   comment: 0,    // 灰色（注释）
+  database: 75,  // 绿色系（数据库）
+  time: 120,     // 浅绿色（时间）
 } as const;
 
 /**
@@ -437,6 +465,263 @@ const CUSTOM_BLOCKS = [
     helpUrl: HELP_URL.event,
   },
   {
+    type: 'event_on_group_admin',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_ADMIN}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['设置管理员', 'set'],
+          ['取消管理员', 'unset'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群管理员变动事件处理器，当群成员被设置或取消管理员时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 设置管理员/取消管理员\n输出：事件对象（包含群号、用户ID、操作类型等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_member_increase',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_MEMBER_INCREASE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['同意入群', 'approve'],
+          ['邀请入群', 'invite'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群成员增加事件处理器，当有新成员加入群时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 同意入群/邀请入群\n输出：事件对象（包含群号、用户ID、操作者ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_member_decrease',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_MEMBER_DECREASE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['主动退群', 'leave'],
+          ['被踢出群', 'kick'],
+          ['机器人被踢', 'kick_me'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群成员减少事件处理器，当有成员离开或被踢出群时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 主动退群/被踢出群/机器人被踢\n输出：事件对象（包含群号、用户ID、操作者ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_ban',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_BAN}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['禁言', 'ban'],
+          ['解除禁言', 'lift_ban'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群禁言事件处理器，当群成员被禁言或解除禁言时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 禁言/解除禁言\n输出：事件对象（包含群号、用户ID、操作者ID、禁言时长等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_recall',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_RECALL}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群消息撤回事件处理器，当群成员撤回消息时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含群号、用户ID、操作者ID、消息ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_friend_recall',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_FRIEND_RECALL}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册好友消息撤回事件处理器，当好友撤回消息时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含用户ID、消息ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_poke',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_POKE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册戳一戳事件处理器，当收到戳一戳消息时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含发送者ID、接收者ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_essence',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_ESSENCE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['添加精华', 'add'],
+          ['删除精华', 'delete'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册精华消息变动事件处理器，当消息被设为精华或取消精华时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 添加精华/删除精华\n输出：事件对象（包含群号、消息ID、操作者ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_friend_add',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_FRIEND_ADD}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册好友添加事件处理器，当有新好友添加成功时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含用户ID等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_card',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_CARD}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群名片变动事件处理器，当群成员的名片被修改时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含群号、用户ID、新名片、旧名片等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_title',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_TITLE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群头衔变动事件处理器，当群成员获得或修改专属头衔时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含群号、用户ID、头衔等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_msg_emoji_like',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_MSG_EMOJI_LIKE}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群消息表情点赞事件处理器，当群消息被添加或取消表情点赞时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含群号、消息ID、用户ID、表情列表等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_upload',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_UPLOAD}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群文件上传事件处理器，当群成员上传文件时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含群号、用户ID、文件信息等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_group_request',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_GROUP_REQUEST}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      {
+        type: 'field_dropdown',
+        name: 'SUB_TYPE',
+        options: [
+          ['加群请求', 'add'],
+          ['邀请机器人入群', 'invite'],
+        ],
+      },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册群请求事件处理器，当收到加群请求或邀请时执行\n输入：变量名 - 用于存储事件数据的变量；子类型 - 加群请求/邀请入群\n输出：事件对象（包含群号、用户ID、请求标识等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_friend_request',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_FRIEND_REQUEST}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册好友请求事件处理器，当收到好友申请时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含用户ID、请求消息、请求标识等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'event_on_bot_status',
+    message0: '%{BKY_BLOCKLY_EVENT_ON_BOT_STATUS}',
+    args0: [
+      { type: 'field_variable', name: 'VAR', variable: 'event' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：注册机器人状态变化事件处理器，当机器人上线或下线时执行\n输入：变量名 - 用于存储事件数据的变量\n输出：事件对象（包含状态信息等）',
+    helpUrl: HELP_URL.event,
+  },
+  {
     type: 'event_variable',
     message0: '事件变量 %1',
     args0: [
@@ -531,6 +816,19 @@ const CUSTOM_BLOCKS = [
     helpUrl: HELP_URL.block,
   },
   {
+    type: 'text_replace_custom',
+    message0: '将文本 %1 中的 %2 替换为 %3',
+    args0: [
+      { type: 'input_value', name: 'TEXT', check: 'String' },
+      { type: 'input_value', name: 'SEARCH', check: 'String' },
+      { type: 'input_value', name: 'REPLACE', check: 'String' },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.text,
+    tooltip: '介绍：替换文本中的指定内容\n输入：文本 - 原字符串；查找内容 - 要替换的子串；替换内容 - 替换后的字符串\n输出：字符串（替换后的文本）',
+    helpUrl: HELP_URL.block,
+  },
+  {
     type: 'text_contains',
     message0: '文本 %1 包含 %2',
     args0: [
@@ -596,6 +894,28 @@ const CUSTOM_BLOCKS = [
     nextStatement: null,
     colour: COLOR_HUE.advanced,
     tooltip: '介绍：调用API并通过分支处理成功或失败结果\n输入：API名称 - 字符串；参数1 - 任意类型；参数2 - 任意类型\n输出：无（通过成功/失败分支处理结果）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'api_get_retcode',
+    message0: '%{BKY_BLOCKLY_API_GET_RETCODE}',
+    args0: [
+      { type: 'input_value', name: 'RESPONSE' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.advanced,
+    tooltip: '介绍：从API响应中获取retcode状态码\n输入：响应 - API调用返回的响应对象\n输出：数字（retcode值，0表示成功，非0表示失败）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'api_is_success',
+    message0: '%{BKY_BLOCKLY_API_IS_SUCCESS}',
+    args0: [
+      { type: 'input_value', name: 'RESPONSE' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.logic,
+    tooltip: '介绍：判断API操作是否成功\n输入：响应 - API调用返回的响应对象\n输出：布尔值（retcode为0且status为ok时返回true）',
     helpUrl: HELP_URL.block,
   },
   // ========== 群管理积木 ==========
@@ -3151,7 +3471,7 @@ const CUSTOM_BLOCKS = [
     type: 'api_call_with_var',
     message0: '调用API %1 参数1 %2 参数2 %3 响应存入 %4',
     args0: [
-      { type: 'input_value', name: 'API_NAME', check: 'String' },
+      { type: 'field_input', name: 'API_NAME', text: '' },
       { type: 'input_value', name: 'PARAM1' },
       { type: 'input_value', name: 'PARAM2' },
       { type: 'field_variable', name: 'VAR', variable: 'response' },
@@ -3970,6 +4290,432 @@ const CUSTOM_BLOCKS = [
     nextStatement: null,
     colour: COLOR_HUE.event,
     tooltip: '介绍：执行指定的函数\n输入：函数名 - 与定义函数时的名称对应\n输出：无（执行完毕后自动继续执行后续积木）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'schedule_interval_seconds',
+    message0: '每 %1 秒执行一次',
+    args0: [
+      { type: 'field_number', name: 'SECONDS', value: 60, min: 1, max: 86400, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个每隔指定秒数执行一次的定时任务\n输入：秒数 - 1到86400之间的整数，表示每次执行的间隔秒数\n输出：无（自动重复执行）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'schedule_interval_minutes',
+    message0: '每 %1 分钟执行一次',
+    args0: [
+      { type: 'field_number', name: 'MINUTES', value: 1, min: 1, max: 1440, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个每隔指定分钟数执行一次的定时任务\n输入：分钟数 - 1到1440之间的整数，表示每次执行的间隔分钟数\n输出：无（自动重复执行）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'schedule_interval_hours',
+    message0: '每 %1 小时执行一次',
+    args0: [
+      { type: 'field_number', name: 'HOURS', value: 1, min: 1, max: 168, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个每隔指定小时数执行一次的定时任务\n输入：小时数 - 1到168之间的整数，表示每次执行的间隔小时数\n输出：无（自动重复执行）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'schedule_weekly',
+    message0: '每周 %1 的 %2 时 %3 分 %4 秒执行',
+    args0: [
+      {
+        type: 'field_dropdown',
+        name: 'WEEKDAY',
+        options: [
+          ['星期一', '1'],
+          ['星期二', '2'],
+          ['星期三', '3'],
+          ['星期四', '4'],
+          ['星期五', '5'],
+          ['星期六', '6'],
+          ['星期日', '0'],
+        ],
+      },
+      { type: 'field_number', name: 'HOUR', value: 0, min: 0, max: 23, precision: 1 },
+      { type: 'field_number', name: 'MINUTE', value: 0, min: 0, max: 59, precision: 1 },
+      { type: 'field_number', name: 'SECOND', value: 0, min: 0, max: 59, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个在指定星期和时间执行的定时任务\n输入：星期 - 选择周一到周日；时/分/秒 - 0-23时，0-59分，0-59秒\n输出：无（在指定时间自动执行一次）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'schedule_monthly',
+    message0: '每月 %1 日的 %2 时 %3 分 %4 秒执行',
+    args0: [
+      { type: 'field_number', name: 'DAY', value: 1, min: 1, max: 31, precision: 1 },
+      { type: 'field_number', name: 'HOUR', value: 0, min: 0, max: 23, precision: 1 },
+      { type: 'field_number', name: 'MINUTE', value: 0, min: 0, max: 59, precision: 1 },
+      { type: 'field_number', name: 'SECOND', value: 0, min: 0, max: 59, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个在每月指定日期和时间执行的定时任务\n输入：日期 - 1-31日（注意：部分月份不足31天会自动调整为最后一天）；时/分/秒 - 0-23时，0-59分，0-59秒\n输出：无（在指定时间自动执行一次）',
+    helpUrl: HELP_URL.event,
+  },
+  {
+    type: 'schedule_daily',
+    message0: '每天 %1 时 %2 分 %3 秒执行',
+    args0: [
+      { type: 'field_number', name: 'HOUR', value: 0, min: 0, max: 23, precision: 1 },
+      { type: 'field_number', name: 'MINUTE', value: 0, min: 0, max: 59, precision: 1 },
+      { type: 'field_number', name: 'SECOND', value: 0, min: 0, max: 59, precision: 1 },
+    ],
+    message1: '%1',
+    args1: [
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.event,
+    tooltip: '介绍：创建一个在每天指定时间执行的定时任务\n输入：时/分/秒 - 0-23时，0-59分，0-59秒\n输出：无（每天在指定时间自动执行一次）',
+    helpUrl: HELP_URL.event,
+  },
+
+  // ========== 简化数据库积木（键值存储） ==========
+  {
+    type: 'simple_db_set',
+    message0: '数据库存储 数据库 %1 键 %2 值 %3',
+    args0: [
+      { type: 'input_value', name: 'DB_NAME', check: 'String' },
+      { type: 'input_value', name: 'KEY', check: 'String' },
+      { type: 'input_value', name: 'VALUE' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.database,
+    tooltip: '介绍：将值存储到数据库的指定键\n输入：数据库名 - 文件名；键 - 查找用的key；值 - 要存储的数据\n输出：无',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'simple_db_get',
+    message0: '数据库读取 数据库 %1 键 %2 默认值 %3',
+    args0: [
+      { type: 'input_value', name: 'DB_NAME', check: 'String' },
+      { type: 'input_value', name: 'KEY', check: 'String' },
+      { type: 'input_value', name: 'DEFAULT' },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.database,
+    tooltip: '介绍：从数据库读取指定键的值\n输入：数据库名 - 文件名；键 - 查找用的key；默认值 - 键不存在时返回\n输出：存储的值或默认值',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'simple_db_delete',
+    message0: '数据库删除 数据库 %1 键 %2',
+    args0: [
+      { type: 'input_value', name: 'DB_NAME', check: 'String' },
+      { type: 'input_value', name: 'KEY', check: 'String' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.database,
+    tooltip: '介绍：从数据库删除指定键\n输入：数据库名 - 文件名；键 - 要删除的key\n输出：无',
+    helpUrl: HELP_URL.block,
+  },
+
+  // ========== 增强时间积木 ==========
+  // 获取单独时间单位
+  {
+    type: 'time_get_year',
+    message0: '获取当前年份',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前年份\n输入：无\n输出：数字（当前年份，如 2026）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_month',
+    message0: '获取当前月份',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前月份\n输入：无\n输出：数字（当前月份，1-12）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_day',
+    message0: '获取当前日期',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前日期（几号）\n输入：无\n输出：数字（当前日期，1-31）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_hour',
+    message0: '获取当前小时',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前小时\n输入：无\n输出：数字（当前小时，0-23）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_minute',
+    message0: '获取当前分钟',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前分钟\n输入：无\n输出：数字（当前分钟，0-59）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_second',
+    message0: '获取当前秒数',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前秒数\n输入：无\n输出：数字（当前秒数，0-59）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_weekday',
+    message0: '获取当前星期',
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前星期几\n输入：无\n输出：数字（0=周日，1=周一，...，6=周六）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_get_weekday_name',
+    message0: '获取当前星期名称',
+    output: 'String',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前星期几的中文名称\n输入：无\n输出：字符串（如：星期一、星期二等）',
+    helpUrl: HELP_URL.block,
+  },
+  // 格式化日期字符串
+  {
+    type: 'time_format_date',
+    message0: '获取当前日期 %1',
+    args0: [
+      {
+        type: 'field_dropdown',
+        name: 'FORMAT',
+        options: [
+          ['YYYY-MM-DD', 'ymd-dash'],
+          ['YYYY/MM/DD', 'ymd-slash'],
+          ['YYYY年MM月DD日', 'ymd-chinese'],
+          ['MM-DD-YYYY', 'mdy-dash'],
+          ['MM/DD/YYYY', 'mdy-slash'],
+          ['DD-MM-YYYY', 'dmy-dash'],
+          ['DD/MM/YYYY', 'dmy-slash'],
+        ],
+      },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前日期字符串\n输入：格式 - 下拉选择日期格式\n输出：字符串（格式化后的日期）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_format_time',
+    message0: '获取当前时间 %1',
+    args0: [
+      {
+        type: 'field_dropdown',
+        name: 'FORMAT',
+        options: [
+          ['HH:MM:SS', 'hms-colon'],
+          ['HH时MM分SS秒', 'hms-chinese'],
+          ['HH:MM', 'hm-colon'],
+          ['HH时MM分', 'hm-chinese'],
+        ],
+      },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前时间字符串\n输入：格式 - 下拉选择时间格式\n输出：字符串（格式化后的时间）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_format_datetime',
+    message0: '获取当前日期时间 %1',
+    args0: [
+      {
+        type: 'field_dropdown',
+        name: 'FORMAT',
+        options: [
+          ['YYYY-MM-DD HH:MM:SS', 'full-dash'],
+          ['YYYY/MM/DD HH:MM:SS', 'full-slash'],
+          ['YYYY年MM月DD日 HH时MM分SS秒', 'full-chinese'],
+          ['YYYY-MM-DD HH:MM', 'no-sec-dash'],
+          ['YYYY/MM/DD HH:MM', 'no-sec-slash'],
+        ],
+      },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取当前日期时间字符串\n输入：格式 - 下拉选择日期时间格式\n输出：字符串（格式化后的日期时间）',
+    helpUrl: HELP_URL.block,
+  },
+  // 时间戳转换
+  {
+    type: 'time_timestamp_to_date',
+    message0: '时间戳 %1 转日期 %2',
+    args0: [
+      { type: 'input_value', name: 'TIMESTAMP', check: 'Number' },
+      {
+        type: 'field_dropdown',
+        name: 'FORMAT',
+        options: [
+          ['YYYY-MM-DD HH:MM:SS', 'full-dash'],
+          ['YYYY/MM/DD HH:MM:SS', 'full-slash'],
+          ['YYYY年MM月DD日 HH时MM分SS秒', 'full-chinese'],
+          ['YYYY-MM-DD', 'date-dash'],
+          ['YYYY/MM/DD', 'date-slash'],
+          ['HH:MM:SS', 'time-colon'],
+        ],
+      },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：将Unix时间戳转换为日期字符串\n输入：时间戳 - 数字（Unix时间戳，秒或毫秒）；格式 - 下拉选择输出格式\n输出：字符串（格式化后的日期时间）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_date_to_timestamp',
+    message0: '日期 %1 转时间戳',
+    args0: [
+      { type: 'input_value', name: 'DATE', check: 'String' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：将日期字符串转换为Unix时间戳\n输入：日期 - 字符串（支持多种格式，如 2026-03-31 或 2026/03/31 15:30:00）\n输出：数字（Unix时间戳，单位为秒）',
+    helpUrl: HELP_URL.block,
+  },
+  // 时间计算
+  {
+    type: 'time_add_unit',
+    message0: '时间 %1 %2 %3 %4',
+    args0: [
+      { type: 'input_value', name: 'TIMESTAMP', check: 'Number' },
+      {
+        type: 'field_dropdown',
+        name: 'OPERATION',
+        options: [
+          ['加上', 'add'],
+          ['减去', 'sub'],
+        ],
+      },
+      { type: 'input_value', name: 'AMOUNT', check: 'Number' },
+      {
+        type: 'field_dropdown',
+        name: 'UNIT',
+        options: [
+          ['秒', 'seconds'],
+          ['分钟', 'minutes'],
+          ['小时', 'hours'],
+          ['天', 'days'],
+          ['周', 'weeks'],
+          ['月', 'months'],
+          ['年', 'years'],
+        ],
+      },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：对时间进行加减运算\n输入：时间戳 - 数字；操作 - 加/减；数量 - 数字；单位 - 秒/分钟/小时/天/周/月/年\n输出：数字（计算后的时间戳）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_diff',
+    message0: '计算时间差 %1 - %2 单位 %3',
+    args0: [
+      { type: 'input_value', name: 'TIMESTAMP1', check: 'Number' },
+      { type: 'input_value', name: 'TIMESTAMP2', check: 'Number' },
+      {
+        type: 'field_dropdown',
+        name: 'UNIT',
+        options: [
+          ['秒', 'seconds'],
+          ['分钟', 'minutes'],
+          ['小时', 'hours'],
+          ['天', 'days'],
+        ],
+      },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：计算两个时间戳之间的差值\n输入：时间戳1、时间戳2 - 数字；单位 - 秒/分钟/小时/天\n输出：数字（时间差，可能为负数）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_is_leap_year',
+    message0: '年份 %1 是闰年',
+    args0: [
+      { type: 'input_value', name: 'YEAR', check: 'Number' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：判断指定年份是否为闰年\n输入：年份 - 数字\n输出：布尔值（true=闰年，false=平年）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_days_in_month',
+    message0: '年份 %1 月份 %2 的天数',
+    args0: [
+      { type: 'input_value', name: 'YEAR', check: 'Number' },
+      { type: 'input_value', name: 'MONTH', check: 'Number' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取指定年月的天数\n输入：年份 - 数字；月份 - 数字（1-12）\n输出：数字（该月的天数，28-31）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_start_of_day',
+    message0: '时间戳 %1 当天开始',
+    args0: [
+      { type: 'input_value', name: 'TIMESTAMP', check: 'Number' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取指定时间戳当天0点0分0秒的时间戳\n输入：时间戳 - 数字\n输出：数字（当天开始的时间戳）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'time_end_of_day',
+    message0: '时间戳 %1 当天结束',
+    args0: [
+      { type: 'input_value', name: 'TIMESTAMP', check: 'Number' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.time,
+    tooltip: '介绍：获取指定时间戳当天23点59分59秒的时间戳\n输入：时间戳 - 数字\n输出：数字（当天结束的时间戳）',
     helpUrl: HELP_URL.block,
   },
 ];

@@ -12,6 +12,7 @@ import (
 
 // AdminAuth 管理员认证中间件
 // 使用新的WebLoginService替代旧的AdminService
+// 包含自动token续期机制
 func AdminAuth(loginSvc *services.WebLoginService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 从多个来源获取token
@@ -53,6 +54,19 @@ func AdminAuth(loginSvc *services.WebLoginService) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// Token有效，进行智能续期检查
+		renewResult := loginSvc.RenewTokenIfNeeded(token)
+
+		// 将续期信息记录到响应头（可选，便于客户端感知续期状态）
+		if renewResult.Renewed {
+			c.Header("X-Token-Renewed", "true")
+			c.Header("X-Token-Expires-At", renewResult.NewExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+		}
+
+		// 将token信息存储到上下文，供后续处理器使用
+		c.Set("token", token)
+		c.Set("token_renew_result", renewResult)
 
 		c.Next()
 	}

@@ -87,18 +87,15 @@ func (s *LuaSandbox) Reset() {
 
 // SafeCall 安全调用Lua函数，带堆栈保护
 func (s *LuaSandbox) SafeCall(L *lua.LState, fn *lua.LFunction, args ...lua.LValue) error {
-	// 检查堆栈深度
 	if err := s.CheckStackDepth(); err != nil {
 		return err
 	}
 	defer s.DecreaseStackDepth()
 
-	// 检查是否已停止
 	if s.IsHalted() {
 		return fmt.Errorf("插件已被安全机制终止，无法执行")
 	}
 
-	// 调用函数
 	L.Push(fn)
 	for _, arg := range args {
 		L.Push(arg)
@@ -109,6 +106,11 @@ func (s *LuaSandbox) SafeCall(L *lua.LState, fn *lua.LFunction, args ...lua.LVal
 	}
 
 	return nil
+}
+
+// IsInstructionCountExceeded 检查指令数是否超过限制（用于外部定期检查）
+func (s *LuaSandbox) IsInstructionCountExceeded() bool {
+	return atomic.LoadInt64(&s.instructionCount) > MaxInstructions
 }
 
 // GetStackInfo 获取当前堆栈信息

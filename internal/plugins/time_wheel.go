@@ -36,6 +36,7 @@ type timeWheelLevel struct {
 	interval  time.Duration
 	wheelSize int64
 	current   int64
+	mu        sync.Mutex // 保护 current 指针的并发访问
 	slots     [][]*TimeWheelTask
 	slotMap   map[string]*TimeWheelTask
 	ticker    *time.Ticker
@@ -154,20 +155,31 @@ func (mtw *MultiLevelTimeWheel) runLevel(levelIndex int) {
 func (mtw *MultiLevelTimeWheel) tickLevel(levelIndex int) {
 	level := mtw.levels[levelIndex]
 
-	currentSlot := level.slots[level.current]
+	level.mu.Lock()
+	current := level.current
+	level.mu.Unlock()
+
+	// 复制当前槽位的任务，避免立即清空导致的竞态条件
+	currentSlot := level.slots[current]
 	if len(currentSlot) > 0 {
+		// 先复制任务列表再启动执行，避免立即清空导致的问题
+		tasksToExec := make([]*TimeWheelTask, len(currentSlot))
+		copy(tasksToExec, currentSlot)
+		// 清空当前槽位
+		level.slots[current] = nil
+
 		// 执行当前槽位的所有任务
-		for _, task := range currentSlot {
+		for _, task := range tasksToExec {
 			if task.ExecFunc != nil {
 				go task.ExecFunc()
 			}
 		}
-		// 清空当前槽位
-		level.slots[level.current] = nil
 	}
 
 	// 推进时间轮指针
+	level.mu.Lock()
 	level.current = (level.current + 1) % level.wheelSize
+	level.mu.Unlock()
 }
 
 // AddTask 添加任务到多级时间轮
@@ -207,7 +219,11 @@ func (mtw *MultiLevelTimeWheel) AddTask(task *TimeWheelTask, expiration time.Tim
 
 // addTaskToLevel 添加任务到指定级别的时间轮
 func (mtw *MultiLevelTimeWheel) addTaskToLevel(level *timeWheelLevel, task *TimeWheelTask, duration time.Duration) {
-	slotIndex := (level.current + int64(duration/level.interval)) % level.wheelSize
+	level.mu.Lock()
+	current := level.current
+	level.mu.Unlock()
+
+	slotIndex := int((current + int64(duration/level.interval)) % level.wheelSize)
 	level.slots[slotIndex] = append(level.slots[slotIndex], task)
 	level.slotMap[task.ID] = task
 }
@@ -215,19 +231,18 @@ func (mtw *MultiLevelTimeWheel) addTaskToLevel(level *timeWheelLevel, task *Time
 // RemoveTask 从多级时间轮中移除任务
 func (mtw *MultiLevelTimeWheel) RemoveTask(taskID string) bool {
 	for _, level := range mtw.levels {
-		task, exists := level.slotMap[taskID]
-		if exists {
+		if _, exists := level.slotMap[taskID]; exists {
 			delete(level.slotMap, taskID)
-			// 从槽位中移除任务
-			slotIndex := int64(time.Until(task.Expiration)/level.interval) % level.wheelSize
-			slot := level.slots[slotIndex]
-			for i, t := range slot {
-				if t.ID == taskID {
-					if i < len(slot)-1 {
-						slot[i] = slot[len(slot)-1]
+			// 遍历所有槽位找到并移除任务，而不是依赖时间计算
+			for slotIndex, slot := range level.slots {
+				for i, t := range slot {
+					if t.ID == taskID {
+						if i < len(slot)-1 {
+							slot[i] = slot[len(slot)-1]
+						}
+						level.slots[slotIndex] = slot[:len(slot)-1]
+						return true
 					}
-					level.slots[slotIndex] = slot[:len(slot)-1]
-					return true
 				}
 			}
 			return true

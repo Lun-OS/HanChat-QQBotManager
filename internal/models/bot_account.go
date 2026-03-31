@@ -126,3 +126,18 @@ func (ba *BotAccount) WriteMessage(messageType int, data []byte) error {
 
 	return ba.WsConn.WriteMessage(messageType, data)
 }
+
+// SafeClose 安全关闭连接，返回是否实际关闭了连接
+// 使用互斥锁保护，避免重复关闭导致的 panic
+func (ba *BotAccount) SafeClose() bool {
+	ba.connMu.Lock()
+	defer ba.connMu.Unlock()
+
+	if ba.WsConn == nil {
+		return false
+	}
+
+	ba.WsConn.Close()
+	ba.WsConn = nil
+	return true
+}

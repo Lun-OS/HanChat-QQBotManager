@@ -38,6 +38,12 @@ func Success(c *gin.Context, data interface{}) {
 	})
 }
 
+// SuccessRaw 直接返回数据内容，不包裹外层结构
+// 用于接口调试等场景，直接返回实际数据
+func SuccessRaw(c *gin.Context, data interface{}) {
+	c.JSON(http.StatusOK, data)
+}
+
 // SuccessWithMessage 返回带消息的成功响应
 func SuccessWithMessage(c *gin.Context, message string, data interface{}) {
 	c.JSON(http.StatusOK, APIResponse{

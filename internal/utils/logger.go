@@ -57,12 +57,14 @@ func InitLogger(cfg LoggerConfig) *zap.Logger {
 	fileWS := zapcore.AddSync(lj)
 	consoleWS := zapcore.AddSync(os.Stdout)
 
-	// 使用异步写入器，避免文件IO阻塞
-	asyncFileWS := NewAsyncWriter(fileWS, 1000) // 1000条日志缓冲
-	
+	asyncFileWS := NewAsyncWriter(fileWS, 1000)
+
+	fileCore := zapcore.NewCore(encoder, zapcore.AddSync(asyncFileWS), level)
+	consoleCore := zapcore.NewCore(encoder, consoleWS, zap.WarnLevel)
+
 	core := zapcore.NewTee(
-		zapcore.NewCore(encoder, consoleWS, level),
-		zapcore.NewCore(encoder, asyncFileWS, level),
+		consoleCore,
+		fileCore,
 	)
 
 	logger := zap.New(core, zap.AddCaller())

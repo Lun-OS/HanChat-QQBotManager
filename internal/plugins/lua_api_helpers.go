@@ -25,15 +25,19 @@ func luaAPIError(L *lua.LState, err error, context string) int {
 }
 
 // luaAPISuccess 统一的Lua API成功返回（单个结果）
-// 统一返回包含 success=true 和数据的表类型
+// 直接返回结果数据，不再包装data字段
 func luaAPISuccess(L *lua.LState, m *Manager, result interface{}) int {
-	// 统一返回表类型格式
-	table := L.CreateTable(0, 3)
+	table := L.CreateTable(0, 2)
 	table.RawSetString("success", lua.LTrue)
 
 	if result != nil {
-		// 将结果数据放入表的 data 字段
-		table.RawSetString("data", m.convertToLuaValue(L, result))
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			for key, value := range resultMap {
+				table.RawSetString(key, m.convertToLuaValue(L, value))
+			}
+		} else {
+			table.RawSetString("data", m.convertToLuaValue(L, result))
+		}
 	}
 
 	L.Push(table)
@@ -41,18 +45,12 @@ func luaAPISuccess(L *lua.LState, m *Manager, result interface{}) int {
 }
 
 // luaAPISuccessWithTable 统一的Lua API成功返回（表格结果）
-// 返回包含 success=true 和数据的表类型
+// 直接返回结果数据，不再包装data字段
 func luaAPISuccessWithTable(L *lua.LState, m *Manager, result map[string]interface{}) int {
-	// 统一返回表类型格式
-	table := L.CreateTable(0, 3)
+	table := L.CreateTable(0, 2)
 	table.RawSetString("success", lua.LTrue)
 
 	if result != nil {
-		// 将结果数据放入表的 data 字段
-		resultTable := m.convertToLuaTable(L, result)
-		table.RawSetString("data", resultTable)
-
-		// 同时保留常用字段在顶层，方便访问
 		for key, value := range result {
 			table.RawSetString(key, m.convertToLuaValue(L, value))
 		}
@@ -63,23 +61,14 @@ func luaAPISuccessWithTable(L *lua.LState, m *Manager, result map[string]interfa
 }
 
 // luaAPIBoolSuccess 统一的Lua API布尔成功返回
-// 返回包含 success=true 和数据的表类型
+// 直接返回结果数据，不再包装data字段
 func luaAPIBoolSuccess(L *lua.LState, m *Manager, result map[string]interface{}) int {
-	// 统一返回表类型格式
-	table := L.CreateTable(0, 3)
+	table := L.CreateTable(0, 2)
 	table.RawSetString("success", lua.LTrue)
 
 	if result != nil {
-		// 将结果数据放入表的 data 字段
-		resultTable := m.convertToLuaTable(L, result)
-		table.RawSetString("data", resultTable)
-
-		// 同时保留常用字段在顶层，方便访问
-		if messageId, ok := result["message_id"]; ok {
-			table.RawSetString("message_id", m.convertToLuaValue(L, messageId))
-		}
-		if status, ok := result["status"]; ok {
-			table.RawSetString("status", m.convertToLuaValue(L, status))
+		for key, value := range result {
+			table.RawSetString(key, m.convertToLuaValue(L, value))
 		}
 	}
 

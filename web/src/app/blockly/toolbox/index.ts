@@ -52,6 +52,30 @@ export function getToolboxCategories(): any {
           block('event_on_init'),
           block('event_on_destroy'),
         ]),
+        subCategory('群事件', 'event_category', [
+          block('event_on_group_admin'),
+          block('event_on_group_member_increase'),
+          block('event_on_group_member_decrease'),
+          block('event_on_group_ban'),
+          block('event_on_group_recall'),
+          block('event_on_group_card'),
+          block('event_on_group_title'),
+          block('event_on_group_msg_emoji_like'),
+          block('event_on_group_upload'),
+          block('event_on_group_request'),
+        ]),
+        subCategory('好友事件', 'event_category', [
+          block('event_on_friend_recall'),
+          block('event_on_friend_add'),
+          block('event_on_friend_request'),
+        ]),
+        subCategory('互动事件', 'event_category', [
+          block('event_on_poke'),
+          block('event_on_essence'),
+        ]),
+        subCategory('机器人状态', 'event_category', [
+          block('event_on_bot_status'),
+        ]),
       ]),
 
       category('消息', 'message_category', [
@@ -295,6 +319,11 @@ export function getToolboxCategories(): any {
           block('is_type'),
           block('safe_get'),
         ]),
+        subCategory('数据库', 'database_category', [
+          block('simple_db_set'),
+          block('simple_db_get'),
+          block('simple_db_delete'),
+        ]),
       ]),
 
       category('逻辑', 'logic_category', [
@@ -345,7 +374,7 @@ export function getToolboxCategories(): any {
           block('text_contains'),
         ]),
         subCategory('查找替换', 'text_category', [
-          block('text_replace'),
+          block('text_replace_custom'),
         ]),
         subCategory('文本转换', 'text_category', [
           block('text_changeCase'),
@@ -456,9 +485,46 @@ export function getToolboxCategories(): any {
       ]),
 
       category('时间', 'time_category', [
-        block('system_timestamp_seconds'),
-        block('system_timestamp_milliseconds'),
-        block('system_now'),
+        subCategory('系统时间', 'time_category', [
+          block('system_timestamp_seconds'),
+          block('system_timestamp_milliseconds'),
+          block('system_now'),
+        ]),
+        subCategory('获取时间单位', 'time_category', [
+          block('time_get_year'),
+          block('time_get_month'),
+          block('time_get_day'),
+          block('time_get_hour'),
+          block('time_get_minute'),
+          block('time_get_second'),
+          block('time_get_weekday'),
+          block('time_get_weekday_name'),
+        ]),
+        subCategory('格式化日期', 'time_category', [
+          block('time_format_date'),
+          block('time_format_time'),
+          block('time_format_datetime'),
+        ]),
+        subCategory('时间戳转换', 'time_category', [
+          block('time_timestamp_to_date'),
+          block('time_date_to_timestamp'),
+        ]),
+        subCategory('时间计算', 'time_category', [
+          block('time_add_unit'),
+          block('time_diff'),
+          block('time_is_leap_year'),
+          block('time_days_in_month'),
+          block('time_start_of_day'),
+          block('time_end_of_day'),
+        ]),
+        subCategory('定时任务', 'time_category', [
+          block('schedule_interval_seconds'),
+          block('schedule_interval_minutes'),
+          block('schedule_interval_hours'),
+          block('schedule_daily'),
+          block('schedule_weekly'),
+          block('schedule_monthly'),
+        ]),
       ]),
 
       category('日志', 'log_category', [
@@ -549,6 +615,8 @@ export function getToolboxCategories(): any {
         subCategory('API调用', 'advanced_category', [
           block('api_call_with_result'),
           block('api_call_with_var'),
+          block('api_get_retcode'),
+          block('api_is_success'),
         ]),
       ]),
     ],

@@ -265,6 +265,13 @@ function registerLuaGenerators(generator: any) {
 `;
   };
 
+  generator.forBlock['message_reply'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'nil';
+    const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
+    return `message.reply(${event}, ${content})
+`;
+  };
+
   generator.forBlock['message_send_private_with_result'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
@@ -323,14 +330,12 @@ end
   generator.forBlock['event_on_message'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 事件数据直接作为Lua表传递，保存到全局变量
+    const globalKey = `__event_${block.id}_${varName}`;
     return `on_message(function(${varName})
-  -- 验证事件参数类型
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  -- 保存到全局变量供其他函数使用
-  _G["${varName}"] = ${varName}
+  _G["${globalKey}"] = ${varName}
 ${statements}end)
 
 `;
@@ -339,14 +344,12 @@ ${statements}end)
   generator.forBlock['event_on_notice'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 添加参数类型验证，保存到全局变量供其他函数使用
+    const globalKey = `__event_${block.id}_${varName}`;
     return `on_notice(function(${varName})
-  -- 验证事件参数类型
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  -- 保存到全局变量供其他函数使用
-  _G["${varName}"] = ${varName}
+  _G["${globalKey}"] = ${varName}
 ${statements}end)
 
 `;
@@ -355,14 +358,12 @@ ${statements}end)
   generator.forBlock['event_on_request'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 添加参数类型验证，保存到全局变量供其他函数使用
+    const globalKey = `__event_${block.id}_${varName}`;
     return `on_request(function(${varName})
-  -- 验证事件参数类型
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  -- 保存到全局变量供其他函数使用
-  _G["${varName}"] = ${varName}
+  _G["${globalKey}"] = ${varName}
 ${statements}end)
 
 `;
@@ -380,6 +381,218 @@ ${statements}end
     const statements = generator.statementToCode(block, 'HANDLER');
     return `function on_destroy()
 ${statements}end
+
+`;
+  };
+
+  generator.forBlock['event_on_group_admin'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_member_increase'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_member_decrease'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_ban'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_recall'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "group_recall" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_friend_recall'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "friend_recall" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_poke'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.sub_type == "poke" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_essence'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "essence" and ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_friend_add'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "friend_add" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_card'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "group_card" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_title'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "notify" and ${varName}.sub_type == "title" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_msg_emoji_like'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "group_msg_emoji_like" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_upload'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_notice(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.notice_type == "group_upload" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_group_request'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    const subType = block.getFieldValue('SUB_TYPE');
+    return `on_request(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.request_type == "group" and ${varName}.sub_type == "${subType}" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_friend_request'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_request(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  if ${varName}.request_type == "friend" then
+    _G["${varName}"] = ${varName}
+${statements}  end
+end)
+
+`;
+  };
+
+  generator.forBlock['event_on_bot_status'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return `on_bot_status_change(function(${varName})
+  if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
+${statements}end)
 
 `;
   };
@@ -651,7 +864,7 @@ ${statements}end
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const start = generator.valueToCode(block, 'START', generator.ORDER_NONE) || '1';
     const end = generator.valueToCode(block, 'END', generator.ORDER_NONE) || '1';
-    return [`string.sub(${text}, ${start}, ${end})`, generator.ORDER_HIGH];
+    return [`string.sub(${text}, tonumber(${start}), tonumber(${end}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_left'] = function(block: Blockly.Block) {
@@ -670,6 +883,7 @@ ${statements}end
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const startText = generator.valueToCode(block, 'START_TEXT', generator.ORDER_NONE) || '""';
     const endText = generator.valueToCode(block, 'END_TEXT', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
     return [`blockly_text_utils.get_between(${text}, ${startText}, ${endText})`, generator.ORDER_HIGH];
   };
 
@@ -677,6 +891,7 @@ ${statements}end
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const occurrence = generator.valueToCode(block, 'OCCURRENCE', generator.ORDER_NONE) || '1';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
     return [`blockly_text_utils.index_of(${text}, ${search}, ${occurrence})`, generator.ORDER_HIGH];
   };
 
@@ -688,6 +903,14 @@ ${statements}end
     return [`blockly_text_utils.count_occurrences(${text}, ${search})`, generator.ORDER_HIGH];
   };
 
+  generator.forBlock['text_replace_custom'] = function(block: Blockly.Block) {
+    const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
+    const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
+    const replace = generator.valueToCode(block, 'REPLACE', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
+    return [`blockly_text_utils.replace(${text}, ${search}, ${replace})`, generator.ORDER_HIGH];
+  };
+
   generator.forBlock['text_contains'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
@@ -697,6 +920,7 @@ ${statements}end
   generator.forBlock['text_split'] = function(block: Blockly.Block) {
     const delimiter = generator.valueToCode(block, 'DELIMITER', generator.ORDER_NONE) || '""';
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
     return [`blockly_text_utils.split(${text}, ${delimiter})`, generator.ORDER_HIGH];
   };
 
@@ -708,6 +932,7 @@ ${statements}end
 
   generator.forBlock['text_trim'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
     return [`blockly_text_utils.trim(${text})`, generator.ORDER_HIGH];
   };
 
@@ -995,7 +1220,7 @@ ${doCode}until ${condition}
   generator.forBlock['math_random'] = function(block: Blockly.Block) {
     const min = generator.valueToCode(block, 'MIN', generator.ORDER_NONE) || '1';
     const max = generator.valueToCode(block, 'MAX', generator.ORDER_NONE) || '100';
-    return [`math.random(${min}, ${max})`, generator.ORDER_HIGH];
+    return [`math.random(tonumber(${min}), tonumber(${max}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['math_random_float'] = function(block: Blockly.Block) {
@@ -1065,6 +1290,167 @@ ${doCode}until ${condition}
   generator.forBlock['time_sleep'] = function(block: Blockly.Block) {
     const seconds = generator.valueToCode(block, 'SECONDS', generator.ORDER_NONE) || '0';
     return `os.execute("sleep " .. ${seconds})\n`;
+  };
+
+  // ========== 增强时间积木代码生成器 ==========
+  // 获取单独时间单位
+  generator.forBlock['time_get_year'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%Y"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_month'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%m"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_day'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%d"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_hour'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%H"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_minute'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%M"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_second'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%S"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_weekday'] = function(block: Blockly.Block) {
+    return ['tonumber(os.date("%w"))', generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_get_weekday_name'] = function(block: Blockly.Block) {
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    const code = `({"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"})[tonumber(os.date("%w")) + 1]`;
+    return [code, generator.ORDER_HIGH];
+  };
+
+  // 格式化日期字符串
+  generator.forBlock['time_format_date'] = function(block: Blockly.Block) {
+    const format = block.getFieldValue('FORMAT') || 'ymd-dash';
+    const formatMap: Record<string, string> = {
+      'ymd-dash': '%Y-%m-%d',
+      'ymd-slash': '%Y/%m/%d',
+      'ymd-chinese': '%Y年%m月%d日',
+      'mdy-dash': '%m-%d-%Y',
+      'mdy-slash': '%m/%d/%Y',
+      'dmy-dash': '%d-%m-%Y',
+      'dmy-slash': '%d/%m/%Y',
+    };
+    const fmt = formatMap[format] || '%Y-%m-%d';
+    return [`os.date("${fmt}")`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_format_time'] = function(block: Blockly.Block) {
+    const format = block.getFieldValue('FORMAT') || 'hms-colon';
+    const formatMap: Record<string, string> = {
+      'hms-colon': '%H:%M:%S',
+      'hms-chinese': '%H时%M分%S秒',
+      'hm-colon': '%H:%M',
+      'hm-chinese': '%H时%M分',
+    };
+    const fmt = formatMap[format] || '%H:%M:%S';
+    return [`os.date("${fmt}")`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_format_datetime'] = function(block: Blockly.Block) {
+    const format = block.getFieldValue('FORMAT') || 'full-dash';
+    const formatMap: Record<string, string> = {
+      'full-dash': '%Y-%m-%d %H:%M:%S',
+      'full-slash': '%Y/%m/%d %H:%M:%S',
+      'full-chinese': '%Y年%m月%d日 %H时%M分%S秒',
+      'no-sec-dash': '%Y-%m-%d %H:%M',
+      'no-sec-slash': '%Y/%m/%d %H:%M',
+    };
+    const fmt = formatMap[format] || '%Y-%m-%d %H:%M:%S';
+    return [`os.date("${fmt}")`, generator.ORDER_HIGH];
+  };
+
+  // 时间戳转换
+  generator.forBlock['time_timestamp_to_date'] = function(block: Blockly.Block) {
+    const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
+    const format = block.getFieldValue('FORMAT') || 'full-dash';
+    const formatMap: Record<string, string> = {
+      'full-dash': '%Y-%m-%d %H:%M:%S',
+      'full-slash': '%Y/%m/%d %H:%M:%S',
+      'full-chinese': '%Y年%m月%d日 %H时%M分%S秒',
+      'date-dash': '%Y-%m-%d',
+      'date-slash': '%Y/%m/%d',
+      'time-colon': '%H:%M:%S',
+    };
+    const fmt = formatMap[format] || '%Y-%m-%d %H:%M:%S';
+    return [`os.date("${fmt}", ${timestamp})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_date_to_timestamp'] = function(block: Blockly.Block) {
+    const date = generator.valueToCode(block, 'DATE', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+    return [`blockly_time.date_to_timestamp(${date})`, generator.ORDER_HIGH];
+  };
+
+  // 时间计算
+  generator.forBlock['time_add_unit'] = function(block: Blockly.Block) {
+    const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
+    const operation = block.getFieldValue('OPERATION') || 'add';
+    const amount = generator.valueToCode(block, 'AMOUNT', generator.ORDER_NONE) || '0';
+    const unit = block.getFieldValue('UNIT') || 'seconds';
+    const op = operation === 'add' ? '+' : '-';
+    const multipliers: Record<string, number> = {
+      'seconds': 1,
+      'minutes': 60,
+      'hours': 3600,
+      'days': 86400,
+      'weeks': 604800,
+    };
+    // 月和年需要特殊处理，使用辅助函数
+    if (unit === 'months' || unit === 'years') {
+      markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+      return [`blockly_time.add_unit(${timestamp}, "${operation}", ${amount}, "${unit}")`, generator.ORDER_HIGH];
+    }
+    const multiplier = multipliers[unit] || 1;
+    return [`(${timestamp} ${op} (${amount} * ${multiplier}))`, generator.ORDER_ADDITIVE];
+  };
+
+  generator.forBlock['time_diff'] = function(block: Blockly.Block) {
+    const ts1 = generator.valueToCode(block, 'TIMESTAMP1', generator.ORDER_NONE) || '0';
+    const ts2 = generator.valueToCode(block, 'TIMESTAMP2', generator.ORDER_NONE) || '0';
+    const unit = block.getFieldValue('UNIT') || 'seconds';
+    const divisors: Record<string, number> = {
+      'seconds': 1,
+      'minutes': 60,
+      'hours': 3600,
+      'days': 86400,
+    };
+    const divisor = divisors[unit] || 1;
+    return [`math.floor((${ts1} - ${ts2}) / ${divisor})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_is_leap_year'] = function(block: Blockly.Block) {
+    const year = generator.valueToCode(block, 'YEAR', generator.ORDER_NONE) || '0';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+    return [`blockly_time.is_leap_year(${year})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_days_in_month'] = function(block: Blockly.Block) {
+    const year = generator.valueToCode(block, 'YEAR', generator.ORDER_NONE) || '0';
+    const month = generator.valueToCode(block, 'MONTH', generator.ORDER_NONE) || '0';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+    return [`blockly_time.days_in_month(${year}, ${month})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_start_of_day'] = function(block: Blockly.Block) {
+    const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+    return [`blockly_time.start_of_day(${timestamp})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['time_end_of_day'] = function(block: Blockly.Block) {
+    const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
+    return [`blockly_time.end_of_day(${timestamp})`, generator.ORDER_HIGH];
   };
 
   // ========== 调试工具积木 ==========
@@ -1326,72 +1712,42 @@ ${varName} = __http_response and __http_response.body or ""
     return [`file.filter_files(${files}, ${pattern})`, generator.ORDER_HIGH];
   };
 
-  // ========== 数据库管理积木 ==========
-  generator.forBlock['db_open'] = function(block: Blockly.Block) {
-    const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
-    return [`db.open(${name})`, generator.ORDER_HIGH];
+  // ========== 简化数据库积木（键值存储） ==========
+  generator.forBlock['simple_db_set'] = function(block: Blockly.Block) {
+    const dbName = generator.valueToCode(block, 'DB_NAME', generator.ORDER_NONE) || '""';
+    const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    return `db.set(${dbName}, ${key}, ${value})\n`;
   };
 
-  generator.forBlock['db_insert'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const record = generator.valueToCode(block, 'RECORD', generator.ORDER_NONE) || '{}';
-    return [`${db}:insert(${record})`, generator.ORDER_HIGH];
+  generator.forBlock['simple_db_get'] = function(block: Blockly.Block) {
+    const dbName = generator.valueToCode(block, 'DB_NAME', generator.ORDER_NONE) || '""';
+    const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
+    const defaultVal = generator.valueToCode(block, 'DEFAULT', generator.ORDER_NONE);
+    const safeDefault = defaultVal ? defaultVal : '0';
+    return [`db.get(${dbName}, ${key}, ${safeDefault})`, generator.ORDER_HIGH];
   };
 
-  generator.forBlock['db_query'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const conditions = generator.valueToCode(block, 'CONDITIONS', generator.ORDER_NONE) || 'nil';
-    return [`${db}:query(${conditions})`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_query_one'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const conditions = generator.valueToCode(block, 'CONDITIONS', generator.ORDER_NONE) || 'nil';
-    return [`${db}:query_one(${conditions})`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_update'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const id = generator.valueToCode(block, 'ID', generator.ORDER_NONE) || '0';
-    const data = generator.valueToCode(block, 'DATA', generator.ORDER_NONE) || '{}';
-    return [`${db}:update(${id}, ${data})`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_delete'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const id = generator.valueToCode(block, 'ID', generator.ORDER_NONE) || '0';
-    return [`${db}:delete(${id})`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_backup'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    const backupName = generator.valueToCode(block, 'BACKUP_NAME', generator.ORDER_NONE) || '""';
-    return [`${db}:backup(${backupName})`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_count'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    return [`${db}:count()`, generator.ORDER_HIGH];
-  };
-
-  generator.forBlock['db_clear'] = function(block: Blockly.Block) {
-    const db = generator.valueToCode(block, 'DB', generator.ORDER_NONE) || 'nil';
-    return [`${db}:clear()`, generator.ORDER_HIGH];
+  generator.forBlock['simple_db_delete'] = function(block: Blockly.Block) {
+    const dbName = generator.valueToCode(block, 'DB_NAME', generator.ORDER_NONE) || '""';
+    const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
+    return `db.delete(${dbName}, ${key})\n`;
   };
 
   // ========== 数组操作积木（简化版） ==========
   generator.forBlock['array_create'] = function(block: Blockly.Block) {
     const items = generator.statementToCode(block, 'ITEMS') || '';
-    // 解析items中的add_item调用
     const itemList: string[] = [];
     const lines = items.split('\n');
     for (const line of lines) {
       const match = line.match(/_array_items\[(\d+)\]\s*=\s*(.+)/);
       if (match) {
-        itemList[parseInt(match[1]) - 1] = match[2];
+        const idx = parseInt(match[1]) - 1;
+        itemList[idx] = match[2];
       }
     }
-    return ['{' + itemList.join(', ') + '}', generator.ORDER_HIGH];
+    const filteredItems = itemList.filter(item => item !== undefined);
+    return ['{' + filteredItems.join(', ') + '}', generator.ORDER_HIGH];
   };
 
   generator.forBlock['array_add_item'] = function(block: Blockly.Block) {
@@ -1522,21 +1878,26 @@ ${onError}end
 `;
   };
 
+  generator.forBlock['api_get_retcode'] = function(block: Blockly.Block) {
+    const response = generator.valueToCode(block, 'RESPONSE', generator.ORDER_NONE) || '{}';
+    return [`(${response}.retcode or 0)`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['api_is_success'] = function(block: Blockly.Block) {
+    const response = generator.valueToCode(block, 'RESPONSE', generator.ORDER_NONE) || '{}';
+    return [`(${response}.retcode == 0 and ${response}.status == "ok")`, generator.ORDER_HIGH];
+  };
+
   // ========== API调用带变量积木（通用） ==========
   generator.forBlock['api_call_with_var'] = function(block: Blockly.Block) {
-    const apiName = generator.valueToCode(block, 'API_NAME', generator.ORDER_NONE) || '""';
+    const apiName = block.getFieldValue('API_NAME') || '';
     const param1 = generator.valueToCode(block, 'PARAM1', generator.ORDER_NONE) || '';
     const param2 = generator.valueToCode(block, 'PARAM2', generator.ORDER_NONE) || '';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
     const params = [param1, param2].filter(p => p).join(', ');
 
-    // 后端统一返回表类型，包含 success 字段
     return `local ${varName} = ${apiName}(${params})
--- 确保返回的是表类型
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
-end
 `;
   };
 
@@ -2181,6 +2542,71 @@ ${body}end
     return `${cleanFuncName}()\n`;
   };
 
+  // ========== 定时任务积木 ==========
+  generator.forBlock['schedule_interval_seconds'] = function(block: Blockly.Block) {
+    const seconds = block.getFieldValue('SECONDS') || '60';
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.interval(${seconds}, function()
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['schedule_interval_minutes'] = function(block: Blockly.Block) {
+    const minutes = block.getFieldValue('MINUTES') || '1';
+    const seconds = String(parseInt(minutes) * 60);
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.interval(${seconds}, function()
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['schedule_interval_hours'] = function(block: Blockly.Block) {
+    const hours = block.getFieldValue('HOURS') || '1';
+    const seconds = String(parseInt(hours) * 3600);
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.interval(${seconds}, function()
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['schedule_daily'] = function(block: Blockly.Block) {
+    const hour = block.getFieldValue('HOUR') || '0';
+    const minute = block.getFieldValue('MINUTE') || '0';
+    const second = block.getFieldValue('SECOND') || '0';
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.daily(${hour}, ${minute}, ${second}, function()
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['schedule_weekly'] = function(block: Blockly.Block) {
+    const weekday = block.getFieldValue('WEEKDAY') || '1';
+    const hour = block.getFieldValue('HOUR') || '0';
+    const minute = block.getFieldValue('MINUTE') || '0';
+    const second = block.getFieldValue('SECOND') || '0';
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.weekly(${weekday}, ${hour}, ${minute}, ${second}, function()
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['schedule_monthly'] = function(block: Blockly.Block) {
+    const day = block.getFieldValue('DAY') || '1';
+    const hour = block.getFieldValue('HOUR') || '0';
+    const minute = block.getFieldValue('MINUTE') || '0';
+    const second = block.getFieldValue('SECOND') || '0';
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `scheduler.monthly(${day}, ${hour}, ${minute}, ${second}, function()
+${handler}end)
+
+`;
+  };
+
   // ========== 标准积木 ==========
   generator.forBlock['text'] = function(block: Blockly.Block) {
     const text = block.getFieldValue('TEXT');
@@ -2276,7 +2702,7 @@ ${body}end
   generator.forBlock['controls_repeat_ext'] = function(block: Blockly.Block) {
     const times = generator.valueToCode(block, 'TIMES', generator.ORDER_NONE) || '0';
     const statements = generator.statementToCode(block, 'DO');
-    return `for _i = 1, ${times} do
+    return `for _i = 1, tonumber(${times}) do
 ${statements}end
 `;
   };
@@ -2297,7 +2723,7 @@ ${statements}end
     const to = generator.valueToCode(block, 'TO', generator.ORDER_NONE) || '0';
     const by = generator.valueToCode(block, 'BY', generator.ORDER_NONE) || '1';
     const statements = generator.statementToCode(block, 'DO');
-    return `for ${variable} = ${from}, ${to}, ${by} do
+    return `for ${variable} = tonumber(${from}), tonumber(${to}), tonumber(${by}) do
 ${statements}end
 `;
   };
@@ -2351,10 +2777,8 @@ ${statements}end
   // 新版自定义Lua代码积木（带多行文本输入）
   generator.forBlock['lua_custom_code'] = function(block: Blockly.Block) {
     const code = block.getFieldValue('CODE') || '';
-    // 处理多行代码，确保每行正确缩进
-    const lines = code.split('\n');
-    const processedLines = lines.map(line => line.trimRight());
-    return processedLines.join('\n') + '\n';
+    // 直接原样输出，保留所有换行和格式
+    return code + '\n';
   };
 
   // JSON配置输入积木 - 生成注释形式的配置（供上传时解析）
@@ -2418,13 +2842,13 @@ ${statements}end
 
   generator.forBlock['onebot_set_msg_emoji_like'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '0';
+    const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     return `message.set_msg_emoji_like(${messageId}, ${emojiId})\n`;
   };
 
   generator.forBlock['onebot_unset_msg_emoji_like'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '0';
+    const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     return `message.unset_msg_emoji_like(${messageId}, ${emojiId})\n`;
   };
 

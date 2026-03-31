@@ -18,6 +18,7 @@ export enum RuntimeLibraryType {
   HTTP_UTILS = 'http',     // HTTP请求工具
   URL_UTILS = 'url',       // URL处理工具
   TEXT_UTILS = 'text',     // 文本处理工具
+  TIME_UTILS = 'time',     // 时间处理工具
 }
 
 /**
@@ -328,6 +329,162 @@ function blockly_url_utils.extract_tld(url_or_domain)
   end
 end`;
 
+// 时间处理工具模块代码
+const TIME_UTILS_RUNTIME_CODE = String.raw`-- 时间处理工具模块
+blockly_time = blockly_time or {}
+
+-- 将日期字符串转换为Unix时间戳（秒）
+-- 支持格式：2026-03-31、2026/03/31、2026-03-31 15:30:45、2026/03/31 15:30:45
+function blockly_time.date_to_timestamp(date_str)
+  if type(date_str) ~= "string" or date_str == "" then
+    return 0
+  end
+  -- 解析日期：使用最简单可靠的字符串操作
+  local s = date_str
+  -- 去除首尾空格
+  local function trim(str)
+    local i = 1
+    while i <= #str and str:sub(i, i) == " " do i = i + 1 end
+    local j = #str
+    while j >= i and str:sub(j, j) == " " do j = j - 1 end
+    return str:sub(i, j)
+  end
+  s = trim(s)
+  if s == "" then return 0 end
+  -- 查找空格分隔日期和时间
+  local space_idx = 0
+  for i = 1, #s do
+    if s:sub(i, i) == " " then
+      space_idx = i
+      break
+    end
+  end
+  local date_s, time_s
+  if space_idx > 0 then
+    date_s = s:sub(1, space_idx - 1)
+    time_s = s:sub(space_idx + 1)
+  else
+    date_s = s
+    time_s = ""
+  end
+  -- 解析日期 YYYY-MM-DD 或 YYYY/MM/DD
+  local year, month, day = 0, 1, 1
+  local hyphen_idx = date_s:find("-", 1, true)
+  local slash_idx = date_s:find("/", 1, true)
+  local sep_idx = 0
+  local sep_char = "-"
+  if hyphen_idx and (not slash_idx or hyphen_idx < slash_idx) then
+    sep_idx = hyphen_idx
+    sep_char = "-"
+  elseif slash_idx then
+    sep_idx = slash_idx
+    sep_char = "/"
+  end
+  if sep_idx > 0 then
+    year = tonumber(date_s:sub(1, sep_idx - 1)) or 0
+    local rest = date_s:sub(sep_idx + 1)
+    local sep_idx2 = rest:find(sep_char, 1, true)
+    if sep_idx2 then
+      month = tonumber(rest:sub(1, sep_idx2 - 1)) or 1
+      day = tonumber(rest:sub(sep_idx2 + 1)) or 1
+    end
+  end
+  -- 解析时间 HH:MM:SS
+  local hour, min, sec = 0, 0, 0
+  if time_s ~= "" then
+    local colon1 = time_s:find(":", 1, true)
+    if colon1 then
+      hour = tonumber(time_s:sub(1, colon1 - 1)) or 0
+      local rest = time_s:sub(colon1 + 1)
+      local colon2 = rest:find(":", 1, true)
+      if colon2 then
+        min = tonumber(rest:sub(1, colon2 - 1)) or 0
+        sec = tonumber(rest:sub(colon2 + 1)) or 0
+      else
+        min = tonumber(rest) or 0
+      end
+    end
+  end
+  if year < 1970 then return 0 end
+  -- 手动计算时间戳，避免 os.time 的月份 bug
+  -- 计算距离 1970-01-01 的天数
+  local days = 0
+  local y = 1970
+  while y < year do
+    if (y % 4 == 0 and y % 100 ~= 0) or (y % 400 == 0) then
+      days = days + 366
+    else
+      days = days + 365
+    end
+    y = y + 1
+  end
+  local month_days = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+  if (year % 4 == 0 and year % 100 ~= 0) or (year % 400 == 0) then
+    month_days[2] = 29
+  end
+  local m = 1
+  while m < month do
+    days = days + month_days[m]
+    m = m + 1
+  end
+  days = days + day - 1
+  -- 返回时间戳
+  return days * 86400 + hour * 3600 + min * 60 + sec
+end
+
+-- 时间加减运算
+function blockly_time.add_unit(timestamp, operation, amount, unit)
+  timestamp = tonumber(timestamp) or 0
+  amount = tonumber(amount) or 0
+  local multipliers = {
+    second = 1,
+    minute = 60,
+    hour = 3600,
+    day = 86400,
+    week = 604800,
+    month = 2592000,
+    year = 31536000
+  }
+  local mult = multipliers[unit] or 1
+  if operation == "add" then
+    return timestamp + (amount * mult)
+  else
+    return timestamp - (amount * mult)
+  end
+end
+
+-- 判断是否闰年
+function blockly_time.is_leap_year(year)
+  year = tonumber(year) or 0
+  return (year % 4 == 0 and year % 100 ~= 0) or (year % 400 == 0)
+end
+
+-- 获取月份天数
+function blockly_time.days_in_month(year, month)
+  year = tonumber(year) or 0
+  month = tonumber(month) or 1
+  local days_in_months = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+  if month == 2 and blockly_time.is_leap_year(year) then
+    return 29
+  end
+  if month < 1 or month > 12 then return 0 end
+  return days_in_months[month] or 0
+end
+
+-- 获取一天开始的时间戳（00:00:00）
+function blockly_time.start_of_day(timestamp)
+  timestamp = tonumber(timestamp) or 0
+  local t = os.date("*t", timestamp)
+  return os.time({year=t.year, month=t.month, day=t.day, hour=0, min=0, sec=0})
+end
+
+-- 获取一天结束的时间戳（23:59:59）
+function blockly_time.end_of_day(timestamp)
+  timestamp = tonumber(timestamp) or 0
+  local t = os.date("*t", timestamp)
+  return os.time({year=t.year, month=t.month, day=t.day, hour=23, min=59, sec=59})
+end`;
+
 // 文本处理工具模块代码
 const TEXT_UTILS_RUNTIME_CODE = String.raw`-- 文本处理工具模块
 blockly_text_utils = blockly_text_utils or {}
@@ -346,6 +503,95 @@ function blockly_text_utils.count_occurrences(text, search)
     start_pos = pos + #search
   end
   return count
+end
+
+-- 替换文本中的子串
+function blockly_text_utils.replace(text, search, replace)
+  if type(text) ~= "string" or type(search) ~= "string" then
+    return text
+  end
+  if search == "" then
+    return text
+  end
+  replace = replace or ""
+  local result = ""
+  local start_pos = 1
+  while true do
+    local pos = string.find(text, search, start_pos, true)
+    if not pos then
+      result = result .. string.sub(text, start_pos)
+      break
+    end
+    result = result .. string.sub(text, start_pos, pos - 1) .. replace
+    start_pos = pos + #search
+  end
+  return result
+end
+
+-- 查找子串在文本中的位置（语义：查找 search 在 text 中）
+function blockly_text_utils.index_of(search, text, occurrence)
+  if type(text) ~= "string" or type(search) ~= "string" or search == "" then
+    return -1
+  end
+  occurrence = tonumber(occurrence) or 1
+  if occurrence < 1 then occurrence = 1 end
+  local start_pos = 1
+  local found_count = 0
+  while start_pos <= #text do
+    local pos = string.find(text, search, start_pos, true)
+    if not pos then break end
+    found_count = found_count + 1
+    if found_count == occurrence then
+      return pos
+    end
+    start_pos = pos + 1
+  end
+  return -1
+end
+
+-- 分割文本为数组
+function blockly_text_utils.split(text, delimiter)
+  if type(text) ~= "string" then return {} end
+  if type(delimiter) ~= "string" or delimiter == "" then
+    return {text}
+  end
+  local result = {}
+  local start_pos = 1
+  while true do
+    local pos = string.find(text, delimiter, start_pos, true)
+    if not pos then break end
+    table.insert(result, text:sub(start_pos, pos - 1))
+    start_pos = pos + #delimiter
+  end
+  table.insert(result, text:sub(start_pos))
+  return result
+end
+
+-- 去除文本首尾空格
+function blockly_text_utils.trim(text)
+  if type(text) ~= "string" then return "" end
+  return text:match("^%s*(.-)%s*$") or ""
+end
+
+-- 获取两个文本之间的内容
+function blockly_text_utils.get_between(text, startText, endText)
+  if type(text) ~= "string" then return "" end
+  if type(startText) ~= "string" or type(endText) ~= "string" then
+    startText = startText or ""
+    endText = endText or ""
+  end
+  local start_pos = 1
+  local end_pos = #text
+  if startText ~= "" then
+    local s = string.find(text, startText, 1, true)
+    if s then start_pos = s + #startText else return "" end
+  end
+  if endText ~= "" then
+    local e = string.find(text, endText, start_pos, true)
+    if e then end_pos = e - 1 else return "" end
+  end
+  if start_pos > end_pos then return "" end
+  return text:sub(start_pos, end_pos)
 end`;
 
 /**
@@ -377,6 +623,10 @@ export function generateRuntimeLibraries(usedLibraries: Set<RuntimeLibraryType>)
 
   if (usedLibraries.has(RuntimeLibraryType.TEXT_UTILS)) {
     parts.push(TEXT_UTILS_RUNTIME_CODE);
+  }
+
+  if (usedLibraries.has(RuntimeLibraryType.TIME_UTILS)) {
+    parts.push(TIME_UTILS_RUNTIME_CODE);
   }
 
   return parts.join('\n\n');

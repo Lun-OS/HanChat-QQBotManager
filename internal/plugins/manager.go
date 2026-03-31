@@ -69,6 +69,8 @@ type LuaPluginInstance struct {
 	imageProcessors   map[int]*utils.SimpleImageProcessor // 图像处理器映射表
 	imageProcessorMu  sync.RWMutex                        // 保护图像处理器映射
 	nextProcessorID   int                                 // 下一个处理器ID
+	// 调度器回调函数
+	schedulerCallbacks map[string]*lua.LFunction
 }
 
 // PluginInfo 插件信息
@@ -205,6 +207,8 @@ type Manager struct {
 	// 插件文件检查定时器
 	fileCheckTicker *time.Ticker
 	fileCheckStop   chan struct{}
+	// 调度器管理器
+	schedulerManager *SchedulerManager
 }
 
 // NewManager 创建插件管理器
@@ -252,6 +256,9 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 
 	// 初始化定时任务系统
 	m.timerSystem = NewTimerSystem(m, m.logger)
+
+	// 初始化调度器管理器
+	m.schedulerManager = NewSchedulerManager(m, m.logger, nil)
 
 	// 初始化HTTP接口管理器
 	m.httpInterfaceManager = NewHTTPInterfaceManager(m, m.logger)
@@ -860,6 +867,46 @@ func (m *Manager) RemovePluginFromAutoStart(selfID string, pluginName string) er
 	return nil
 }
 
+// luaFormatToGoFormat 将 Lua 的 strftime 格式转换为 Go 的 time 格式
+// Lua 格式: %Y-%m-%d %H:%M:%S
+// Go 格式: 2006-01-02 15:04:05
+func luaFormatToGoFormat(luaFormat string) string {
+	// 如果已经是 Go 格式（包含数字），直接返回
+	if strings.Contains(luaFormat, "2006") || strings.Contains(luaFormat, "01") || strings.Contains(luaFormat, "02") {
+		return luaFormat
+	}
+
+	// 定义 Lua 格式到 Go 格式的映射
+	replacements := map[string]string{
+		"%Y": "2006",        // 四位年份
+		"%y": "06",          // 两位年份
+		"%m": "01",          // 月份 (01-12)
+		"%d": "02",          // 日期 (01-31)
+		"%H": "15",          // 小时 (00-23)
+		"%I": "03",          // 小时 (01-12)
+		"%M": "04",          // 分钟 (00-59)
+		"%S": "05",          // 秒 (00-59)
+		"%p": "PM",          // AM/PM
+		"%a": "Mon",         // 缩写星期名
+		"%A": "Monday",      // 完整星期名
+		"%b": "Jan",         // 缩写月份名
+		"%B": "January",     // 完整月份名
+		"%c": "2006-01-02 15:04:05", // 完整日期时间
+		"%x": "2006-01-02",  // 日期
+		"%X": "15:04:05",    // 时间
+		"%Z": "MST",         // 时区名
+		"%z": "-0700",       // 时区偏移
+		"%%": "%",           // 百分号
+	}
+
+	result := luaFormat
+	for luaFmt, goFmt := range replacements {
+		result = strings.ReplaceAll(result, luaFmt, goFmt)
+	}
+
+	return result
+}
+
 // setupSandbox 设置沙箱环境
 func (m *Manager) setupSandbox(L *lua.LState, selfID string, pluginName string) error {
 	// 移除危险函数
@@ -876,7 +923,13 @@ func (m *Manager) setupSandbox(L *lua.LState, selfID string, pluginName string) 
 	}))
 	L.SetField(osTable, "date", L.NewFunction(func(L *lua.LState) int {
 		format := L.OptString(1, "%c")
-		L.Push(lua.LString(time.Now().Format(format)))
+		timestamp := L.OptNumber(2, lua.LNumber(time.Now().Unix()))
+		
+		// 将 Lua 的 strftime 格式转换为 Go 的 time 格式
+		goFormat := luaFormatToGoFormat(format)
+		
+		t := time.Unix(int64(timestamp), 0)
+		L.Push(lua.LString(t.Format(goFormat)))
 		return 1
 	}))
 	L.SetGlobal("os", osTable)
@@ -1453,6 +1506,316 @@ function Database:clear()
 	return self:save_to_csv()
 end
 
+-- ========== 简化版数据库API（键值存储）==========
+-- 简化版数据库，直接操作单个CSV文件，键值对存储
+
+-- 打开或创建数据库文件
+local function openSimpleDb(dbName)
+	if not dbName or dbName == "" then
+		return nil, "数据库名称不能为空"
+	end
+	if not dbName:match("%.db%.csv$") then
+		dbName = dbName .. ".db.csv"
+	end
+	return dbName
+end
+
+-- 存储键值对
+function db.set(dbName, key, value)
+	local filePath, err = openSimpleDb(dbName)
+	if not filePath then
+		return false, err
+	end
+	if not key or key == "" then
+		return false, "键不能为空"
+	end
+	if value == nil then
+		value = ""
+	end
+
+	-- 读取现有数据
+	local data = {}
+	local content = ""
+	local exists_func = file.exists or file._lua_exists
+	if exists_func(filePath) then
+		content = file.read(filePath) or ""
+	end
+
+	-- 解析现有数据（格式：key=value）
+	for line in content:gmatch("[^\r\n]+") do
+		local eqPos = line:find("=")
+		if eqPos then
+			local k = line:sub(1, eqPos - 1)
+			local v = line:sub(eqPos + 1)
+			data[k] = v
+		end
+	end
+
+	-- 更新数据
+	if type(value) == "table" then
+		data[key] = blockly_json.encode(value)
+	else
+		data[key] = tostring(value)
+	end
+
+	-- 保存数据
+	local lines = {}
+	for k, v in pairs(data) do
+		table.insert(lines, k .. "=" .. v)
+	end
+	local newContent = table.concat(lines, "\n")
+	return file.write_safe(filePath, newContent)
+end
+
+-- 读取键值对
+function db.get(dbName, key, default)
+	local filePath, err = openSimpleDb(dbName)
+	if not filePath then
+		return default
+	end
+	if not key or key == "" then
+		return default
+	end
+
+	local content = file.read(filePath) or ""
+	for line in content:gmatch("[^\r\n]+") do
+		local eqPos = line:find("=")
+		if eqPos then
+			local k = line:sub(1, eqPos - 1)
+			local v = line:sub(eqPos + 1)
+			if k == key then
+				-- 尝试转为数字
+				local num = tonumber(v)
+				if num then
+					return num
+				end
+				-- 尝试转为布尔值
+				if v == "true" then
+					return true
+				elseif v == "false" then
+					return false
+				end
+				return v
+			end
+		end
+	end
+	return default
+end
+
+-- 删除键值对
+function db.delete(dbName, key)
+	local filePath, err = openSimpleDb(dbName)
+	if not filePath then
+		return false, err
+	end
+	if not key or key == "" then
+		return false, "键不能为空"
+	end
+
+	local exists_func = file.exists or file._lua_exists
+	if not exists_func(filePath) then
+		return true
+	end
+
+	local content = file.read(filePath) or ""
+	local lines = {}
+	local found = false
+
+	for line in content:gmatch("[^\r\n]+") do
+		local eqPos = line:find("=")
+		if eqPos then
+			local k = line:sub(1, eqPos - 1)
+			if k == key then
+				found = true
+			else
+				table.insert(lines, line)
+			end
+		end
+	end
+
+	if not found then
+		return true
+	end
+
+	local newContent = table.concat(lines, "\n")
+	return file.write_safe(filePath, newContent)
+end
+
+-- ========== 时间处理辅助函数库 ==========
+-- 为 Blockly 时间积木提供支持
+
+blockly_time = {}
+
+-- 将日期字符串转换为时间戳
+-- 支持格式：YYYY-MM-DD, YYYY/MM/DD, YYYY-MM-DD HH:MM:SS, 等
+function blockly_time.date_to_timestamp(date_str)
+	if not date_str or date_str == "" then
+		return 0
+	end
+	
+	-- 标准化日期字符串
+	local normalized = tostring(date_str)
+	
+	-- 提取年月日时分秒
+	local year, month, day, hour, min, sec = 1970, 1, 1, 0, 0, 0
+	
+	-- 尝试匹配 YYYY-MM-DD 或 YYYY/MM/DD
+	local y, m, d = normalized:match("(%d%d%d%d)[/-](%d%d?)[/-](%d%d?)")
+	if y then
+		year, month, day = tonumber(y), tonumber(m), tonumber(d)
+	end
+	
+	-- 尝试匹配时间部分 HH:MM:SS 或 HH:MM
+	local h, mi, s = normalized:match("(%d%d?):(%d%d?):?(%d*)")
+	if h then
+		hour, min = tonumber(h), tonumber(mi)
+		if s and s ~= "" then
+			sec = tonumber(s)
+		end
+	end
+	
+	-- 使用 os.time 计算时间戳
+	local t = {
+		year = year,
+		month = month,
+		day = day,
+		hour = hour,
+		min = min,
+		sec = sec
+	}
+	
+	local ts = os.time(t)
+	return ts or 0
+end
+
+-- 判断是否为闰年
+function blockly_time.is_leap_year(year)
+	if not year then return false end
+	year = tonumber(year)
+	if not year then return false end
+	
+	-- 闰年规则：能被4整除但不能被100整除，或者能被400整除
+	return (year % 4 == 0 and year % 100 ~= 0) or (year % 400 == 0)
+end
+
+-- 获取指定月份的天数
+function blockly_time.days_in_month(year, month)
+	if not year or not month then return 0 end
+	year, month = tonumber(year), tonumber(month)
+	if not year or not month then return 0 end
+	
+	-- 各月天数表
+	local days_in_month = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+	
+	-- 二月特殊处理
+	if month == 2 then
+		if blockly_time.is_leap_year(year) then
+			return 29
+		else
+			return 28
+		end
+	end
+	
+	return days_in_month[month] or 0
+end
+
+-- 对时间进行加减运算（支持月和年）
+function blockly_time.add_unit(timestamp, operation, amount, unit)
+	if not timestamp then timestamp = os.time() end
+	if not amount then amount = 0 end
+	if not unit then unit = "seconds" end
+	
+	timestamp = tonumber(timestamp) or os.time()
+	amount = tonumber(amount) or 0
+	
+	-- 秒、分钟、小时、天、周直接计算
+	local multipliers = {
+		seconds = 1,
+		minutes = 60,
+		hours = 3600,
+		days = 86400,
+		weeks = 604800
+	}
+	
+	if multipliers[unit] then
+		local multiplier = multipliers[unit]
+		if operation == "add" then
+			return timestamp + (amount * multiplier)
+		else
+			return timestamp - (amount * multiplier)
+		end
+	end
+	
+	-- 月和年需要特殊处理
+	local date = os.date("*t", timestamp)
+	
+	if unit == "months" then
+		if operation == "add" then
+			date.month = date.month + amount
+		else
+			date.month = date.month - amount
+		end
+		
+		-- 处理月份溢出
+		while date.month > 12 do
+			date.month = date.month - 12
+			date.year = date.year + 1
+		end
+		while date.month < 1 do
+			date.month = date.month + 12
+			date.year = date.year - 1
+		end
+		
+		-- 处理日期溢出（如1月31日加1个月）
+		local max_day = blockly_time.days_in_month(date.year, date.month)
+		if date.day > max_day then
+			date.day = max_day
+		end
+		
+	elseif unit == "years" then
+		if operation == "add" then
+			date.year = date.year + amount
+		else
+			date.year = date.year - amount
+		end
+		
+		-- 处理闰年2月29日的情况
+		if date.month == 2 and date.day == 29 then
+			if not blockly_time.is_leap_year(date.year) then
+				date.day = 28
+			end
+		end
+	end
+	
+	return os.time(date)
+end
+
+-- 获取当天开始的时间戳（0点0分0秒）
+function blockly_time.start_of_day(timestamp)
+	if not timestamp then timestamp = os.time() end
+	timestamp = tonumber(timestamp) or os.time()
+	
+	local date = os.date("*t", timestamp)
+	date.hour = 0
+	date.min = 0
+	date.sec = 0
+	
+	return os.time(date)
+end
+
+-- 获取当天结束的时间戳（23点59分59秒）
+function blockly_time.end_of_day(timestamp)
+	if not timestamp then timestamp = os.time() end
+	timestamp = tonumber(timestamp) or os.time()
+	
+	local date = os.date("*t", timestamp)
+	date.hour = 23
+	date.min = 59
+	date.sec = 59
+	
+	return os.time(date)
+end
+
 `
 	if err := L.DoString(runtimeLib); err != nil {
 		m.logger.Warnw("加载 Lua 运行时库失败", "plugin", instance.Name, "error", err)
@@ -1646,6 +2009,19 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(tableTable, "get", L.NewFunction(m.luaTableGet))
 	L.SetField(tableTable, "set", L.NewFunction(m.luaTableSet))
 	L.SetGlobal("table_utils", tableTable)
+
+	// 调度器API
+	schedulerTable := L.NewTable()
+	L.SetField(schedulerTable, "interval", L.NewFunction(m.luaScheduleInterval(instance)))
+	L.SetField(schedulerTable, "daily", L.NewFunction(m.luaScheduleDaily(instance)))
+	L.SetField(schedulerTable, "weekly", L.NewFunction(m.luaScheduleWeekly(instance)))
+	L.SetField(schedulerTable, "monthly", L.NewFunction(m.luaScheduleMonthly(instance)))
+	L.SetField(schedulerTable, "cancel", L.NewFunction(m.luaCancelSchedulerTask(instance)))
+	L.SetField(schedulerTable, "pause", L.NewFunction(m.luaPauseSchedulerTask(instance)))
+	L.SetField(schedulerTable, "resume", L.NewFunction(m.luaResumeSchedulerTask(instance)))
+	L.SetField(schedulerTable, "get_status", L.NewFunction(m.luaGetSchedulerTaskStatus(instance)))
+	L.SetField(schedulerTable, "list", L.NewFunction(m.luaListSchedulerTasks(instance)))
+	L.SetGlobal("scheduler", schedulerTable)
 
 	// 消息解析API
 	msgTable := L.NewTable()
@@ -1866,6 +2242,11 @@ func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
 	// 取消该插件的所有定时任务
 	if m.timerSystem != nil {
 		m.timerSystem.CancelPluginTasks(fmt.Sprintf("%s/%s", selfID, name))
+	}
+
+	// 取消该插件的调度器任务
+	if m.schedulerManager != nil {
+		m.schedulerManager.CancelPluginTasks(fmt.Sprintf("%s/%s", selfID, name))
 	}
 
 	// 记录最后5条日志

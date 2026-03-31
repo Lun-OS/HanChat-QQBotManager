@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
@@ -281,6 +282,7 @@ func (tm *TaskManager) createExecFunc(task *PluginTimerTask) func() {
 		}
 
 		// 尝试获取信号量，限制并发执行
+		semaphoreAcquired := false
 		if tm.timerSystem != nil {
 			if !tm.timerSystem.AcquireTaskSemaphore() {
 				// 并发数已达上限，重新排队
@@ -290,13 +292,15 @@ func (tm *TaskManager) createExecFunc(task *PluginTimerTask) func() {
 				tm.rescheduleTask(task, time.Now().Add(100*time.Millisecond))
 				return
 			}
-			// 确保释放信号量 - 使用安全的nil检查版本
-			defer func() {
-				if tm.timerSystem != nil {
-					tm.timerSystem.ReleaseTaskSemaphore()
-				}
-			}()
+			semaphoreAcquired = true
 		}
+
+		// 确保释放信号量 - 在函数退出时执行
+		defer func() {
+			if semaphoreAcquired && tm.timerSystem != nil {
+				tm.timerSystem.ReleaseTaskSemaphore()
+			}
+		}()
 
 		// 执行任务
 		retryCount := 0
@@ -331,6 +335,12 @@ func (tm *TaskManager) createExecFunc(task *PluginTimerTask) func() {
 				case func():
 					cb()
 					success = true
+				default:
+					if tm.logger != nil {
+						tm.logger.Warnw("不支持的回调类型，任务将静默失败", "task_id", task.ID, "plugin", task.PluginName, "callback_type", fmt.Sprintf("%T", task.Callback))
+					}
+					execErr = fmt.Errorf("不支持的回调类型: %T", task.Callback)
+					success = false
 				}
 			}()
 
@@ -349,7 +359,10 @@ func (tm *TaskManager) createExecFunc(task *PluginTimerTask) func() {
 			if tm.logger != nil {
 				tm.logger.Warnw("任务执行失败，准备重试", "task_id", task.ID, "plugin", task.PluginName, "retry_count", retryCount, "delay", retryDelay, "error", execErr)
 			}
-			time.Sleep(retryDelay)
+			// 使用重新调度替代阻塞Sleep，避免goroutine堆积
+			// 注意：这里不再增加 ExecCount，重试时保持原计数
+			tm.rescheduleTask(task, time.Now().Add(retryDelay))
+			return
 		}
 
 		// 更新任务状态和执行统计
@@ -490,22 +503,16 @@ func parseInterval(s string) (time.Duration, error) {
 
 // 解析Cron表达式，计算下一次执行时间
 func parseCronNext(s string) (time.Time, error) {
-	// 简化的Cron表达式解析，支持分钟、小时、天、月、星期
-	// 格式：* * * * * (分 时 日 月 周)
 	s = strings.TrimSpace(s)
-	parts := strings.Fields(s)
-	if len(parts) != 5 {
-		return time.Time{}, fmt.Errorf("无效的Cron表达式格式: %s", s)
+
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	schedule, err := parser.Parse(s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("无效的Cron表达式: %s, 错误: %v", s, err)
 	}
 
 	now := time.Now()
-
-	// 简化实现：只支持固定值和通配符
-	// 实际生产环境应使用完整的Cron表达式解析库
-
-	// 计算下一次执行时间
-	// 这里使用简单的实现，实际应用中应使用更完整的Cron解析
-	next := now.Add(time.Minute)
+	next := schedule.Next(now)
 	return next, nil
 }
 

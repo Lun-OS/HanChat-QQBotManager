@@ -27,13 +27,31 @@ type WebLoginService struct {
 	banIPFile       string
 	failedAttempts  map[string]int // IP -> 失败次数
 	tokens          map[string]*LoginToken // token -> 登录凭证
+
+	// Token续期配置
+	tokenDuration    time.Duration // Token默认有效期
+	minRenewalRatio  float64       // 触发续期的剩余比例阈值（默认0.5）
+	maxRenewalRatio  float64       // 最大可续期比例（默认1.0，即最多延长到2倍原始有效期）
+	renewalCooldown  time.Duration  // 续期冷却时间（防止频繁续期）
+	lastRenewal      map[string]time.Time // token -> 上次续期时间
 }
 
 // LoginToken 登录凭证
 type LoginToken struct {
-	Token     string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Token       string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	LastRenewAt time.Time // 上次续期时间
+}
+
+// TokenRenewResult Token续期结果
+type TokenRenewResult struct {
+	Renewed         bool      // 是否进行了续期
+	OldExpiresAt    time.Time // 续期前过期时间
+	NewExpiresAt    time.Time // 续期后过期时间
+	RemainingBefore time.Duration // 续期前剩余时间
+	RemainingAfter  time.Duration // 续期后剩余时间
+	Reason          string    // 续期原因或未续期原因
 }
 
 // NewWebLoginService 创建Web登录服务
@@ -70,6 +88,13 @@ func NewWebLoginService(baseLogger *zap.Logger) *WebLoginService {
 		banIPFile:      banIPFile,
 		failedAttempts: make(map[string]int),
 		tokens:         make(map[string]*LoginToken),
+
+		// Token续期配置 - 默认1小时有效期
+		tokenDuration:   1 * time.Hour,
+		minRenewalRatio:  0.5,       // 剩余50%以下才续期
+		maxRenewalRatio:  1.0,       // 最多延长到2倍原始有效期
+		renewalCooldown:  5 * time.Second, // 续期冷却5秒，防止频繁续期
+		lastRenewal:      make(map[string]time.Time),
 	}
 
 	// 确保BanIP.ini目录存在
@@ -138,17 +163,19 @@ func (s *WebLoginService) Login(req *LoginRequest, clientIP string) *LoginRespon
 
 	// 5. 生成登录凭证
 	token := s.generateToken()
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := time.Now().Add(s.tokenDuration)
 
 	s.mu.Lock()
 	s.tokens[token] = &LoginToken{
-		Token:     token,
-		CreatedAt: time.Now(),
-		ExpiresAt: expiresAt,
+		Token:       token,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   expiresAt,
+		LastRenewAt: time.Now(),
 	}
 	s.mu.Unlock()
 
-	s.logger.Infow("登录成功", "ip", realIP, "username", req.Username)
+	s.logger.Infow("登录成功", "ip", realIP, "username", req.Username,
+		"token_ttl", s.tokenDuration)
 
 	return &LoginResponse{
 		Success:   true,
@@ -168,7 +195,6 @@ func (s *WebLoginService) ValidateToken(token string) bool {
 		return false
 	}
 
-	// 检查是否过期
 	if time.Now().After(t.ExpiresAt) {
 		return false
 	}
@@ -176,30 +202,101 @@ func (s *WebLoginService) ValidateToken(token string) bool {
 	return true
 }
 
-// RefreshToken 刷新Token有效期
-// 如果Token有效，延长其过期时间并返回新的过期时间
-func (s *WebLoginService) RefreshToken(token string) (time.Time, bool) {
+// RenewTokenIfNeeded 智能续期Token
+// 当token剩余有效期不足50%时，自动续期
+// 续期条件：
+// 1. Token存在且有效
+// 2. 不在续期冷却期内（防止频繁续期）
+// 3. 剩余有效期不足tokenDuration的50%
+// 4. 续期后不超过原始有效期的2倍（最大有效期限制）
+func (s *WebLoginService) RenewTokenIfNeeded(token string) *TokenRenewResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := time.Now()
+	result := &TokenRenewResult{}
+
 	t, exists := s.tokens[token]
 	if !exists {
-		return time.Time{}, false
+		result.Reason = "token_not_found"
+		return result
 	}
 
-	// 检查是否过期
-	now := time.Now()
 	if now.After(t.ExpiresAt) {
+		result.Reason = "token_expired"
 		delete(s.tokens, token)
-		return time.Time{}, false
+		return result
 	}
 
-	// 延长过期时间（最多延长1小时）
-	newExpiresAt := now.Add(1 * time.Hour)
-	t.ExpiresAt = newExpiresAt
+	result.OldExpiresAt = t.ExpiresAt
+	result.RemainingBefore = t.ExpiresAt.Sub(now)
 
-	s.logger.Infow("Token已刷新", "token", token[:8]+"...")
-	return newExpiresAt, true
+	// 检查冷却期
+	if lastRenew, hasLastRenew := s.lastRenewal[token]; hasLastRenew {
+		if now.Sub(lastRenew) < s.renewalCooldown {
+			result.Reason = fmt.Sprintf("renewal_cooldown_active (cooldown=%v, remaining=%v)",
+				s.renewalCooldown, s.renewalCooldown-now.Sub(lastRenew))
+			result.NewExpiresAt = t.ExpiresAt
+			result.RemainingAfter = result.RemainingBefore
+			return result
+		}
+	}
+
+	// 计算续期后的新过期时间
+	totalValidDuration := s.tokenDuration // 原始有效期时长
+	maxExpiresAt := t.CreatedAt.Add(totalValidDuration).Add(s.tokenDuration * time.Duration(s.maxRenewalRatio))
+
+	// 计算剩余有效期比例
+	remainingRatio := result.RemainingBefore.Seconds() / s.tokenDuration.Seconds()
+
+	// 检查是否需要续期：剩余时间不足50%
+	if remainingRatio >= s.minRenewalRatio {
+		result.Reason = fmt.Sprintf("sufficient_remaining_time (ratio=%.2f%%, threshold=%.2f%%)",
+			remainingRatio*100, s.minRenewalRatio*100)
+		result.NewExpiresAt = t.ExpiresAt
+		result.RemainingAfter = result.RemainingBefore
+		return result
+	}
+
+	// 计算新的过期时间
+	newExpiresAt := now.Add(s.tokenDuration)
+
+	// 确保不超过最大有效期
+	if newExpiresAt.After(maxExpiresAt) {
+		newExpiresAt = maxExpiresAt
+		result.Reason = fmt.Sprintf("capped_at_max_duration (new_expires_at=%v, max=%v)",
+			newExpiresAt.Format(time.RFC3339), maxExpiresAt.Format(time.RFC3339))
+	} else {
+		result.Reason = "normal_renewal"
+	}
+
+	// 执行续期
+	oldExpiresAt := t.ExpiresAt
+	t.ExpiresAt = newExpiresAt
+	t.LastRenewAt = now
+	s.lastRenewal[token] = now
+
+	result.Renewed = true
+	result.NewExpiresAt = newExpiresAt
+	result.RemainingAfter = newExpiresAt.Sub(now)
+
+	s.logger.Infow("Token续期成功",
+		"token", token[:8]+"...",
+		"old_expires_at", oldExpiresAt.Format(time.RFC3339),
+		"new_expires_at", newExpiresAt.Format(time.RFC3339),
+		"remaining_before", result.RemainingBefore.String(),
+		"remaining_after", result.RemainingAfter.String(),
+		"renewal_reason", result.Reason,
+	)
+
+	return result
+}
+
+// RefreshToken 刷新Token有效期（兼容旧接口）
+// 如果Token有效，延长其过期时间并返回新的过期时间
+func (s *WebLoginService) RefreshToken(token string) (time.Time, bool) {
+	result := s.RenewTokenIfNeeded(token)
+	return result.NewExpiresAt, result.Renewed
 }
 
 // GetTokenInfo 获取Token信息
@@ -212,12 +309,41 @@ func (s *WebLoginService) GetTokenInfo(token string) (*LoginToken, bool) {
 		return nil, false
 	}
 
-	// 检查是否过期
 	if time.Now().After(t.ExpiresAt) {
 		return nil, false
 	}
 
 	return t, true
+}
+
+// GetTokenRemainingTime 获取Token剩余有效期
+func (s *WebLoginService) GetTokenRemainingTime(token string) time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	t, exists := s.tokens[token]
+	if !exists {
+		return 0
+	}
+
+	if time.Now().After(t.ExpiresAt) {
+		return 0
+	}
+
+	return t.ExpiresAt.Sub(time.Now())
+}
+
+// IsInRenewalCooldown 检查token是否处于续期冷却期
+func (s *WebLoginService) IsInRenewalCooldown(token string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	lastRenew, exists := s.lastRenewal[token]
+	if !exists {
+		return false
+	}
+
+	return time.Now().Sub(lastRenew) < s.renewalCooldown
 }
 
 // Logout 登出
@@ -226,6 +352,7 @@ func (s *WebLoginService) Logout(token string) {
 	defer s.mu.Unlock()
 
 	delete(s.tokens, token)
+	delete(s.lastRenewal, token)
 }
 
 // extractRealIP 提取真实IP

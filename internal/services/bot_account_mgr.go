@@ -226,9 +226,8 @@ func (m *BotAccountManager) DeleteAccount(selfID string) error {
 	}
 
 	// 如果账号在线，先断开连接
-	if account.WsConn != nil {
-		account.WsConn.Close()
-	}
+	// 使用 SafeClose 安全关闭，避免重复关闭
+	account.SafeClose()
 
 	delete(m.accounts, selfID)
 
@@ -262,7 +261,8 @@ func (m *BotAccountManager) HandleDisconnect(selfID string, reason error) {
 	)
 
 	// 清理连接句柄，标记离线，记录离线时间
-	account.WsConn = nil
+	// 使用 SafeClose 安全关闭连接，避免重复关闭
+	account.SafeClose()
 	account.Status = "offline"
 	now := time.Now()
 	account.OfflineAt = &now
@@ -344,8 +344,8 @@ func (m *BotAccountManager) CleanupStaleConnections(maxIdle time.Duration) {
 					"self_id", selfID,
 					"last_activity_at", account.LastActivityAt,
 					"idle_duration", now.Sub(account.LastActivityAt).String())
-				account.WsConn.Close()
-				account.WsConn = nil
+				// 使用 SafeClose 安全关闭，避免重复关闭
+				account.SafeClose()
 				account.Status = "offline"
 				account.OfflineAt = &now
 				m.config.SaveAccountConfig(account)

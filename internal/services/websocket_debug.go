@@ -71,6 +71,11 @@ func (s *WSDebugService) registerInterceptors() {
 	s.reverseWS.AddRawEventHandler(func(selfID string, rawData []byte) {
 		s.ForwardRawEvent(selfID, rawData)
 	})
+
+	// 注册调试响应处理器 - 转发API响应到调试客户端
+	s.reverseWS.AddDebugResponseHandler(func(selfID string, rawData []byte) {
+		s.ForwardDebugResponse(selfID, rawData)
+	})
 }
 
 // HandleDebugWebSocket 处理调试WebSocket连接
@@ -197,16 +202,38 @@ func (s *WSDebugService) ForwardRawEvent(selfID string, rawData []byte) {
 	s.clientsMu.RLock()
 	client, exists := s.clients[selfID]
 	s.clientsMu.RUnlock()
-	
+
 	if !exists {
 		return
 	}
-	
+
 	// 直接透传原始数据，不做任何修改
 	select {
 	case client.sendChan <- rawData:
 	default:
 		s.logger.Warnw("调试客户端发送通道已满，丢弃消息",
+			"self_id", client.selfID)
+	}
+}
+
+// ForwardDebugResponse 转发API响应到调试客户端
+func (s *WSDebugService) ForwardDebugResponse(selfID string, rawData []byte) {
+	s.clientsMu.RLock()
+	client, exists := s.clients[selfID]
+	s.clientsMu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	s.logger.Debugw("转发API响应到调试客户端",
+		"self_id", selfID,
+		"size", len(rawData))
+
+	select {
+	case client.sendChan <- rawData:
+	default:
+		s.logger.Warnw("调试客户端发送通道已满，丢弃API响应",
 			"self_id", client.selfID)
 	}
 }

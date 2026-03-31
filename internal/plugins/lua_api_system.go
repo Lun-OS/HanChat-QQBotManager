@@ -206,18 +206,23 @@ func (m *Manager) luaDisconnectBot() func(*lua.LState) int {
 			return 2
 		}
 
-		account, err := m.reverseWS.GetAccountManager().GetAccount(targetSelfID)
+		accountMgr := m.reverseWS.GetAccountManager()
+		if accountMgr == nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString("WebSocket服务未初始化"))
+			return 2
+		}
+
+		// 检查账号是否存在
+		_, err := accountMgr.GetAccount(targetSelfID)
 		if err != nil {
 			L.Push(lua.LBool(false))
 			L.Push(lua.LString(err.Error()))
 			return 2
 		}
 
-		if account.WsConn != nil {
-			account.WsConn.Close()
-		}
-
-		m.reverseWS.GetAccountManager().HandleDisconnect(targetSelfID, fmt.Errorf("插件请求断开连接"))
+		// 使用 HandleDisconnect 统一处理断开连接，它会通过 SafeClose 安全关闭
+		accountMgr.HandleDisconnect(targetSelfID, fmt.Errorf("插件请求断开连接"))
 
 		L.Push(lua.LBool(true))
 		return 1

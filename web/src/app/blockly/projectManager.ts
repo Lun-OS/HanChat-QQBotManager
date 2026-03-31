@@ -179,6 +179,7 @@ export async function exportPlugin(
     }
 
     if (exists && forceOverwrite) {
+      // 覆盖模式：只卸载插件，不删除目录，保留其他文件
       try {
         await pluginApi.unloadPlugin(targetAccountId, pluginName);
       } catch (e: any) {
@@ -186,16 +187,13 @@ export async function exportPlugin(
           console.log(`插件 ${pluginName} 未运行或账号容器不存在，跳过卸载`);
         }
       }
-      const deleteRes = await pluginManagerApi.deleteFile(pluginPath);
-      if (!deleteRes.success && !deleteRes.message?.includes('不存在')) {
-        return { success: false, message: deleteRes.message || 'Failed to delete existing plugin' };
+      // 注意：不再删除整个插件目录，只覆盖 main.lua 和 config.json
+    } else if (!exists) {
+      // 新插件：创建插件目录
+      const folderRes = await pluginManagerApi.createFile(`/plugins/${targetAccountId}`, pluginName, 'folder');
+      if (!folderRes.success) {
+        return { success: false, message: folderRes.message || 'Failed to create plugin folder' };
       }
-    }
-    
-    // 创建插件目录
-    const folderRes = await pluginManagerApi.createFile(`/plugins/${targetAccountId}`, pluginName, 'folder');
-    if (!folderRes.success) {
-      return { success: false, message: folderRes.message || 'Failed to create plugin folder' };
     }
     
     // 写入 main.lua

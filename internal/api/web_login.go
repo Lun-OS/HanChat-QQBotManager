@@ -172,7 +172,7 @@ func (h *WebLoginHandler) extractToken(c *gin.Context) string {
 	return ""
 }
 
-// AuthMiddleware 认证中间件
+// AuthMiddleware 认证中间件（带自动续期）
 func (h *WebLoginHandler) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := h.extractToken(c)
@@ -193,6 +193,19 @@ func (h *WebLoginHandler) AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// Token有效，进行智能续期检查
+		renewResult := h.loginSvc.RenewTokenIfNeeded(token)
+
+		// 将续期信息记录到响应头
+		if renewResult.Renewed {
+			c.Header("X-Token-Renewed", "true")
+			c.Header("X-Token-Expires-At", renewResult.NewExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+		}
+
+		// 将token信息存储到上下文
+		c.Set("token", token)
+		c.Set("token_renew_result", renewResult)
 
 		c.Next()
 	}
