@@ -1203,6 +1203,61 @@ const CUSTOM_BLOCKS = [
     tooltip: '介绍：获取消息的唯一ID\n输入：事件 - 事件对象\n输出：数字或字符串（消息ID）',
     helpUrl: HELP_URL.block,
   },
+  {
+    type: 'message_get_sender_role',
+    message0: '获取事件 %1 发送者的角色',
+    args0: [
+      { type: 'input_value', name: 'EVENT', check: 'Event' },
+    ],
+    output: 'String',
+    colour: COLOR_HUE.message,
+    tooltip: '介绍：获取消息发送者的角色（owner/admin/member）\n输入：事件 - 事件对象\n输出：字符串（发送者角色）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'message_is_sender_owner',
+    message0: '事件 %1 发送者是群主',
+    args0: [
+      { type: 'input_value', name: 'EVENT', check: 'Event' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.message,
+    tooltip: '介绍：检查消息发送者是否是群主\n输入：事件 - 事件对象\n输出：布尔值（true/false）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'message_is_sender_admin',
+    message0: '事件 %1 发送者是管理员',
+    args0: [
+      { type: 'input_value', name: 'EVENT', check: 'Event' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.message,
+    tooltip: '介绍：检查消息发送者是否是管理员或群主\n输入：事件 - 事件对象\n输出：布尔值（true/false）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'message_is_sender_member',
+    message0: '事件 %1 发送者是普通群员',
+    args0: [
+      { type: 'input_value', name: 'EVENT', check: 'Event' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.message,
+    tooltip: '介绍：检查消息发送者是否是普通群员\n输入：事件 - 事件对象\n输出：布尔值（true/false）',
+    helpUrl: HELP_URL.block,
+  },
+  {
+    type: 'message_has_reply',
+    message0: '事件 %1 引用了其他消息',
+    args0: [
+      { type: 'input_value', name: 'EVENT', check: 'Event' },
+    ],
+    output: 'Boolean',
+    colour: COLOR_HUE.message,
+    tooltip: '介绍：检查消息是否引用了其他消息\n输入：事件 - 事件对象\n输出：布尔值（true/false）',
+    helpUrl: HELP_URL.block,
+  },
   // ========== 文件操作积木 ==========
   {
     type: 'file_upload_group',

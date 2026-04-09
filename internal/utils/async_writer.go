@@ -93,6 +93,12 @@ func (aw *AsyncWriter) Write(data []byte) (int, error) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
+	defer func() {
+		if r := recover(); r != nil {
+			atomic.AddInt64(&aw.dropped, 1)
+		}
+	}()
+
 	select {
 	case aw.buffer <- dataCopy:
 		return len(data), nil

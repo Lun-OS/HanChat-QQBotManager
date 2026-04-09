@@ -440,35 +440,39 @@ func (m *Manager) workerLoop(id int) {
 	for {
 		select {
 		case <-m.priorityQueue.notEmpty:
-			// 尝试获取任务
-			task, ok := m.priorityQueue.Pop()
-			if !ok {
-				continue
-			}
+			// 持续处理队列中的任务，直到队列为空
+			for {
+				// 尝试获取任务
+				task, ok := m.priorityQueue.Pop()
+				if !ok {
+					// 队列已空，退出内层循环
+					break
+				}
 
-			// 减少排队计数
-			atomic.AddInt64(&m.queuedEvents, -1)
+				// 减少排队计数
+				atomic.AddInt64(&m.queuedEvents, -1)
 
-			// 检查插件实例是否正在卸载，避免处理已卸载插件的事件
-			task.instance.unloadingMu.RLock()
-			isUnloading := task.instance.unloading
-			task.instance.unloadingMu.RUnlock()
+				// 检查插件实例是否正在卸载，避免处理已卸载插件的事件
+				task.instance.unloadingMu.RLock()
+				isUnloading := task.instance.unloading
+				task.instance.unloadingMu.RUnlock()
 
-			if isUnloading {
-				m.logger.Debugw("跳过正在卸载的插件事件",
-					"workerId", id,
-					"plugin", task.pluginName,
-					"event", task.eventType)
-				continue
-			}
+				if isUnloading {
+					m.logger.Debugw("跳过正在卸载的插件事件",
+						"workerId", id,
+						"plugin", task.pluginName,
+						"event", task.eventType)
+					continue
+				}
 
-			// 执行任务
-			if err := m.callEventHandler(task.instance, task.handler, task.eventData); err != nil {
-				m.logger.Errorw("执行事件处理器失败",
-					"workerId", id,
-					"plugin", task.pluginName,
-					"event", task.eventType,
-					"error", err)
+				// 执行任务
+				if err := m.callEventHandler(task.instance, task.handler, task.eventData); err != nil {
+					m.logger.Errorw("执行事件处理器失败",
+						"workerId", id,
+						"plugin", task.pluginName,
+						"event", task.eventType,
+						"error", err)
+				}
 			}
 
 		case <-m.ctx.Done():
@@ -1514,10 +1518,17 @@ local function openSimpleDb(dbName)
 	if not dbName or dbName == "" then
 		return nil, "数据库名称不能为空"
 	end
-	if not dbName:match("%.db%.csv$") then
-		dbName = dbName .. ".db.csv"
+	-- 如果已经带有 .db.csv 后缀，直接返回
+	if dbName:match("%.db%.csv$") then
+		return dbName
 	end
-	return dbName
+	-- 如果路径中包含斜杠，说明是带目录的路径，只给文件名部分添加后缀
+	local dir, file = dbName:match("^(.-)/?([^/]+)$")
+	if dir and dir ~= "" then
+		return dir .. "/" .. file .. ".db.csv"
+	end
+	-- 普通数据库名，直接添加后缀
+	return dbName .. ".db.csv"
 end
 
 -- 存储键值对
@@ -1526,7 +1537,9 @@ function db.set(dbName, key, value)
 	if not filePath then
 		return false, err
 	end
-	if not key or key == "" then
+	-- 将键转换为字符串，确保类型一致
+	key = tostring(key)
+	if key == "" then
 		return false, "键不能为空"
 	end
 	if value == nil then
@@ -1564,7 +1577,14 @@ function db.set(dbName, key, value)
 		table.insert(lines, k .. "=" .. v)
 	end
 	local newContent = table.concat(lines, "\n")
-	return file.write_safe(filePath, newContent)
+	
+	-- 确保目录存在
+	local dir = filePath:match("^(.+)/[^/]+$")
+	if dir and dir ~= "" then
+		file.mkdir(dir)
+	end
+	
+	return file.write(filePath, newContent)
 end
 
 -- 读取键值对
@@ -1573,11 +1593,23 @@ function db.get(dbName, key, default)
 	if not filePath then
 		return default
 	end
-	if not key or key == "" then
+	-- 将键转换为字符串，确保类型一致
+	key = tostring(key)
+	if key == "" then
 		return default
 	end
 
-	local content = file.read(filePath) or ""
+	-- 检查文件是否存在
+	local exists_func = file.exists or file._lua_exists
+	if not exists_func(filePath) then
+		return default
+	end
+
+	local content = file.read(filePath)
+	if not content or content == "" then
+		return default
+	end
+
 	for line in content:gmatch("[^\r\n]+") do
 		local eqPos = line:find("=")
 		if eqPos then
@@ -2033,6 +2065,13 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(msgTable, "has_image", L.NewFunction(m.luaMsgHasImage()))
 	L.SetField(msgTable, "has_voice", L.NewFunction(m.luaMsgHasVoice()))
 	L.SetField(msgTable, "get_reply_id", L.NewFunction(m.luaMsgGetReplyId()))
+	// 新增：发送者角色相关
+	L.SetField(msgTable, "get_sender_role", L.NewFunction(m.luaMsgGetSenderRole()))
+	L.SetField(msgTable, "is_sender_owner", L.NewFunction(m.luaMsgIsSenderOwner()))
+	L.SetField(msgTable, "is_sender_admin", L.NewFunction(m.luaMsgIsSenderAdmin()))
+	L.SetField(msgTable, "is_sender_member", L.NewFunction(m.luaMsgIsSenderMember()))
+	// 新增：回复消息相关
+	L.SetField(msgTable, "has_reply", L.NewFunction(m.luaMsgHasReply()))
 	// 新增：前端需要的msg.*函数
 	L.SetField(msgTable, "is_group_message", L.NewFunction(m.luaMsgIsGroupMessage()))
 	L.SetField(msgTable, "is_private_message", L.NewFunction(m.luaMsgIsPrivateMessage()))

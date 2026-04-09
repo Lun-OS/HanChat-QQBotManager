@@ -91,6 +91,9 @@ export function getToolboxCategories(): any {
           block('msg_get_first_image'),
           block('msg_get_at_users'),
           block('msg_get_reply_info'),
+          block('msg_get_reply_id'),
+          block('message_get_reply_id'),
+          block('message_get_sender_role'),
         ]),
         subCategory('消息判断', 'message_category', [
           block('msg_contains_text'),
@@ -109,6 +112,10 @@ export function getToolboxCategories(): any {
           block('msg_is_at_bot'),
           block('msg_is_at_all'),
           block('msg_has_url'),
+          block('message_is_sender_owner'),
+          block('message_is_sender_admin'),
+          block('message_is_sender_member'),
+          block('message_has_reply'),
         ]),
         subCategory('卡片解析', 'message_category', [
           block('msg_get_json_data'),

@@ -179,7 +179,13 @@ func (al *AsyncLogger) log(level zapcore.Level, msg string, fields ...zap.Field)
 		fields: fields,
 		time:   time.Now(),
 	}
-	
+
+	defer func() {
+		if r := recover(); r != nil {
+			atomic.AddInt64(&al.dropped, 1)
+		}
+	}()
+
 	select {
 	case al.logChan <- entry:
 		// 成功写入

@@ -4,8 +4,8 @@ import { Save, Github, FileText, HelpCircle, Shield, Clock, Trash2, Globe, Info,
 import { toast } from 'sonner';
 import { settingsApi, systemApi } from '../services/api';
 
-// 前端版本号（从环境变量读取，默认为v4.5）
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'v4.5';
+// 前端版本号（从环境变量读取，默认为v4.8）
+const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'v4.8';
 
 export function Settings() {
   const [websocketAuthorization, setWebsocketAuthorization] = useState('');

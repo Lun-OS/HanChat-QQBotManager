@@ -124,6 +124,9 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
     blockClipboardRef.current = content;
   };
 
+  // 添加复制成功后的清理机制（可选，用户可能需要多次粘贴）
+  // 但可以在复制新内容时清理旧内容
+
   // 清理剪贴板
   const clearClipboard = () => {
     setClipboardContent(null);
@@ -1727,62 +1730,7 @@ end)
           return blockClipboardRef.current ? 'enabled' : 'disabled';
         },
         callback: (scope: any) => {
-          if (!blockClipboardRef.current) return;
-          if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
-            toast.error('工作区已失效，请刷新页面');
-            return;
-          }
-          try {
-            const xml = Blockly.utils.xml.textToDom(blockClipboardRef.current);
-            const blockElements = xml.getElementsByTagName('block');
-            const blockCount = blockElements.length;
-
-            if (blockCount > 50) {
-              toast.info(`正在粘贴 ${blockCount} 个积木，请稍候...`);
-            }
-
-            if (blockCount > 100) {
-              // 大量积木时分批处理
-              const BATCH_SIZE = 30;
-              const BATCH_DELAY = 50;
-              const blocksArray = Array.from(blockElements);
-              let currentIndex = 0;
-
-              const processBatch = () => {
-                if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
-                  toast.error('工作区已失效，请刷新页面');
-                  return;
-                }
-                const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
-                batch.forEach((blockEl) => {
-                  const newXml = document.implementation.createDocument('', '', null);
-                  const root = newXml.createElement('xml');
-                  root.appendChild(newXml.importNode(blockEl, true));
-                  try {
-                    Blockly.Xml.domToWorkspace(root.firstChild as Element, workspaceRef.current);
-                  } catch (e) {
-                    console.warn('粘贴单个积木失败:', e);
-                  }
-                });
-                currentIndex += BATCH_SIZE;
-                if (currentIndex < blocksArray.length) {
-                  setTimeout(processBatch, BATCH_DELAY);
-                } else {
-                  workspaceRef.current.render();
-                  toast.success(`成功粘贴 ${blockCount} 个积木`);
-                }
-              };
-
-              processBatch();
-            } else {
-              Blockly.Xml.domToWorkspace(xml, workspaceRef.current);
-              workspaceRef.current.render();
-              toast.success('粘贴成功');
-            }
-          } catch (error) {
-            console.error('粘贴失败:', error);
-            toast.error('粘贴失败');
-          }
+          performPaste();
         },
         scopeType: Blockly.ContextMenuRegistry.ScopeType.WORKSPACE,
         id: 'blocklyPaste',
@@ -2051,21 +1999,55 @@ end)
     }
   }, []);
 
-  // 从剪贴板粘贴积木 - 优化版，支持大量积木分批处理
-  const handlePasteBlocks = useCallback(() => {
+  // 修复旧块 XML - 转换 text_replace 为 text_replace_custom
+  const fixOldBlockXml = useCallback((xml: Element): Element => {
+    const blocks = xml.getElementsByTagName('block');
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (block.getAttribute('type') === 'text_replace') {
+        // 转换为新的块类型
+        block.setAttribute('type', 'text_replace_custom');
+        
+        // 转换输入名称
+        const inputs = block.getElementsByTagName('value');
+        for (let j = 0; j < inputs.length; j++) {
+          const input = inputs[j];
+          const name = input.getAttribute('name');
+          if (name === 'STR') {
+            input.setAttribute('name', 'TEXT');
+          } else if (name === 'FROM') {
+            input.setAttribute('name', 'SEARCH');
+          } else if (name === 'TO') {
+            input.setAttribute('name', 'REPLACE');
+          }
+        }
+      }
+    }
+    return xml;
+  }, []);
+
+  // 通用粘贴函数 - 统一处理粘贴逻辑
+  const performPaste = useCallback(() => {
     const workspace = workspaceRef.current as Blockly.WorkspaceSvg | null;
-    if (!workspace) {
-      toast.error('工作区未初始化');
+    
+    // 首先验证工作区状态
+    if (!workspace || typeof workspace.isDisposed === 'function' && workspace.isDisposed()) {
+      toast.error('工作区已失效，请刷新页面');
       return;
     }
 
-    if (!blockClipboard) {
+    const clipboardContent = blockClipboardRef.current;
+    if (!clipboardContent) {
       toast.warning('剪贴板为空，请先复制积木');
       return;
     }
 
     try {
-      const xml = Blockly.utils.xml.textToDom(blockClipboard);
+      let xml = Blockly.utils.xml.textToDom(clipboardContent);
+      
+      // 修复旧块
+      xml = fixOldBlockXml(xml);
+      
       const blockElements = xml.getElementsByTagName('block');
       const blockCount = blockElements.length;
 
@@ -2073,55 +2055,27 @@ end)
         toast.info(`正在粘贴 ${blockCount} 个积木，请稍候...`);
       }
 
-      if (blockCount > 100) {
-        // 大量积木时分批处理，避免 DOM 操作过载
-        const BATCH_SIZE = 30;
-        const BATCH_DELAY = 50;
-        const blocksArray = Array.from(blockElements);
-
-        let currentIndex = 0;
-
-        const processBatch = () => {
-          if (!workspaceRef.current || typeof workspaceRef.current.isDisposed !== 'function' || workspaceRef.current.isDisposed()) {
-            toast.error('工作区已失效，请刷新页面');
-            return;
-          }
-
-          const batch = blocksArray.slice(currentIndex, currentIndex + BATCH_SIZE);
-
-          batch.forEach((blockEl) => {
-            const newXml = document.implementation.createDocument('', '', null);
-            const root = newXml.createElement('xml');
-            root.appendChild(newXml.importNode(blockEl, true));
-            try {
-              Blockly.Xml.domToWorkspace(root.firstChild as Element, workspaceRef.current);
-            } catch (e) {
-              console.warn('粘贴单个积木失败:', e);
-            }
-          });
-
-          currentIndex += BATCH_SIZE;
-
-          if (currentIndex < blocksArray.length) {
-            setTimeout(processBatch, BATCH_DELAY);
-          } else {
-            workspaceRef.current.render();
-            toast.success(`成功粘贴 ${blockCount} 个积木`);
-          }
-        };
-
-        processBatch();
-      } else {
-        // 小量积木直接粘贴
-        Blockly.Xml.domToWorkspace(xml, workspace);
-        workspace.render();
-        toast.success('粘贴成功');
-      }
+      // 使用 Blockly 内置的 domToWorkspace 进行粘贴，比手动分批更稳定
+      const pastedBlocks = Blockly.Xml.domToWorkspace(xml, workspace);
+      
+      // 清理剪贴板，防止重复粘贴累积
+      setClipboardContent(null);
+      
+      workspace.render();
+      toast.success(`成功粘贴 ${blockCount} 个积木`);
+      
     } catch (error) {
       console.error('粘贴失败:', error);
-      toast.error('粘贴失败');
+      toast.error('粘贴失败，请重试');
+      // 出错时也清理剪贴板，避免重复尝试同样的错误内容
+      setClipboardContent(null);
     }
-  }, [blockClipboard]);
+  }, [fixOldBlockXml]);
+
+  // 从剪贴板粘贴积木
+  const handlePasteBlocks = useCallback(() => {
+    performPaste();
+  }, [performPaste]);
 
   // 全屏切换功能
   const toggleFullscreen = useCallback(() => {
@@ -2222,7 +2176,7 @@ end)
     }
   };
 
-  const handleOpenProject = async (projectFile: BlocklyProjectFile) => {
+  const handleOpenProject = useCallback(async (projectFile: BlocklyProjectFile) => {
     if (hasUnsavedChanges) {
       const confirmed = window.confirm('您有未保存的更改，确定要打开其他项目吗？');
       if (!confirmed) return;
@@ -2236,10 +2190,12 @@ end)
           workspaceRef.current.clear();
           if (project.xmlContent) {
             try {
-              Blockly.Xml.domToWorkspace(
-                Blockly.utils.xml.textToDom(project.xmlContent),
-                workspaceRef.current
-              );
+              let xml = Blockly.utils.xml.textToDom(project.xmlContent);
+              
+              // 修复旧块
+              xml = fixOldBlockXml(xml);
+              
+              Blockly.Xml.domToWorkspace(xml, workspaceRef.current);
             } catch (e) {
               console.error('Failed to load workspace XML:', e);
             }
@@ -2257,7 +2213,7 @@ end)
     } finally {
       setLoading(false);
     }
-  };
+  }, [hasUnsavedChanges, fixOldBlockXml]);
 
   const handleSaveProject = useCallback(async () => {
     if (!currentProject || !workspaceRef.current) {

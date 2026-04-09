@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -121,7 +122,7 @@ func (ba *BotAccount) WriteMessage(messageType int, data []byte) error {
 	defer ba.connMu.Unlock()
 
 	if ba.WsConn == nil {
-		return nil
+		return fmt.Errorf("连接不存在")
 	}
 
 	return ba.WsConn.WriteMessage(messageType, data)

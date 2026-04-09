@@ -208,12 +208,7 @@ func (s *WSDebugService) ForwardRawEvent(selfID string, rawData []byte) {
 	}
 
 	// 直接透传原始数据，不做任何修改
-	select {
-	case client.sendChan <- rawData:
-	default:
-		s.logger.Warnw("调试客户端发送通道已满，丢弃消息",
-			"self_id", client.selfID)
-	}
+	s.safeSend(client, rawData)
 }
 
 // ForwardDebugResponse 转发API响应到调试客户端
@@ -230,10 +225,23 @@ func (s *WSDebugService) ForwardDebugResponse(selfID string, rawData []byte) {
 		"self_id", selfID,
 		"size", len(rawData))
 
+	s.safeSend(client, rawData)
+}
+
+// safeSend 安全地向客户端发送数据，避免向已关闭通道发送数据导致panic
+func (s *WSDebugService) safeSend(client *WSDebugClient, data []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warnw("向调试客户端发送数据失败，客户端可能已关闭",
+				"self_id", client.selfID,
+				"recover", r)
+		}
+	}()
+
 	select {
-	case client.sendChan <- rawData:
+	case client.sendChan <- data:
 	default:
-		s.logger.Warnw("调试客户端发送通道已满，丢弃API响应",
+		s.logger.Warnw("调试客户端发送通道已满，丢弃消息",
 			"self_id", client.selfID)
 	}
 }

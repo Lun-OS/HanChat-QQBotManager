@@ -4885,14 +4885,27 @@ func (m *Manager) luaMsgIsAtBot() func(*lua.LState) int {
 		}
 		botIdStr := ""
 		
-		// 支持数字和字符串类型的botId
-		botIdVal := L.Get(2)
-		switch botIdVal.Type() {
-		case lua.LTNumber:
-			botIdStr = strconv.FormatInt(int64(botIdVal.(lua.LNumber)), 10)
-		case lua.LTString:
-			botIdStr = botIdVal.String()
-		default:
+		// 优先从 event.self_id 获取机器人自己的QQ号
+		selfIdVal := L.GetField(event, "self_id")
+		if selfIdVal.Type() == lua.LTNumber {
+			botIdStr = strconv.FormatInt(int64(selfIdVal.(lua.LNumber)), 10)
+		} else if selfIdVal.Type() == lua.LTString {
+			botIdStr = selfIdVal.String()
+		} else {
+			// 如果没有 self_id，尝试从第二个参数获取（保持向后兼容）
+			if L.GetTop() >= 2 {
+				botIdVal := L.Get(2)
+				switch botIdVal.Type() {
+				case lua.LTNumber:
+					botIdStr = strconv.FormatInt(int64(botIdVal.(lua.LNumber)), 10)
+				case lua.LTString:
+					botIdStr = botIdVal.String()
+				}
+			}
+		}
+		
+		// 如果没有找到 botId，返回 false
+		if botIdStr == "" {
 			L.Push(lua.LBool(false))
 			return 1
 		}
@@ -5017,6 +5030,158 @@ func (m *Manager) luaMsgGetReplyId() func(*lua.LState) int {
 		}
 		
 		L.Push(replyId)
+		return 1
+	}
+}
+
+// 获取发送者角色
+func (m *Manager) luaMsgGetSenderRole() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LString(""))
+			return 1
+		}
+
+		// 从sender对象获取role
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			role := L.GetField(sender.(*lua.LTable), "role")
+			if role.Type() == lua.LTString {
+				L.Push(role)
+				return 1
+			}
+		}
+
+		// 如果没有找到，返回空字符串
+		L.Push(lua.LString(""))
+		return 1
+	}
+}
+
+// 判断发送者是否是群主
+func (m *Manager) luaMsgIsSenderOwner() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 从sender对象获取role
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			role := L.GetField(sender.(*lua.LTable), "role")
+			if role.Type() == lua.LTString && role.String() == "owner" {
+				L.Push(lua.LBool(true))
+				return 1
+			}
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// 判断发送者是否是管理员
+func (m *Manager) luaMsgIsSenderAdmin() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 从sender对象获取role
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			role := L.GetField(sender.(*lua.LTable), "role")
+			if role.Type() == lua.LTString && (role.String() == "admin" || role.String() == "owner") {
+				L.Push(lua.LBool(true))
+				return 1
+			}
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// 判断发送者是否是普通群员
+func (m *Manager) luaMsgIsSenderMember() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 从sender对象获取role
+		sender := L.GetField(event, "sender")
+		if sender.Type() == lua.LTTable {
+			role := L.GetField(sender.(*lua.LTable), "role")
+			if role.Type() == lua.LTString && role.String() == "member" {
+				L.Push(lua.LBool(true))
+				return 1
+			}
+		}
+
+		L.Push(lua.LBool(false))
+		return 1
+	}
+}
+
+// 判断消息是否引用了其他消息
+func (m *Manager) luaMsgHasReply() func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		event := m.getEventTable(L, 1)
+		if event == nil {
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		// 先检查是否有 reply_id 字段
+		replyId := L.GetField(event, "reply_id")
+		if replyId.Type() == lua.LTNumber || replyId.Type() == lua.LTString {
+			L.Push(lua.LBool(true))
+			return 1
+		}
+
+		// 从message字段获取消息段
+		messageField := L.GetField(event, "message")
+		if messageField.Type() == lua.LTTable {
+			messageTable := messageField.(*lua.LTable)
+			var hasReply bool = false
+			messageTable.ForEach(func(index lua.LValue, segment lua.LValue) {
+				if hasReply {
+					return
+				}
+				if segment.Type() != lua.LTTable {
+					return
+				}
+				segmentTable := segment.(*lua.LTable)
+				segType := L.GetField(segmentTable, "type")
+				if segType.Type() == lua.LTString && segType.String() == "reply" {
+					hasReply = true
+				}
+			})
+			if hasReply {
+				L.Push(lua.LBool(true))
+				return 1
+			}
+		}
+
+		// 从 raw_message 中检查
+		rawMessageField := L.GetField(event, "raw_message")
+		if rawMessageField.Type() == lua.LTString {
+			rawMessage := rawMessageField.String()
+			if cqReplyPattern.MatchString(rawMessage) || cqReplyPattern2.MatchString(rawMessage) {
+				L.Push(lua.LBool(true))
+				return 1
+			}
+		}
+
+		L.Push(lua.LBool(false))
 		return 1
 	}
 }

@@ -330,12 +330,12 @@ end
   generator.forBlock['event_on_message'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    const globalKey = `__event_${block.id}_${varName}`;
+    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_message(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  _G["${globalKey}"] = ${varName}
+  _G["${varName}"] = ${varName}
 ${statements}end)
 
 `;
@@ -344,12 +344,12 @@ ${statements}end)
   generator.forBlock['event_on_notice'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    const globalKey = `__event_${block.id}_${varName}`;
+    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  _G["${globalKey}"] = ${varName}
+  _G["${varName}"] = ${varName}
 ${statements}end)
 
 `;
@@ -358,12 +358,12 @@ ${statements}end)
   generator.forBlock['event_on_request'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    const globalKey = `__event_${block.id}_${varName}`;
+    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_request(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
   end
-  _G["${globalKey}"] = ${varName}
+  _G["${varName}"] = ${varName}
 ${statements}end)
 
 `;
@@ -391,8 +391,8 @@ ${statements}end
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -405,8 +405,8 @@ end)
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -419,8 +419,8 @@ end)
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -433,8 +433,8 @@ end)
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -446,8 +446,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "group_recall" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -459,8 +459,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "friend_recall" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -472,8 +472,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.sub_type == "poke" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -486,8 +486,8 @@ end)
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "essence" and ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -499,8 +499,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "friend_add" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -512,8 +512,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "group_card" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -525,8 +525,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "notify" and ${varName}.sub_type == "title" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -538,8 +538,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "group_msg_emoji_like" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -551,8 +551,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.notice_type == "group_upload" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -565,8 +565,8 @@ end)
     const subType = block.getFieldValue('SUB_TYPE');
     return `on_request(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.request_type == "group" and ${varName}.sub_type == "${subType}" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -578,8 +578,8 @@ end)
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
     return `on_request(function(${varName})
   if type(${varName}) ~= "table" then ${varName} = {} end
+  _G["${varName}"] = ${varName}
   if ${varName}.request_type == "friend" then
-    _G["${varName}"] = ${varName}
 ${statements}  end
 end)
 
@@ -737,6 +737,31 @@ ${statements}end)
   generator.forBlock['msg_get_message_type'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
     return [`msg.get_message_type(${message})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['message_get_sender_role'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'event';
+    return [`msg.get_sender_role(${event})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['message_is_sender_owner'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'event';
+    return [`msg.is_sender_owner(${event})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['message_is_sender_admin'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'event';
+    return [`msg.is_sender_admin(${event})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['message_is_sender_member'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'event';
+    return [`msg.is_sender_member(${event})`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['message_has_reply'] = function(block: Blockly.Block) {
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'event';
+    return [`msg.has_reply(${event})`, generator.ORDER_HIGH];
   };
 
   // ========== 卡片消息判断与解析积木 ==========
@@ -907,6 +932,43 @@ ${statements}end)
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     const replace = generator.valueToCode(block, 'REPLACE', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
+    return [`blockly_text_utils.replace(${text}, ${search}, ${replace})`, generator.ORDER_HIGH];
+  };
+
+  // Handle old "text_replace" block from Blockly built-in (uses different input names)
+  generator.forBlock['text_replace'] = function(block: Blockly.Block) {
+    // First check what inputs the block actually has
+    const hasTextInput = !!block.getInput('TEXT');
+    const hasSearchInput = !!block.getInput('SEARCH');
+    const hasReplaceInput = !!block.getInput('REPLACE');
+    const hasStrInput = !!block.getInput('STR');
+    const hasFromInput = !!block.getInput('FROM');
+    const hasToInput = !!block.getInput('TO');
+    
+    // Get values using the correct input names
+    let text = '""';
+    let search = '""';
+    let replace = '""';
+    
+    if (hasTextInput) {
+      text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
+    } else if (hasStrInput) {
+      text = generator.valueToCode(block, 'STR', generator.ORDER_NONE) || '""';
+    }
+    
+    if (hasSearchInput) {
+      search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
+    } else if (hasFromInput) {
+      search = generator.valueToCode(block, 'FROM', generator.ORDER_NONE) || '""';
+    }
+    
+    if (hasReplaceInput) {
+      replace = generator.valueToCode(block, 'REPLACE', generator.ORDER_NONE) || '""';
+    } else if (hasToInput) {
+      replace = generator.valueToCode(block, 'TO', generator.ORDER_NONE) || '""';
+    }
+    
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
     return [`blockly_text_utils.replace(${text}, ${search}, ${replace})`, generator.ORDER_HIGH];
   };
@@ -2530,7 +2592,7 @@ ${body}end
     const funcName = block.getFieldValue('NAME') || '我的函数';
     const body = generator.statementToCode(block, 'BODY') || '';
     const cleanFuncName = funcName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
-    return `function ${cleanFuncName}()
+    return `function ${cleanFuncName}(__blc_var_message)
 ${body}end
 
 `;
@@ -2539,7 +2601,7 @@ ${body}end
   generator.forBlock['simple_function_call'] = function(block: Blockly.Block) {
     const funcName = block.getFieldValue('NAME') || '我的函数';
     const cleanFuncName = funcName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
-    return `${cleanFuncName}()\n`;
+    return `${cleanFuncName}(__blc_var_message)\n`;
   };
 
   // ========== 定时任务积木 ==========
@@ -2627,14 +2689,18 @@ ${handler}end)
   };
 
   generator.forBlock['variables_get'] = function(block: Blockly.Block) {
-    const variable = generator.getVariableName(block, block.getFieldValue('VAR'));
-    return [variable, generator.ORDER_HIGH];
+    const varName = block.getFieldValue('VAR');
+    const variable = generator.getVariableName(block, varName);
+    // 使用 _G 表访问全局变量，确保跨函数共享
+    return [`_G["${variable}"]`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['variables_set'] = function(block: Blockly.Block) {
-    const variable = generator.getVariableName(block, block.getFieldValue('VAR'));
+    const varName = block.getFieldValue('VAR');
+    const variable = generator.getVariableName(block, varName);
     const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
-    return `${variable} = ${value}\n`;
+    // 使用 _G 表设置全局变量，确保跨函数共享
+    return `_G["${variable}"] = ${value}\n`;
   };
 
   generator.forBlock['controls_if'] = function(block: Blockly.Block) {

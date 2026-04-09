@@ -137,28 +137,22 @@ func (s *ReverseWebSocketService) heartbeatChecker() {
 }
 
 // checkHeartbeats 检查所有连接的心跳状态
+// [已禁用] 不再因为心跳超时而主动关闭连接
 func (s *ReverseWebSocketService) checkHeartbeats() {
+	// 只记录心跳超时，但不主动关闭连接
+	// 连接只在真正异常断开时才关闭
 	s.lastHeartbeatMu.RLock()
 	now := time.Now()
-	timeoutConnections := make([]string, 0)
 
 	for selfID, lastBeat := range s.lastHeartbeat {
 		if now.Sub(lastBeat) > s.heartbeatTimeout {
-			timeoutConnections = append(timeoutConnections, selfID)
+			s.logger.Debugw("检测到心跳超时，但不主动关闭连接",
+				"self_id", selfID,
+				"timeout", s.heartbeatTimeout.String(),
+				"last_beat", lastBeat)
 		}
 	}
 	s.lastHeartbeatMu.RUnlock()
-
-	// 关闭超时的连接
-	for _, selfID := range timeoutConnections {
-		s.logger.Warnw("心跳超时，关闭连接",
-			"self_id", selfID,
-			"timeout", s.heartbeatTimeout.String())
-
-		// 使用 HandleDisconnect 统一处理断开连接，避免重复关闭
-		s.accountMgr.HandleDisconnect(selfID, fmt.Errorf("心跳超时"))
-		s.RemoveHeartbeat(selfID)
-	}
 }
 
 // UpdateHeartbeat 更新指定账号的心跳时间
@@ -173,6 +167,41 @@ func (s *ReverseWebSocketService) RemoveHeartbeat(selfID string) {
 	s.lastHeartbeatMu.Lock()
 	defer s.lastHeartbeatMu.Unlock()
 	delete(s.lastHeartbeat, selfID)
+}
+
+// CleanupAccount 清理指定账号的所有资源
+func (s *ReverseWebSocketService) CleanupAccount(selfID string) {
+	s.logger.Debugw("开始清理账号资源", "self_id", selfID)
+	
+	// 1. 清理心跳记录
+	s.RemoveHeartbeat(selfID)
+	
+	// 2. 清理并发控制通道
+	s.apiChanMu.Lock()
+	delete(s.apiChan, selfID)
+	s.apiChanMu.Unlock()
+	
+	// 3. 清理等待连接列表
+	s.waitingMu.Lock()
+	delete(s.waitingConnect, selfID)
+	s.waitingMu.Unlock()
+	
+	// 4. 清理临时响应通道（与该账号相关的所有 echo）
+	s.tempResponseMu.Lock()
+	// 找出所有以 selfID 开头的 echo 并删除
+	for echo := range s.tempResponseChan {
+		if strings.HasPrefix(echo, "echo_"+selfID+"_") {
+			delete(s.tempResponseChan, echo)
+		}
+	}
+	for echo := range s.tempResponseChanBytes {
+		if strings.HasPrefix(echo, "echo_"+selfID+"_") {
+			delete(s.tempResponseChanBytes, echo)
+		}
+	}
+	s.tempResponseMu.Unlock()
+	
+	s.logger.Infow("账号资源清理完成", "self_id", selfID)
 }
 
 // SetHeartbeatConfig 设置心跳检测配置
@@ -277,36 +306,69 @@ func (s *ReverseWebSocketService) HandleWebSocket(c *gin.Context) {
 // readLoop 读取WebSocket消息循环
 // 处理事件上报和API响应
 func (s *ReverseWebSocketService) readLoop(selfID string, conn *websocket.Conn) {
+	// 设置 ping 处理函数 - 收到 ping 时自动回复 pong 并更新心跳
+	conn.SetPingHandler(func(appData string) error {
+		s.logger.Debugw("收到 ping，更新心跳", "self_id", selfID)
+		s.UpdateHeartbeat(selfID)
+		if account, err := s.accountMgr.GetAccount(selfID); err == nil {
+			account.UpdateActivity()
+		}
+		// 自动回复 pong
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(time.Second*10))
+		if err != nil {
+			s.logger.Warnw("发送 pong 失败", "self_id", selfID, "error", err)
+		}
+		return nil
+	})
+
+	// 设置 pong 处理函数 - 收到 pong 时也更新心跳
+	conn.SetPongHandler(func(appData string) error {
+		s.logger.Debugw("收到 pong，更新心跳", "self_id", selfID)
+		s.UpdateHeartbeat(selfID)
+		if account, err := s.accountMgr.GetAccount(selfID); err == nil {
+			account.UpdateActivity()
+		}
+		return nil
+	})
+
 	defer func() {
 		// 连接断开时的清理工作
 		// 使用 HandleDisconnect 统一处理，它会通过 SafeClose 安全关闭连接
 		// 不在这里直接调用 conn.Close()，避免重复关闭
 		s.accountMgr.HandleDisconnect(selfID, fmt.Errorf("连接关闭"))
-		s.RemoveHeartbeat(selfID)
+		s.CleanupAccount(selfID)
 	}()
 
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseTLSHandshake) {
-				s.logger.Warnw("WebSocket读取错误",
+			// 优化错误处理 - 减少不必要的警告日志
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseTLSHandshake, websocket.CloseNormalClosure) {
+				// 只记录非预期的错误，正常关闭不记录警告
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+					s.logger.Warnw("WebSocket读取错误",
+						"self_id", selfID,
+						"error", err)
+				}
+			} else {
+				// 其他错误（如网络中断）记录为信息级
+				s.logger.Infow("WebSocket连接关闭",
 					"self_id", selfID,
 					"error", err)
 			}
 			return
 		}
 
+		// 收到任何消息都更新心跳（包括 TextMessage, BinaryMessage 等）
+		s.UpdateHeartbeat(selfID)
+		if account, err := s.accountMgr.GetAccount(selfID); err == nil {
+			account.UpdateActivity()
+		}
+
+		// 只处理文本消息
 		if messageType != websocket.TextMessage {
 			continue
 		}
-
-		// 更新最后活动时间（用于保活）
-	if account, err := s.accountMgr.GetAccount(selfID); err == nil {
-		account.UpdateActivity()
-	}
-
-	// 更新心跳时间
-	s.UpdateHeartbeat(selfID)
 
 		// 记录接收的 WebSocket 消息（排除 ping）
 		if s.logManager != nil {
@@ -712,6 +774,15 @@ func (s *ReverseWebSocketService) SendRawMessageToAccount(selfID string, data []
 // params: 请求参数
 // 返回响应数据
 func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[string]interface{}) (map[string]interface{}, error) {
+	// 先检查账号是否在线
+	account, err := s.accountMgr.GetAccount(selfID)
+	if err != nil {
+		return nil, fmt.Errorf("账号不存在: %w", err)
+	}
+	if !account.IsOnline() {
+		return nil, fmt.Errorf("账号离线: %s", selfID)
+	}
+	
 	// 修复：处理action参数，移除开头的"/"，确保接口名称格式一致
 	action = strings.TrimPrefix(action, "/")
 
@@ -803,6 +874,15 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 
 // CallBotAPIRaw 发送API请求到机器人并直接返回原始响应（用于接口调试透传）
 func (s *ReverseWebSocketService) CallBotAPIRaw(selfID, action string, params map[string]interface{}) ([]byte, error) {
+	// 先检查账号是否在线
+	account, err := s.accountMgr.GetAccount(selfID)
+	if err != nil {
+		return nil, fmt.Errorf("账号不存在: %w", err)
+	}
+	if !account.IsOnline() {
+		return nil, fmt.Errorf("账号离线: %s", selfID)
+	}
+	
 	action = strings.TrimPrefix(action, "/")
 
 	s.apiChanMu.Lock()
@@ -866,23 +946,24 @@ func (s *ReverseWebSocketService) registerTempResponse(echo string, ch chan map[
 // unregisterTempResponse 取消注册临时响应回调
 func (s *ReverseWebSocketService) unregisterTempResponse(echo string) {
 	s.tempResponseMu.Lock()
-	defer s.tempResponseMu.Unlock()
 	if ch, ok := s.tempResponseChan[echo]; ok {
-		// 安全关闭通道，避免重复关闭
-		select {
-		case <-ch:
-			// 通道已经关闭或已收到数据
-		default:
+		// 使用 recover 防止重复关闭 panic
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Debugw("通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
+				}
+			}()
 			close(ch)
-		}
+		}()
 		delete(s.tempResponseChan, echo)
 	}
+	s.tempResponseMu.Unlock()
 }
 
 // handleTempResponse 处理临时响应（修复问题22：使用实例级别的锁）
 func (s *ReverseWebSocketService) handleTempResponse(echo string, response map[string]interface{}) {
 	s.tempResponseMu.Lock()
-	defer s.tempResponseMu.Unlock()
 	if ch, ok := s.tempResponseChan[echo]; ok {
 		// 使用非阻塞发送，避免阻塞
 		select {
@@ -892,6 +973,7 @@ func (s *ReverseWebSocketService) handleTempResponse(echo string, response map[s
 			s.logger.Warnw("响应通道已满或已关闭，丢弃响应", "echo", echo)
 		}
 	}
+	s.tempResponseMu.Unlock()
 }
 
 // registerTempResponseBytes 注册字节类型的临时响应回调
@@ -906,11 +988,15 @@ func (s *ReverseWebSocketService) unregisterTempResponseBytes(echo string) {
 	s.tempResponseMu.Lock()
 	defer s.tempResponseMu.Unlock()
 	if ch, ok := s.tempResponseChanBytes[echo]; ok {
-		select {
-		case <-ch:
-		default:
+		// 使用 recover 防止重复关闭 panic
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Debugw("通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
+				}
+			}()
 			close(ch)
-		}
+		}()
 		delete(s.tempResponseChanBytes, echo)
 	}
 }
@@ -918,7 +1004,6 @@ func (s *ReverseWebSocketService) unregisterTempResponseBytes(echo string) {
 // handleTempResponseBytes 处理字节类型的临时响应
 func (s *ReverseWebSocketService) handleTempResponseBytes(echo string, rawData []byte) {
 	s.tempResponseMu.Lock()
-	defer s.tempResponseMu.Unlock()
 	if ch, ok := s.tempResponseChanBytes[echo]; ok {
 		select {
 		case ch <- rawData:
@@ -926,6 +1011,7 @@ func (s *ReverseWebSocketService) handleTempResponseBytes(echo string, rawData [
 			s.logger.Warnw("字节响应通道已满或已关闭，丢弃响应", "echo", echo)
 		}
 	}
+	s.tempResponseMu.Unlock()
 }
 
 // AddEventHandler 添加事件处理器
