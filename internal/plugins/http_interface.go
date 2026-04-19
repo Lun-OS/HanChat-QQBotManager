@@ -144,7 +144,7 @@ func (him *HTTPInterfaceManager) HandleHTTPRequest(c *utils.HTTPRequestContext) 
 	}
 
 	// 在新的多账号架构中，通过账号容器查找插件实例
-	instance := him.pluginsManager.getPluginInstance(handler.SelfID, handler.PluginName)
+	instance := him.pluginsManager.GetPluginInstance(handler.SelfID, handler.PluginName)
 	if instance == nil {
 		return nil, fmt.Errorf("插件未运行: %s (账号: %s)", handler.PluginName, handler.SelfID)
 	}

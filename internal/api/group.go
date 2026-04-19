@@ -295,19 +295,26 @@ func RegisterGroupRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base 
 	r.POST("/:groupId/notice", func(c *gin.Context) {
 		groupId := c.Param("groupId")
 		var body struct {
-			Content string `json:"content"`
-			Image   string `json:"image"`
+			Content         string `json:"content"`
+			Image           string `json:"image"`
+			Pinned          bool   `json:"pinned"`
+			ConfirmRequired bool   `json:"confirm_required"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
 			return
 		}
 		logger.Infow("发布群公告", "requestId", c.GetString("requestId"), "groupId", groupId)
-		res, err := ll.CallAPI("/_send_group_notice", map[string]interface{}{
+		params := map[string]interface{}{
 			"group_id": groupId,
 			"content":  body.Content,
-			"image":    body.Image,
-		}, "POST")
+		}
+		if body.Image != "" {
+			params["image"] = body.Image
+		}
+		params["pinned"] = body.Pinned
+		params["confirm_required"] = body.ConfirmRequired
+		res, err := ll.CallAPI("/_send_group_notice", params, "POST")
 		if err != nil {
 			c.Error(err)
 			c.Status(http.StatusBadGateway)

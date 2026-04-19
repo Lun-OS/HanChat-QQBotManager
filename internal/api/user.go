@@ -182,10 +182,28 @@ func RegisterUserRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *
 		if userID == nil {
 			userID = body["user_id"]
 		}
-		logger.Infow("好友戳一戳", "requestId", c.GetString("requestId"), "userId", userID)
-		res, err := ll.CallAPI("/friend_poke", map[string]interface{}{
-			"user_id": userID,
-		}, "POST")
+		targetID := body["target_id"]
+		logger.Infow("好友戳一戳", "requestId", c.GetString("requestId"), "userId", userID, "targetId", targetID)
+		res, err := ll.FriendPoke(userID, targetID)
+		if err != nil {
+			c.Error(err)
+			c.Status(http.StatusBadGateway)
+			return
+		}
+		respondWithData(c, res)
+	})
+
+	// 好友戳一戳 - 符合 OneBot 标准 API
+	r.POST("/friend_poke", func(c *gin.Context) {
+		var body map[string]interface{}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+			return
+		}
+		userID := body["user_id"]
+		targetID := body["target_id"]
+		logger.Infow("好友戳一戳", "requestId", c.GetString("requestId"), "userId", userID, "targetId", targetID)
+		res, err := ll.FriendPoke(userID, targetID)
 		if err != nil {
 			c.Error(err)
 			c.Status(http.StatusBadGateway)

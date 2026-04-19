@@ -71,7 +71,7 @@ func (ac *AccountConfig) LoadConfig() (*ConfigFile, error) {
 			},
 			Websocket: WebsocketConfig{
 				Authorization: "",
-				Port:          8765,
+				Port:          59178,
 			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil
@@ -181,7 +181,7 @@ func (ac *AccountConfig) loadConfigUnsafe() (*ConfigFile, error) {
 			},
 			Websocket: WebsocketConfig{
 				Authorization: "",
-				Port:          8765,
+				Port:          59178,
 			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil

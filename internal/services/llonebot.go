@@ -393,6 +393,53 @@ func (s *LLOneBotService) ScanQRCode(params map[string]interface{}) (map[string]
 	return s.CallAPI("/scan_qrcode", params, "POST")
 }
 
+// SendPoke 发送戳一戳
+func (s *LLOneBotService) SendPoke(groupId, userId interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_poke", map[string]interface{}{
+		"group_id": groupId,
+		"user_id":  userId,
+	}, "POST")
+}
+
+// FriendPoke 好友戳一戳（支持 target_id）
+func (s *LLOneBotService) FriendPoke(userId, targetId interface{}) (map[string]interface{}, error) {
+	params := map[string]interface{}{"user_id": userId}
+	if targetId != nil {
+		params["target_id"] = targetId
+	}
+	return s.CallAPI("/friend_poke", params, "POST")
+}
+
+// SetMsgEmojiLike 设置消息表情赞（支持取消）
+func (s *LLOneBotService) SetMsgEmojiLike(messageId, emojiId interface{}, set bool) (map[string]interface{}, error) {
+	return s.CallAPI("/set_msg_emoji_like", map[string]interface{}{
+		"message_id": messageId,
+		"emoji_id":   emojiId,
+		"set":        set,
+	}, "POST")
+}
+
+// ReshareFlashFile 重新分享闪传文件
+func (s *LLOneBotService) ReshareFlashFile(shareLink, fileSetId interface{}) (map[string]interface{}, error) {
+	params := map[string]interface{}{}
+	if shareLink != nil {
+		params["share_link"] = shareLink
+	}
+	if fileSetId != nil {
+		params["file_set_id"] = fileSetId
+	}
+	return s.CallAPI("/reshare_flash_file", params, "POST")
+}
+
+// RenameGroupFile 重命名群文件
+func (s *LLOneBotService) RenameGroupFile(groupId, fileId, newFileName interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/rename_group_file", map[string]interface{}{
+		"group_id":       groupId,
+		"file_id":        fileId,
+		"new_file_name": newFileName,
+	}, "POST")
+}
+
 // ========== 插件需要的额外方法 ==========
 
 // VoiceMsgToText 语音转文字

@@ -251,7 +251,6 @@ func (c *WSDebugClient) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
 		c.conn.Close()
-		close(c.sendChan)
 	})
 }
 

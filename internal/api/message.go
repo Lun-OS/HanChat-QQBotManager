@@ -474,7 +474,7 @@ func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, bas
 		respondWithData(c, res)
 	})
 
-	// 设置消息表情赞
+	// 设置消息表情赞（支持取消）
 	r.POST("/emoji-like", func(c *gin.Context) {
 		var body map[string]interface{}
 		if err := c.ShouldBindJSON(&body); err != nil {
@@ -482,7 +482,13 @@ func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, bas
 			return
 		}
 		logger.Infow("设置消息表情赞", "requestId", c.GetString("requestId"))
-		res, err := ll.CallAPI("/set_msg_emoji_like", body, "POST")
+		messageId := body["message_id"]
+		emojiId := body["emoji_id"]
+		set := true
+		if s, ok := body["set"].(bool); ok {
+			set = s
+		}
+		res, err := ll.SetMsgEmojiLike(messageId, emojiId, set)
 		if err != nil {
 			c.Error(err)
 			c.Status(http.StatusBadGateway)
@@ -499,7 +505,28 @@ func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, bas
 			return
 		}
 		logger.Infow("取消消息表情赞", "requestId", c.GetString("requestId"))
-		res, err := ll.CallAPI("/unset_msg_emoji_like", body, "POST")
+		messageId := body["message_id"]
+		emojiId := body["emoji_id"]
+		res, err := ll.SetMsgEmojiLike(messageId, emojiId, false)
+		if err != nil {
+			c.Error(err)
+			c.Status(http.StatusBadGateway)
+			return
+		}
+		respondWithData(c, res)
+	})
+
+	// 发送戳一戳 - 符合 OneBot 标准 API
+	r.POST("/send_poke", func(c *gin.Context) {
+		var body map[string]interface{}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+			return
+		}
+		groupId := body["group_id"]
+		userId := body["user_id"]
+		logger.Infow("发送戳一戳", "requestId", c.GetString("requestId"), "groupId", groupId, "userId", userId)
+		res, err := ll.SendPoke(groupId, userId)
 		if err != nil {
 			c.Error(err)
 			c.Status(http.StatusBadGateway)

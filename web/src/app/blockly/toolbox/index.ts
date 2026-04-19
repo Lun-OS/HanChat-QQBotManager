@@ -374,6 +374,7 @@ export function getToolboxCategories(): any {
         ]),
         subCategory('文本属性', 'text_category', [
           block('text_length'),
+          block('text_count_lines'),
         ]),
         subCategory('文本提取', 'text_category', [
           block('text_substring'),
@@ -611,6 +612,9 @@ export function getToolboxCategories(): any {
       category('高级', 'advanced_category', [
         block('lua_custom_code'),
         block('json_config_input'),
+        block('plugin_rpc_declare_event'),
+        block('plugin_rpc_call_function'),
+        block('plugin_rpc_return_function'),
       ]),
 
       category('函数', 'function_category', [

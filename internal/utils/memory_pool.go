@@ -24,12 +24,24 @@ type HTTPResponse struct {
 
 // MemoryPool 内存池管理器
 type MemoryPool struct {
-	stringPool    *sync.Pool
-	bytePool      *sync.Pool
-	mapPool       *sync.Pool
-	slicePool     *sync.Pool
-	responsePool  *sync.Pool
-	requestPool   *sync.Pool
+	stringPool      *sync.Pool
+	bytePool        *sync.Pool
+	mapPool         *sync.Pool
+	slicePool       *sync.Pool
+	responsePool    *sync.Pool
+	requestPool     *sync.Pool
+	stringPoolHits  atomic.Int64
+	stringPoolMiss  atomic.Int64
+	bytePoolHits    atomic.Int64
+	bytePoolMiss    atomic.Int64
+	mapPoolHits     atomic.Int64
+	mapPoolMiss     atomic.Int64
+	slicePoolHits   atomic.Int64
+	slicePoolMiss   atomic.Int64
+	responseHits    atomic.Int64
+	responseMiss    atomic.Int64
+	requestHits     atomic.Int64
+	requestMiss     atomic.Int64
 }
 
 // GlobalMemoryPool 全局内存池实例
@@ -92,39 +104,69 @@ func NewMemoryPool() *MemoryPool {
 
 // GetString 获取字符串指针
 func (p *MemoryPool) GetString() *string {
-	return p.stringPool.Get().(*string)
+	s := p.stringPool.Get()
+	if s == nil {
+		p.stringPoolMiss.Add(1)
+		newStr := ""
+		return &newStr
+	}
+	p.stringPoolHits.Add(1)
+	return s.(*string)
 }
 
 // PutString 归还字符串指针
 func (p *MemoryPool) PutString(s *string) {
+	if s == nil {
+		return
+	}
 	*s = "" // 清空内容
 	p.stringPool.Put(s)
 }
 
 // GetBytes 获取字节切片指针
 func (p *MemoryPool) GetBytes() *[]byte {
-	buf := p.bytePool.Get().(*[]byte)
-	*buf = (*buf)[:0] // 重置长度
-	return buf
+	buf := p.bytePool.Get()
+	if buf == nil {
+		p.bytePoolMiss.Add(1)
+		newBuf := make([]byte, 0, 1024)
+		return &newBuf
+	}
+	p.bytePoolHits.Add(1)
+	result := buf.(*[]byte)
+	*result = (*result)[:0] // 重置长度
+	return result
 }
 
 // PutBytes 归还字节切片指针
 func (p *MemoryPool) PutBytes(buf *[]byte) {
+	if buf == nil {
+		return
+	}
 	*buf = (*buf)[:0] // 清空内容
 	p.bytePool.Put(buf)
 }
 
 // GetMap 获取map指针
 func (p *MemoryPool) GetMap() *map[string]interface{} {
-	m := p.mapPool.Get().(*map[string]interface{})
-	for k := range *m {
-		delete(*m, k) // 清空map
+	m := p.mapPool.Get()
+	if m == nil {
+		p.mapPoolMiss.Add(1)
+		newMap := make(map[string]interface{})
+		return &newMap
 	}
-	return m
+	p.mapPoolHits.Add(1)
+	result := m.(*map[string]interface{})
+	for k := range *result {
+		delete(*result, k) // 清空map
+	}
+	return result
 }
 
 // PutMap 归还map指针
 func (p *MemoryPool) PutMap(m *map[string]interface{}) {
+	if m == nil {
+		return
+	}
 	for k := range *m {
 		delete(*m, k) // 清空map
 	}
@@ -133,31 +175,54 @@ func (p *MemoryPool) PutMap(m *map[string]interface{}) {
 
 // GetSlice 获取切片指针
 func (p *MemoryPool) GetSlice() *[]interface{} {
-	s := p.slicePool.Get().(*[]interface{})
-	*s = (*s)[:0] // 重置长度
-	return s
+	s := p.slicePool.Get()
+	if s == nil {
+		p.slicePoolMiss.Add(1)
+		newSlice := make([]interface{}, 0, 16)
+		return &newSlice
+	}
+	p.slicePoolHits.Add(1)
+	result := s.(*[]interface{})
+	*result = (*result)[:0] // 重置长度
+	return result
 }
 
 // PutSlice 归还切片指针
 func (p *MemoryPool) PutSlice(s *[]interface{}) {
+	if s == nil {
+		return
+	}
 	*s = (*s)[:0] // 清空内容
 	p.slicePool.Put(s)
 }
 
 // GetHTTPResponse 获取HTTP响应对象
 func (p *MemoryPool) GetHTTPResponse() *HTTPResponse {
-	resp := p.responsePool.Get().(*HTTPResponse)
-	resp.StatusCode = 200
-	resp.Body = ""
-	// 清空headers
-	for k := range resp.Headers {
-		delete(resp.Headers, k)
+	resp := p.responsePool.Get()
+	if resp == nil {
+		p.responseMiss.Add(1)
+		return &HTTPResponse{
+			StatusCode: 200,
+			Headers:    make(map[string]string),
+			Body:       "",
+		}
 	}
-	return resp
+	p.responseHits.Add(1)
+	result := resp.(*HTTPResponse)
+	result.StatusCode = 200
+	result.Body = ""
+	// 清空headers
+	for k := range result.Headers {
+		delete(result.Headers, k)
+	}
+	return result
 }
 
 // PutHTTPResponse 归还HTTP响应对象
 func (p *MemoryPool) PutHTTPResponse(resp *HTTPResponse) {
+	if resp == nil {
+		return
+	}
 	resp.StatusCode = 200
 	resp.Body = ""
 	// 清空headers
@@ -169,23 +234,39 @@ func (p *MemoryPool) PutHTTPResponse(resp *HTTPResponse) {
 
 // GetHTTPRequest 获取HTTP请求对象
 func (p *MemoryPool) GetHTTPRequest() *HTTPRequestContext {
-	req := p.requestPool.Get().(*HTTPRequestContext)
-	req.Method = "GET"
-	req.Path = ""
-	req.Body = ""
-	req.RemoteAddr = ""
+	req := p.requestPool.Get()
+	if req == nil {
+		p.requestMiss.Add(1)
+		return &HTTPRequestContext{
+			Method:     "GET",
+			Path:       "",
+			Query:      make(map[string]string),
+			Headers:    make(map[string]string),
+			Body:       "",
+			RemoteAddr: "",
+		}
+	}
+	p.requestHits.Add(1)
+	result := req.(*HTTPRequestContext)
+	result.Method = "GET"
+	result.Path = ""
+	result.Body = ""
+	result.RemoteAddr = ""
 	// 清空query和headers
-	for k := range req.Query {
-		delete(req.Query, k)
+	for k := range result.Query {
+		delete(result.Query, k)
 	}
-	for k := range req.Headers {
-		delete(req.Headers, k)
+	for k := range result.Headers {
+		delete(result.Headers, k)
 	}
-	return req
+	return result
 }
 
 // PutHTTPRequest 归还HTTP请求对象
 func (p *MemoryPool) PutHTTPRequest(req *HTTPRequestContext) {
+	if req == nil {
+		return
+	}
 	req.Method = "GET"
 	req.Path = ""
 	req.Body = ""
@@ -198,6 +279,36 @@ func (p *MemoryPool) PutHTTPRequest(req *HTTPRequestContext) {
 		delete(req.Headers, k)
 	}
 	p.requestPool.Put(req)
+}
+
+// GetStats 获取内存池统计信息
+func (p *MemoryPool) GetStats() map[string]interface{} {
+	return map[string]interface{}{
+		"stringPool": map[string]interface{}{
+			"hits": p.stringPoolHits.Load(),
+			"miss": p.stringPoolMiss.Load(),
+		},
+		"bytePool": map[string]interface{}{
+			"hits": p.bytePoolHits.Load(),
+			"miss": p.bytePoolMiss.Load(),
+		},
+		"mapPool": map[string]interface{}{
+			"hits": p.mapPoolHits.Load(),
+			"miss": p.mapPoolMiss.Load(),
+		},
+		"slicePool": map[string]interface{}{
+			"hits": p.slicePoolHits.Load(),
+			"miss": p.slicePoolMiss.Load(),
+		},
+		"responsePool": map[string]interface{}{
+			"hits": p.responseHits.Load(),
+			"miss": p.responseMiss.Load(),
+		},
+		"requestPool": map[string]interface{}{
+			"hits": p.requestHits.Load(),
+			"miss": p.requestMiss.Load(),
+		},
+	}
 }
 
 // GetStringGlobal 全局获取字符串指针

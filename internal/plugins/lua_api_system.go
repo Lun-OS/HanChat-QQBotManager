@@ -540,7 +540,7 @@ func (m *Manager) luaConnectToPlugin(instance *LuaPluginInstance) func(*lua.LSta
 		}
 
 		// 触发目标插件的连接请求事件
-		targetInstance := m.getPluginInstance(toSelfID, toPlugin)
+		targetInstance := m.GetPluginInstance(toSelfID, toPlugin)
 		if targetInstance != nil {
 			if handler, exists := targetInstance.EventHandlers["plugin_connection_request"]; exists {
 				requestData := map[string]interface{}{
@@ -699,6 +699,506 @@ func (m *Manager) luaOnBotStatusChange(instance *LuaPluginInstance) func(*lua.LS
 		fn := L.CheckFunction(1)
 		instance.EventHandlers["bot_status_change"] = fn
 		m.logger.Infow("注册机器人状态变化监听器", "plugin", instance.Name)
+		return 0
+	}
+}
+
+// ========== 插件RPC（远程过程调用）API ==========
+
+// RPC配置常量
+const (
+	// 默认RPC调用超时（秒）
+	DefaultRPCTimeout = 30
+	// 最大RPC调用超时（秒）
+	MaxRPCTimeout = 300
+	// 单个RPC调用返回数据最大大小（10MB）
+	MaxRPCResultSize = 10 * 1024 * 1024
+	// 单个插件每秒最大RPC调用次数
+	MaxRPCPerSecond = 100
+	// 最大递归调用深度
+	MaxRPCRecursionDepth = 10
+)
+
+// PluginRPCManager 插件RPC管理器
+type PluginRPCManager struct {
+	rpcHandlers      map[string][]*rpcHandler
+	rpcMu            sync.RWMutex
+	logger           *zap.SugaredLogger
+	callRateLimiter  map[string]*rateLimiter
+	recursionTracker map[string]int
+	recursionMu      sync.Mutex
+}
+
+type rpcHandler struct {
+	selfID     string
+	pluginName string
+	handler    *lua.LFunction
+}
+
+type rateLimiter struct {
+	mu       sync.Mutex
+	count    int
+	lastTime time.Time
+}
+
+type rpcCall struct {
+	callID     string
+	callerSelf string
+	callerName string
+	function   string
+	args       interface{}
+	resultChan chan rpcResult
+}
+
+type rpcResult struct {
+	success bool
+	result  interface{}
+	err     string
+}
+
+var (
+	rpcManagerInstance *PluginRPCManager
+	rpcManagerOnce     sync.Once
+)
+
+// GetPluginRPCManager 获取插件RPC管理器单例
+func GetPluginRPCManager(logger *zap.SugaredLogger) *PluginRPCManager {
+	rpcManagerOnce.Do(func() {
+		rpcManagerInstance = &PluginRPCManager{
+			rpcHandlers:      make(map[string][]*rpcHandler),
+			logger:           logger,
+			callRateLimiter:  make(map[string]*rateLimiter),
+			recursionTracker: make(map[string]int),
+		}
+	})
+	return rpcManagerInstance
+}
+
+// checkRateLimit 检查调用频率限制
+func (prm *PluginRPCManager) checkRateLimit(selfID, pluginName string) bool {
+	key := fmt.Sprintf("%s/%s", selfID, pluginName)
+	
+	prm.rpcMu.Lock()
+	limiter, exists := prm.callRateLimiter[key]
+	if !exists {
+		limiter = &rateLimiter{}
+		prm.callRateLimiter[key] = limiter
+	}
+	prm.rpcMu.Unlock()
+	
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	
+	now := time.Now()
+	
+	// 重置每秒的计数
+	if now.Sub(limiter.lastTime) > time.Second {
+		limiter.count = 0
+		limiter.lastTime = now
+	}
+	
+	limiter.count++
+	return limiter.count <= MaxRPCPerSecond
+}
+
+// checkRecursion 检查递归调用深度
+func (prm *PluginRPCManager) checkRecursion(callKey string) (bool, func()) {
+	prm.recursionMu.Lock()
+	defer prm.recursionMu.Unlock()
+	
+	depth := prm.recursionTracker[callKey]
+	if depth >= MaxRPCRecursionDepth {
+		return false, nil
+	}
+	
+	prm.recursionTracker[callKey] = depth + 1
+	
+	return true, func() {
+		prm.recursionMu.Lock()
+		defer prm.recursionMu.Unlock()
+		prm.recursionTracker[callKey]--
+		if prm.recursionTracker[callKey] <= 0 {
+			delete(prm.recursionTracker, callKey)
+		}
+	}
+}
+
+// estimateDataSize 估算数据大小
+func estimateDataSize(data interface{}) int {
+	if data == nil {
+		return 0
+	}
+	
+	switch v := data.(type) {
+	case string:
+		return len(v)
+	case []byte:
+		return len(v)
+	case map[string]interface{}:
+		size := 0
+		for k, val := range v {
+			size += len(k) + estimateDataSize(val)
+		}
+		return size
+	case []interface{}:
+		size := 0
+		for _, val := range v {
+			size += estimateDataSize(val)
+		}
+		return size
+	default:
+		return 8 // 估算一个基础大小
+	}
+}
+
+// RegisterRPCHandler 注册RPC处理器
+func (prm *PluginRPCManager) RegisterRPCHandler(selfID, pluginName, functionName string, handler *lua.LFunction) {
+	prm.rpcMu.Lock()
+	defer prm.rpcMu.Unlock()
+
+	newHandler := &rpcHandler{
+		selfID:     selfID,
+		pluginName: pluginName,
+		handler:    handler,
+	}
+
+	// 检查是否已经存在相同的处理器（避免重复注册）
+	handlers := prm.rpcHandlers[functionName]
+	for i, h := range handlers {
+		if h.selfID == selfID && h.pluginName == pluginName {
+			// 更新已存在的处理器
+			handlers[i] = newHandler
+			prm.rpcHandlers[functionName] = handlers
+			prm.logger.Infow("RPC处理器已更新", "self_id", selfID, "plugin", pluginName, "function", functionName)
+			return
+		}
+	}
+
+	// 添加新处理器
+	prm.rpcHandlers[functionName] = append(handlers, newHandler)
+	prm.logger.Infow("RPC处理器已注册", "self_id", selfID, "plugin", pluginName, "function", functionName)
+}
+
+// UnregisterRPCHandler 注销RPC处理器
+func (prm *PluginRPCManager) UnregisterRPCHandler(selfID, pluginName, functionName string) {
+	prm.rpcMu.Lock()
+	defer prm.rpcMu.Unlock()
+
+	handlers := prm.rpcHandlers[functionName]
+	var newHandlers []*rpcHandler
+	for _, h := range handlers {
+		if h.selfID != selfID || h.pluginName != pluginName {
+			newHandlers = append(newHandlers, h)
+		}
+	}
+
+	if len(newHandlers) == 0 {
+		delete(prm.rpcHandlers, functionName)
+	} else {
+		prm.rpcHandlers[functionName] = newHandlers
+	}
+
+	prm.logger.Infow("RPC处理器已注销", "self_id", selfID, "plugin", pluginName, "function", functionName)
+}
+
+// UnregisterAllPluginHandlers 注销插件的所有RPC处理器
+func (prm *PluginRPCManager) UnregisterAllPluginHandlers(selfID, pluginName string) {
+	prm.rpcMu.Lock()
+	defer prm.rpcMu.Unlock()
+
+	// 遍历所有函数名
+	for functionName, handlers := range prm.rpcHandlers {
+		var newHandlers []*rpcHandler
+		for _, h := range handlers {
+			if h.selfID != selfID || h.pluginName != pluginName {
+				newHandlers = append(newHandlers, h)
+			}
+		}
+		if len(newHandlers) == 0 {
+			delete(prm.rpcHandlers, functionName)
+		} else {
+			prm.rpcHandlers[functionName] = newHandlers
+		}
+	}
+
+	// 同时清理频率限制器
+	limiterKey := fmt.Sprintf("%s/%s", selfID, pluginName)
+	delete(prm.callRateLimiter, limiterKey)
+
+	prm.logger.Infow("插件所有RPC处理器已注销", "self_id", selfID, "plugin", pluginName)
+}
+
+// CallRPC 调用RPC函数（返回所有插件的执行结果）
+func (prm *PluginRPCManager) CallRPC(functionName string, args interface{}, manager *Manager) ([]map[string]interface{}, error) {
+	// 参数验证
+	if functionName == "" {
+		return nil, fmt.Errorf("函数名不能为空")
+	}
+
+	// 获取所有注册的处理器
+	prm.rpcMu.RLock()
+	handlers := prm.rpcHandlers[functionName]
+	if len(handlers) == 0 {
+		prm.rpcMu.RUnlock()
+		return nil, fmt.Errorf("RPC函数不存在: %s", functionName)
+	}
+	prm.rpcMu.RUnlock()
+
+	// 为每个处理器创建结果通道
+	type callResult struct {
+		selfID     string
+		pluginName string
+		success    bool
+		result     interface{}
+		err        string
+	}
+
+	resultChan := make(chan callResult, len(handlers))
+
+	// 异步调用所有处理器
+	for _, handler := range handlers {
+		go func(h *rpcHandler) {
+			defer func() {
+				if r := recover(); r != nil {
+					prm.logger.Errorw("RPC处理器panic", "self_id", h.selfID, "plugin", h.pluginName, "function", functionName, "error", r)
+					resultChan <- callResult{
+						selfID:     h.selfID,
+						pluginName: h.pluginName,
+						success:    false,
+						err:        fmt.Sprintf("RPC处理器panic: %v", r),
+					}
+				}
+			}()
+
+			// 检查调用频率限制
+			if !prm.checkRateLimit(h.selfID, h.pluginName) {
+				resultChan <- callResult{
+					selfID:     h.selfID,
+					pluginName: h.pluginName,
+					success:    false,
+					err:        "RPC调用频率超限",
+				}
+				return
+			}
+
+			// 检查递归调用
+			callKey := fmt.Sprintf("%s/%s", h.selfID, h.pluginName)
+			canCall, releaseRecursion := prm.checkRecursion(callKey)
+			if !canCall {
+				resultChan <- callResult{
+					selfID:     h.selfID,
+					pluginName: h.pluginName,
+					success:    false,
+					err:        "RPC递归调用深度超限",
+				}
+				return
+			}
+			defer releaseRecursion()
+
+			// 获取目标插件实例
+			targetInstance := manager.GetPluginInstance(h.selfID, h.pluginName)
+			if targetInstance == nil {
+				resultChan <- callResult{
+					selfID:     h.selfID,
+					pluginName: h.pluginName,
+					success:    false,
+					err:        "目标插件未运行",
+				}
+				return
+			}
+
+			// 获取锁并确保在目标插件的锁
+			targetInstance.mu.Lock()
+			defer targetInstance.mu.Unlock()
+
+			L := targetInstance.L
+			if L == nil {
+				resultChan <- callResult{
+					selfID:     h.selfID,
+					pluginName: h.pluginName,
+					success:    false,
+					err:        "目标插件Lua环境已销毁",
+				}
+				return
+			}
+
+			// 检查Lua栈安全
+			topBefore := L.GetTop()
+			defer func() {
+				// 清理Lua栈，防止栈泄漏
+				if L.GetTop() > topBefore {
+					L.SetTop(topBefore)
+				}
+			}()
+
+			// 推送函数
+			L.Push(h.handler)
+
+			// 推送参数
+			if args != nil {
+				L.Push(manager.convertToLuaValue(L, args))
+			} else {
+				L.Push(lua.LNil)
+			}
+
+			// 执行函数（保护模式调用，最多1个参数，1个返回值
+			if err := L.PCall(1, 1, nil); err != nil {
+				resultChan <- callResult{
+					selfID:     h.selfID,
+					pluginName: h.pluginName,
+					success:    false,
+					err:        err.Error(),
+				}
+				return
+			}
+
+			// 获取返回值
+			retVal := L.Get(-1)
+			L.Pop(1)
+
+			// 转换返回值
+			var result interface{}
+			switch retVal.Type() {
+			case lua.LTTable:
+				result = luaTableToInterface(L, retVal.(*lua.LTable))
+			case lua.LTString:
+				result = string(retVal.(lua.LString))
+			case lua.LTNumber:
+				result = float64(retVal.(lua.LNumber))
+			case lua.LTBool:
+				result = bool(retVal.(lua.LBool))
+			case lua.LTNil:
+				result = nil
+			default:
+				result = retVal.String()
+			}
+
+			// 检查返回数据大小
+			if result != nil {
+				resultSize := estimateDataSize(result)
+				if resultSize > MaxRPCResultSize {
+					resultChan <- callResult{
+						selfID:     h.selfID,
+						pluginName: h.pluginName,
+						success:    false,
+						err:        fmt.Sprintf("返回数据过大: %d bytes (最大: %d bytes)", resultSize, MaxRPCResultSize),
+					}
+					return
+				}
+			}
+
+			resultChan <- callResult{
+				selfID:     h.selfID,
+				pluginName: h.pluginName,
+				success:    true,
+				result:     result,
+			}
+		}(handler)
+	}
+
+	// 等待所有结果或超时
+	results := make([]map[string]interface{}, 0, len(handlers))
+	timeout := time.After(DefaultRPCTimeout * time.Second)
+	received := 0
+
+	for received < len(handlers) {
+		select {
+		case res := <-resultChan:
+			resultMap := map[string]interface{}{
+				"self_id":     res.selfID,
+				"plugin_name": res.pluginName,
+				"success":     res.success,
+			}
+			if res.success {
+				resultMap["result"] = res.result
+			} else {
+				resultMap["error"] = res.err
+			}
+			results = append(results, resultMap)
+			received++
+		case <-timeout:
+			// 超时，返回已收到的结果
+			prm.logger.Warnw("RPC调用部分超时", "function", functionName, "completed", received, "total", len(handlers))
+			return results, fmt.Errorf("RPC调用超时，已完成%d/%d", received, len(handlers))
+		}
+	}
+
+	return results, nil
+}
+
+// luaDeclareEvent 声明事件（注册RPC函数）
+func (m *Manager) luaDeclareEvent(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		functionName := L.CheckString(1)
+		handler := L.CheckFunction(2)
+
+		prm := GetPluginRPCManager(m.logger)
+		prm.RegisterRPCHandler(instance.SelfID, instance.Name, functionName, handler)
+
+		L.Push(lua.LBool(true))
+		return 1
+	}
+}
+
+// luaCallFunction 调用RPC函数（调用所有同名函数）
+func (m *Manager) luaCallFunction(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		functionName := L.CheckString(1)
+
+		// 获取参数（支持多种类型）
+		var args interface{}
+		if L.GetTop() >= 2 {
+			val := L.Get(2)
+			switch val.Type() {
+			case lua.LTTable:
+				args = luaTableToInterface(L, val.(*lua.LTable))
+			case lua.LTString:
+				args = string(val.(lua.LString))
+			case lua.LTNumber:
+				args = float64(val.(lua.LNumber))
+			case lua.LTBool:
+				args = bool(val.(lua.LBool))
+			case lua.LTNil:
+				args = nil
+			default:
+				args = val.String()
+			}
+		}
+
+		prm := GetPluginRPCManager(m.logger)
+		results, err := prm.CallRPC(functionName, args, m)
+
+		if err != nil && len(results) == 0 {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		// 转换结果并返回（返回数组，包含所有插件的结果）
+		resultTable := L.NewTable()
+		for i, res := range results {
+			L.RawSetInt(resultTable, i+1, m.convertToLuaValue(L, res))
+		}
+
+		L.Push(resultTable)
+		if err != nil {
+			L.Push(lua.LString(err.Error()))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 2
+	}
+}
+
+// luaReturnFunction 返回函数结果
+func (m *Manager) luaReturnFunction(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 这个函数实际上是在声明的事件处理器中直接return
+		// 这里提供一个辅助函数用于明确返回
+		if L.GetTop() >= 1 {
+			// 直接返回第一个值作为结果
+			return 1
+		}
 		return 0
 	}
 }

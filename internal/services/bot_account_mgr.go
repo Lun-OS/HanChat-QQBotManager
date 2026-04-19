@@ -27,8 +27,17 @@ var (
 )
 
 // GetBotAccountManager 获取BotAccountManager单例
+// 注意：首次调用时 baseLogger 和 cfg 不能为nil
 func GetBotAccountManager(baseLogger *zap.Logger, cfg *config.AccountConfig) *BotAccountManager {
 	botAccountMgrOnce.Do(func() {
+		// 参数验证
+		if baseLogger == nil {
+			panic("GetBotAccountManager: baseLogger cannot be nil")
+		}
+		if cfg == nil {
+			panic("GetBotAccountManager: cfg cannot be nil")
+		}
+		
 		logger := utils.NewModuleLogger(baseLogger, "service.bot_account_mgr")
 
 		mgr := &BotAccountManager{
@@ -360,4 +369,30 @@ func (m *BotAccountManager) CleanupStaleConnections(maxIdle time.Duration) {
 			}
 		}
 	}
+}
+
+// CleanupAllAccounts 清理所有账号资源（用于程序关闭时）
+func (m *BotAccountManager) CleanupAllAccounts() {
+	m.mu.Lock()
+	accountsCopy := make(map[string]*models.BotAccount, len(m.accounts))
+	for selfID, account := range m.accounts {
+		accountsCopy[selfID] = account
+	}
+	m.accounts = make(map[string]*models.BotAccount)
+	m.mu.Unlock()
+
+	m.logger.Infow("开始清理所有账号资源", "account_count", len(accountsCopy))
+
+	for selfID, account := range accountsCopy {
+		if account.WsConn != nil {
+			m.logger.Debugw("关闭账号连接", "self_id", selfID, "custom_name", account.CustomName)
+			account.SafeClose()
+		}
+		account.Status = "offline"
+		now := time.Now()
+		account.OfflineAt = &now
+		m.config.SaveAccountConfig(account)
+	}
+
+	m.logger.Infow("所有账号资源已清理")
 }

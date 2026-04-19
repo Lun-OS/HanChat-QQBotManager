@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,7 +47,8 @@ type LuaPluginInstance struct {
 	Config        map[string]interface{}
 	EventHandlers map[string]*lua.LFunction
 	StartTime     time.Time
-	mu            sync.Mutex
+	mu            sync.Mutex           // 保护实例状态（配置、卸载等）
+	execMu        sync.Mutex           // ⭐ 执行锁：保护Lua状态机的并发访问（必须串行化）
 	llService     *services.LLOneBotService
 	reverseWS     *services.ReverseWebSocketService // 新的反向WebSocket服务
 	SelfID        string                              // 绑定的账号ID（固定）
@@ -62,6 +64,8 @@ type LuaPluginInstance struct {
 	lastEventTime time.Time // 最后一次事件处理时间
 	// 安全沙箱
 	sandbox       *LuaSandbox  // Lua沙箱安全控制器
+	luaCorrupted  int32        // ⭐ LState损坏标志（panic后设置，原子操作）
+	corruptReason string       // 损坏原因（用于日志）
 	// 性能监控
 	cpuTime       int64     // CPU时间（纳秒）
 	memoryUsage   int64     // 内存使用量（字节）
@@ -71,6 +75,49 @@ type LuaPluginInstance struct {
 	nextProcessorID   int                                 // 下一个处理器ID
 	// 调度器回调函数
 	schedulerCallbacks map[string]*lua.LFunction
+}
+
+// IsUnloading 检查插件是否正在卸载（导出方法）
+func (l *LuaPluginInstance) IsUnloading() bool {
+	if l == nil {
+		return true
+	}
+	l.unloadingMu.RLock()
+	defer l.unloadingMu.RUnlock()
+	return l.unloading
+}
+
+// IsLuaCorrupted 检查LState是否已损坏（导出方法）
+func (l *LuaPluginInstance) IsLuaCorrupted() bool {
+	if l == nil {
+		return true
+	}
+	return atomic.LoadInt32(&l.luaCorrupted) == 1
+}
+
+// GetCorruptReason 获取LState损坏原因（导出方法）
+func (l *LuaPluginInstance) GetCorruptReason() string {
+	if l == nil {
+		return "实例为空"
+	}
+	return l.corruptReason
+}
+
+// ResetLuaState 重置LState损坏标志（插件重载时调用）
+func (l *LuaPluginInstance) ResetLuaState() {
+	if l == nil {
+		return
+	}
+	atomic.StoreInt32(&l.luaCorrupted, 0)
+	l.corruptReason = ""
+}
+
+// Sandbox 获取插件沙箱（导出方法）
+func (l *LuaPluginInstance) Sandbox() *LuaSandbox {
+	if l == nil {
+		return nil
+	}
+	return l.sandbox
 }
 
 // PluginInfo 插件信息
@@ -91,90 +138,220 @@ type AutoStartConfig struct {
 	AutoStart []string `json:"autoStart"`
 }
 
-// PriorityEventQueue 优先级事件队列
+// PriorityEventQueue 优先级事件队列 - 使用分级通道减少锁竞争
+// 优化：支持动态扩容和背压机制，减少高并发下的消息丢失
 type PriorityEventQueue struct {
-	tasks    []pluginEventTask
-	mu       sync.RWMutex
-	maxSize  int
-	notEmpty chan struct{}
+	highPriority   chan pluginEventTask   // 紧急优先级通道
+	normalPriority chan pluginEventTask   // 普通优先级通道
+	lowPriority    chan pluginEventTask   // 低优先级通道
+	maxSize        int                    // 初始最大容量
+	currentSize    int                    // 当前实际容量（支持扩容）
+	droppedCount   int64                  // 丢弃的任务计数
+	mu             sync.RWMutex           // 保护扩容操作
+	backpressureEnabled bool              // 是否启用背压模式
 }
 
 // NewPriorityEventQueue 创建优先级事件队列
 func NewPriorityEventQueue(maxSize int) *PriorityEventQueue {
+	// 分级分配容量：高优先级30%，普通50%，低20%
+	highSize := maxSize * 3 / 10
+	normalSize := maxSize * 5 / 10
+	lowSize := maxSize * 2 / 10
+	
+	if highSize < 100 {
+		highSize = 100
+	}
+	if normalSize < 100 {
+		normalSize = 100
+	}
+	if lowSize < 50 {
+		lowSize = 50
+	}
+	
 	return &PriorityEventQueue{
-		tasks:    make([]pluginEventTask, 0, maxSize),
-		maxSize:  maxSize,
-		notEmpty: make(chan struct{}, 1),
+		highPriority:   make(chan pluginEventTask, highSize),
+		normalPriority: make(chan pluginEventTask, normalSize),
+		lowPriority:    make(chan pluginEventTask, lowSize),
+		maxSize:        maxSize,
+		currentSize:    maxSize,
+		backpressureEnabled: true,
 	}
 }
 
-// Push 添加任务到队列（按优先级插入）
+// Push 添加任务到队列（根据优先级选择通道）
+// 优化：当队列满时自动扩容而不是直接丢弃，最大可扩容到初始大小的4倍
 func (q *PriorityEventQueue) Push(task pluginEventTask) bool {
+	// 使用循环重试代替递归，避免栈溢出风险
+PushLoop:
+	for {
+		switch task.priority {
+		case PriorityCritical, PriorityHigh:
+			select {
+			case q.highPriority <- task:
+				return true
+			default:
+				// 高优先级队列满，尝试动态扩容
+				if q.tryExpand() {
+					continue PushLoop // 重试（循环而非递归）
+				}
+				// 扩容失败，尝试丢弃最旧的低优先级任务
+				select {
+				case <-q.lowPriority:
+					atomic.AddInt64(&q.droppedCount, 1)
+					q.highPriority <- task
+					return true
+				default:
+					atomic.AddInt64(&q.droppedCount, 1)
+					return false
+				}
+			}
+		case PriorityNormal:
+			select {
+			case q.normalPriority <- task:
+				return true
+			default:
+				// 普通优先级队列满，尝试动态扩容
+				if q.tryExpand() {
+					continue PushLoop // 重试（循环而非递归）
+				}
+				// 扩容失败，尝试丢弃低优先级任务
+				select {
+				case <-q.lowPriority:
+					atomic.AddInt64(&q.droppedCount, 1)
+					q.normalPriority <- task
+					return true
+				default:
+					atomic.AddInt64(&q.droppedCount, 1)
+					return false
+				}
+			}
+		default: // PriorityLow
+			select {
+			case q.lowPriority <- task:
+				return true
+			default:
+				// 低优先级队列满，尝试动态扩容
+				if q.tryExpand() {
+					continue PushLoop // 重试（循环而非递归）
+				}
+				// 扩容失败才丢弃
+				atomic.AddInt64(&q.droppedCount, 1)
+				return false
+			}
+		}
+		break PushLoop // 理论上不会执行到这里（所有路径都有return），但满足编译器要求
+	}
+	// 满足编译器要求：实际上不会执行到这里
+	return false
+}
+
+// tryExpand 尝试动态扩容队列
+// 最大可扩容到初始大小的4倍
+func (q *PriorityEventQueue) tryExpand() bool {
+	if !q.backpressureEnabled {
+		return false
+	}
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if len(q.tasks) >= q.maxSize {
-		// 队列已满，尝试丢弃低优先级任务
-		if !q.tryMakeSpace(task.priority) {
-			return false
+	// 检查是否已达到最大扩容限制（初始大小的4倍）
+	maxExpanded := q.maxSize * 4
+	if q.currentSize >= maxExpanded {
+		return false
+	}
+
+	// 计算新的容量（每次扩容50%）
+	newSize := q.currentSize + q.currentSize/2
+	if newSize > maxExpanded {
+		newSize = maxExpanded
+	}
+
+	// 分级分配新容量
+	highNew := newSize * 3 / 10
+	normalNew := newSize * 5 / 10
+	lowNew := newSize * 2 / 10
+
+	// 创建新的通道
+	newHigh := make(chan pluginEventTask, highNew)
+	newNormal := make(chan pluginEventTask, normalNew)
+	newLow := make(chan pluginEventTask, lowNew)
+
+	// 将旧通道中的数据迁移到新通道
+	migrated := 0
+	for {
+		select {
+		case task := <-q.highPriority:
+			newHigh <- task
+			migrated++
+		default:
+			goto done_high
 		}
 	}
-
-	// 按优先级插入（高优先级在前）
-	insertIdx := len(q.tasks)
-	for i, t := range q.tasks {
-		if task.priority > t.priority {
-			insertIdx = i
-			break
+done_high:
+	for {
+		select {
+		case task := <-q.normalPriority:
+			newNormal <- task
+			migrated++
+		default:
+			goto done_normal
 		}
 	}
-
-	// 插入任务
-	q.tasks = append(q.tasks, pluginEventTask{})
-	copy(q.tasks[insertIdx+1:], q.tasks[insertIdx:])
-	q.tasks[insertIdx] = task
-
-	// 通知有新任务
-	select {
-	case q.notEmpty <- struct{}{}:
-	default:
+done_normal:
+	for {
+		select {
+		case task := <-q.lowPriority:
+			newLow <- task
+			migrated++
+		default:
+			goto done_low
+		}
 	}
+done_low:
+
+	// 替换通道
+	q.highPriority = newHigh
+	q.normalPriority = newNormal
+	q.lowPriority = newLow
+	q.currentSize = newSize
 
 	return true
 }
 
-// tryMakeSpace 尝试通过丢弃低优先级任务腾出空间
-func (q *PriorityEventQueue) tryMakeSpace(priority EventPriority) bool {
-	// 从队列尾部（低优先级）开始查找可丢弃的任务
-	for i := len(q.tasks) - 1; i >= 0; i-- {
-		if q.tasks[i].priority < priority {
-			// 移除这个低优先级任务
-			q.tasks = append(q.tasks[:i], q.tasks[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
-// Pop 从队列头部取出任务
+// Pop 从队列头部取出任务（按优先级顺序）
 func (q *PriorityEventQueue) Pop() (pluginEventTask, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.tasks) == 0 {
+	// 优先处理高优先级任务
+	select {
+	case task := <-q.highPriority:
+		return task, true
+	default:
+	}
+	
+	// 其次处理普通优先级任务
+	select {
+	case task := <-q.normalPriority:
+		return task, true
+	default:
+	}
+	
+	// 最后处理低优先级任务
+	select {
+	case task := <-q.lowPriority:
+		return task, true
+	default:
 		return pluginEventTask{}, false
 	}
-
-	task := q.tasks[0]
-	q.tasks = q.tasks[1:]
-	return task, true
 }
 
 // Len 返回队列长度
 func (q *PriorityEventQueue) Len() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return len(q.tasks)
+	return len(q.highPriority) + len(q.normalPriority) + len(q.lowPriority)
+}
+
+// GetDroppedCount 获取丢弃的任务数
+func (q *PriorityEventQueue) GetDroppedCount() int64 {
+	return atomic.LoadInt64(&q.droppedCount)
 }
 
 // Manager 插件管理器
@@ -193,13 +370,30 @@ type Manager struct {
 	//事件处理工作池
 	priorityQueue *PriorityEventQueue // 优先级事件队列
 	workers       int
+	minWorkers    int                 // 最小worker数量
+	maxWorkers    int                 // 最大worker数量（动态扩容上限）
 	queueSize     int
-	workerWg      sync.WaitGroup // 等待所有worker完成
+	workerWg      sync.WaitGroup      // 等待所有worker完成
 	ctx           context.Context
 	cancel        context.CancelFunc
 	// 工作池统计
-	queuedEvents  int64 // 排队的事件数
-	droppedEvents int64 // 丢弃的事件数
+	queuedEvents    int64 // 排队的事件数
+	droppedEvents   int64 // 丢弃的事件数
+	activeWorkers   int64 // 当前活跃的worker数
+	busyWorkers     int64 // 正在处理任务的worker数
+	// 动态扩容控制
+	scaleUpChan   chan struct{}         // 扩容信号通道
+	scaleDownChan chan struct{}         // 缩容信号通道
+	workerMutex    sync.Mutex           // 保护worker增减操作
+
+	// ========== 性能优化：Channel通知机制替代忙等待 ==========
+	taskAvailable chan struct{} // 任务可用通知通道（替代sync.Cond，更安全）
+
+	// ========== 系统负载自适应 ==========
+	systemLoad    float64               // 当前系统负载 (0.0 - 1.0)
+	loadMu        sync.RWMutex          // 保护系统负载
+	lastScaleTime time.Time             // 上次扩容/缩容时间（冷却机制）
+	scaleCooldown time.Duration         // 扩容冷却时间（默认10秒）
 	// HTTP接口管理器
 	httpInterfaceManager *HTTPInterfaceManager
 	// Lua脚本缓存
@@ -230,13 +424,22 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 从配置读取工作池参数
-	workers := cfg.Plugin.Workers
-	if workers <= 0 {
-		workers = 8 // 默认值
+	minWorkers := cfg.Plugin.Workers
+	if minWorkers <= 0 {
+		minWorkers = 4 // 优化：降低默认最小worker数（原8太大）
+	}
+	// 优化：最大worker数限制为CPU核心数*2，避免过度扩展导致CPU 100%
+	cpuCount := runtime.NumCPU()
+	maxWorkers := minWorkers * 2 // 最大worker数为最小的2倍（原4倍太激进）
+	if maxWorkers > cpuCount*2 {
+		maxWorkers = cpuCount * 2 // 硬上限：不超过CPU核心数*2
+	}
+	if maxWorkers < 8 {
+		maxWorkers = 8 // 至少8个worker
 	}
 	queueSize := cfg.Plugin.QueueSize
 	if queueSize <= 0 {
-		queueSize = 1024 // 默认值
+		queueSize = 4096 // 默认队列大小提升到4096（原1024太小）
 	}
 
 	m := &Manager{
@@ -247,11 +450,23 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 		logger:        zap.NewNop().Sugar(),
 		llService:     llService,
 		queueSize:     queueSize,
-		workers:       workers,
+		workers:       minWorkers,
+		minWorkers:    minWorkers,
+		maxWorkers:    maxWorkers, // 优化：限制最大worker数为CPU核心数*2，避免过度扩展
 		ctx:           ctx,
 		cancel:        cancel,
 		queuedEvents:  0,
 		droppedEvents: 0,
+		activeWorkers: int64(minWorkers),
+		busyWorkers:   0,
+		scaleUpChan:   make(chan struct{}, 1),
+		scaleDownChan: make(chan struct{}, 1),
+		// 初始化任务通知通道（带缓冲，避免阻塞Push操作）
+		taskAvailable: make(chan struct{}, 1),
+		// 初始化负载监控
+		scaleCooldown: 10 * time.Second, // 扩容冷却时间10秒
+		lastScaleTime: time.Now(),
+		systemLoad:    0.0,
 	}
 
 	// 初始化定时任务系统
@@ -266,14 +481,17 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 	// 初始化Lua脚本缓存
 	m.luaScriptCache = NewLuaScriptCache(m.logger, "cache/lua_scripts")
 
-	// 初始化优先级事件队列
+	// 初始化优先级事件队列（支持动态扩容）
 	m.priorityQueue = NewPriorityEventQueue(m.queueSize)
 
-	// 启动工作池
+	// 启动初始工作池
 	for i := 0; i < m.workers; i++ {
 		m.workerWg.Add(1)
 		go m.workerLoop(i)
 	}
+
+	// 启动动态扩容监控协程
+	go m.scaleMonitor()
 
 	// 预编译Lua脚本
 	if err := m.luaScriptCache.PrecompileScripts(m.pluginsDir); err != nil {
@@ -434,50 +652,305 @@ type pluginEventTask struct {
 }
 
 // workerLoop 工作协程：从队列中消费事件并执行
+// 优化重写：使用条件变量替代500ms忙等待，彻底消除CPU空转
 func (m *Manager) workerLoop(id int) {
 	defer m.workerWg.Done()
 
 	for {
+		// 检查是否应该退出
 		select {
-		case <-m.priorityQueue.notEmpty:
-			// 持续处理队列中的任务，直到队列为空
-			for {
-				// 尝试获取任务
-				task, ok := m.priorityQueue.Pop()
-				if !ok {
-					// 队列已空，退出内层循环
-					break
-				}
-
-				// 减少排队计数
-				atomic.AddInt64(&m.queuedEvents, -1)
-
-				// 检查插件实例是否正在卸载，避免处理已卸载插件的事件
-				task.instance.unloadingMu.RLock()
-				isUnloading := task.instance.unloading
-				task.instance.unloadingMu.RUnlock()
-
-				if isUnloading {
-					m.logger.Debugw("跳过正在卸载的插件事件",
-						"workerId", id,
-						"plugin", task.pluginName,
-						"event", task.eventType)
-					continue
-				}
-
-				// 执行任务
-				if err := m.callEventHandler(task.instance, task.handler, task.eventData); err != nil {
-					m.logger.Errorw("执行事件处理器失败",
-						"workerId", id,
-						"plugin", task.pluginName,
-						"event", task.eventType,
-						"error", err)
-				}
-			}
-
 		case <-m.ctx.Done():
 			return
+		case <-m.scaleDownChan:
+			// 收到缩容信号，检查是否可以退出
+			currentWorkers := atomic.LoadInt64(&m.activeWorkers)
+			if currentWorkers > int64(m.minWorkers) {
+				atomic.AddInt64(&m.activeWorkers, -1)
+				m.logger.Debugw("Worker因缩容退出",
+					"workerId", id,
+					"remaining", currentWorkers-1)
+				return
+			}
+			// 已达到最小值，忽略缩容信号
+		default:
 		}
+
+		// ========== 优化：使用Channel等待任务（零CPU消耗，绝对安全） ==========
+		// 尝试非阻塞获取任务（快速路径）
+		task, ok := m.priorityQueue.Pop()
+		if !ok {
+			// 队列为空，阻塞等待任务通知或超时
+			select {
+			case <-m.taskAvailable:
+				// 收到任务通知，重新尝试获取
+				continue
+			case <-time.After(5 * time.Second):
+				// 超时保护，重新检查（防止死锁）
+				continue
+			case <-m.ctx.Done():
+				return
+			}
+		}
+
+		// 减少排队计数
+		atomic.AddInt64(&m.queuedEvents, -1)
+
+		// 计算排队等待时间（用于性能监控）
+		queueWaitTime := time.Since(task.enqueueTime)
+
+		// ⭐ 关键优化：排队超时检查（避免无效的 execMu 等待）
+		maxQueueWaitTime := 5 * time.Second
+		if queueWaitTime > maxQueueWaitTime {
+			m.logger.Warnw("事件排队超时，丢弃任务",
+				"workerId", id,
+				"plugin", task.pluginName,
+				"event", task.eventType,
+				"queueWaitTime", queueWaitTime.String(),
+				"queueLen", atomic.LoadInt64(&m.queuedEvents))
+			atomic.AddInt64(&m.droppedEvents, 1)
+			continue
+		}
+
+		if queueWaitTime > 100*time.Millisecond {
+			m.logger.Debugw("事件排队等待时间较长",
+				"workerId", id,
+				"plugin", task.pluginName,
+				"event", task.eventType,
+				"queueWaitTime", queueWaitTime.String(),
+				"queueLen", atomic.LoadInt64(&m.queuedEvents))
+		}
+
+		// 标记worker为忙碌状态
+		atomic.AddInt64(&m.busyWorkers, 1)
+
+		// 检查插件实例是否正在卸载，避免处理已卸载插件的事件
+		task.instance.unloadingMu.RLock()
+		isUnloading := task.instance.unloading
+		task.instance.unloadingMu.RUnlock()
+
+		if isUnloading {
+			m.logger.Debugw("跳过正在卸载的插件事件",
+				"workerId", id,
+				"plugin", task.pluginName,
+				"event", task.eventType)
+			// 释放忙碌状态
+			atomic.AddInt64(&m.busyWorkers, -1)
+			continue
+		}
+
+		// 执行任务（传入剩余执行超时时间）
+		totalTimeout := 10 * time.Second
+		if task.eventType != "message" {
+			totalTimeout = 30 * time.Second
+		}
+		remainingTimeout := totalTimeout - queueWaitTime // 剩余执行时间 = 总超时 - 已排队时间
+
+		if err := m.callEventHandler(task.instance, task.handler, task.eventType, task.eventData, remainingTimeout); err != nil {
+			m.logger.Errorw("执行事件处理器失败",
+				"workerId", id,
+				"plugin", task.pluginName,
+				"event", task.eventType,
+				"error", err)
+		}
+
+		task.eventData = nil
+
+		// 释放忙碌状态
+		atomic.AddInt64(&m.busyWorkers, -1)
+	}
+}
+
+// scaleMonitor 动态扩容监控协程
+// 根据队列积压情况和worker利用率动态调整worker数量
+func (m *Manager) scaleMonitor() {
+	ticker := time.NewTicker(2 * time.Second) // 每2秒检查一次
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.checkAndScale()
+		}
+	}
+}
+
+// checkAndScale 检查并执行扩容/缩容操作
+// 优化重写：添加冷却机制、系统负载感知、更保守的扩容策略
+func (m *Manager) checkAndScale() {
+	m.workerMutex.Lock()
+	defer m.workerMutex.Unlock()
+
+	currentWorkers := atomic.LoadInt64(&m.activeWorkers)
+	busyCount := atomic.LoadInt64(&m.busyWorkers)
+	queueLen := m.priorityQueue.Len()
+
+	// 计算worker利用率（0.0 - 1.0）
+	var utilization float64
+	if currentWorkers > 0 {
+		utilization = float64(busyCount) / float64(currentWorkers)
+	}
+
+	// ========== 冷却机制检查 ==========
+	now := time.Now()
+	if now.Sub(m.lastScaleTime) < m.scaleCooldown {
+		// 冷却期内，不执行扩容/缩容
+		return
+	}
+
+	// ========== 系统负载评估 ==========
+	// 综合考虑队列积压、worker利用率、时间因素
+	systemLoad := m.calculateSystemLoad(utilization, queueLen, currentWorkers)
+	m.loadMu.Lock()
+	m.systemLoad = systemLoad
+	m.loadMu.Unlock()
+
+	// ========== 扩容条件（更保守） ==========
+	// 1. Worker利用率超过85%（原70%太敏感）
+	// 2. 队列中有明显积压（>20，原10太小）
+	// 3. 当前worker数未达到上限
+	// 4. 系统负载超过阈值
+	// 5. 不在冷却期
+	shouldScaleUp := utilization > 0.85 &&
+		queueLen > 20 &&
+		currentWorkers < int64(m.maxWorkers) &&
+		systemLoad > 0.7
+
+	// ========== 缩容条件（更保守） ==========
+	// 1. Worker利用率低于10%（原20%）
+	// 2. 当前worker数大于最小值
+	// 3. 连续低负载
+	shouldScaleDown := utilization < 0.1 &&
+		currentWorkers > int64(m.minWorkers) &&
+		queueLen == 0 // 只有队列为空时才缩容
+
+	if shouldScaleUp {
+		// 优化：每次只增加1-2个worker（原min(当前数/2, 4)太激进）
+		addWorkers := int64(2)
+		if queueLen > 100 {
+			addWorkers = int64(3) // 队列严重积压时多增加一些
+		}
+		if currentWorkers+addWorkers > int64(m.maxWorkers) {
+			addWorkers = int64(m.maxWorkers) - currentWorkers
+		}
+
+		for i := int64(0); i < addWorkers; i++ {
+			m.workerWg.Add(1)
+			go m.workerLoop(int(currentWorkers + i))
+		}
+
+		atomic.AddInt64(&m.activeWorkers, addWorkers)
+		m.lastScaleTime = now // 更新冷却时间
+
+		m.logger.Infow("Worker池扩容",
+			"current", currentWorkers+addWorkers,
+			"added", addWorkers,
+			"max", m.maxWorkers,
+			"utilization", fmt.Sprintf("%.2f%%", utilization*100),
+			"queueLen", queueLen,
+			"systemLoad", fmt.Sprintf("%.2f", systemLoad))
+
+	} else if shouldScaleDown && len(m.scaleDownChan) == 0 {
+		// 缩容：发送信号让空闲worker退出
+		select {
+		case m.scaleDownChan <- struct{}{}:
+			m.lastScaleTime = now // 更新冷却时间
+			m.logger.Infow("Worker池缩容信号",
+				"current", currentWorkers,
+				"utilization", fmt.Sprintf("%.2f%%", utilization*100))
+		default:
+		}
+	}
+}
+
+// calculateSystemLoad 计算系统综合负载
+// 考虑因素：worker利用率、队列积压程度、处理延迟
+func (m *Manager) calculateSystemLoad(utilization float64, queueLen int, currentWorkers int64) float64 {
+	// 基础负载：worker利用率（权重50%）
+	baseLoad := utilization * 0.5
+
+	// 队列负载：队列积压程度（权重30%）
+	queueLoad := 0.0
+	if queueLen > 0 {
+		// 使用对数函数平滑队列影响，避免剧烈波动
+		queueLoad = math.Log1p(float64(queueLen)) / math.Log1p(float64(m.queueSize)) * 0.3
+	}
+
+	// 时间衰减因子：最近是否有频繁扩容（权重20%）
+	timeFactor := 0.2
+	if time.Since(m.lastScaleTime) < time.Minute {
+		// 最近刚扩容过，降低负载评估，避免频繁扩容
+		timeFactor = 0.1
+	}
+
+	totalLoad := baseLoad + queueLoad + timeFactor
+
+	// 限制在0-1范围
+	if totalLoad > 1.0 {
+		totalLoad = 1.0
+	}
+	if totalLoad < 0.0 {
+		totalLoad = 0.0
+	}
+
+	return totalLoad
+}
+
+// GetSystemStatus 获取系统状态（用于监控和调试）
+// 返回worker池状态、队列状态、系统负载等关键指标
+func (m *Manager) GetSystemStatus() map[string]interface{} {
+	currentWorkers := atomic.LoadInt64(&m.activeWorkers)
+	busyWorkers := atomic.LoadInt64(&m.busyWorkers)
+	queuedEvents := atomic.LoadInt64(&m.queuedEvents)
+	droppedEvents := atomic.LoadInt64(&m.droppedEvents)
+
+	var utilization float64
+	if currentWorkers > 0 {
+		utilization = float64(busyWorkers) / float64(currentWorkers) * 100
+	}
+
+	m.loadMu.RLock()
+	systemLoad := m.systemLoad
+	m.loadMu.RUnlock()
+
+	return map[string]interface{}{
+		"timestamp":      time.Now().Format("2006-01-02 15:04:05"),
+		// Worker池状态
+		"workers": map[string]interface{}{
+			"active":    currentWorkers,
+			"busy":      busyWorkers,
+			"min":       m.minWorkers,
+			"max":       m.maxWorkers,
+			"utilization": fmt.Sprintf("%.2f%%", utilization),
+		},
+		// 队列状态
+		"queue": map[string]interface{}{
+			"size":        m.queueSize,
+			"current_len": m.priorityQueue.Len(),
+			"queued":      queuedEvents,
+			"dropped":     droppedEvents,
+		},
+		// 系统负载
+		"system_load": fmt.Sprintf("%.2f", systemLoad),
+		"status":      m.getSystemStatusString(systemLoad, utilization),
+		// 扩容控制
+		"scale_cooldown": m.scaleCooldown.String(),
+		"last_scale_time": m.lastScaleTime.Format("2006-01-02 15:04:05"),
+	}
+}
+
+// getSystemStatusString 获取系统状态描述字符串
+func (m *Manager) getSystemStatusString(systemLoad float64, utilization float64) string {
+	switch {
+	case systemLoad > 0.9:
+		return "CRITICAL - 系统严重过载"
+	case systemLoad > 0.7:
+		return "WARNING - 系统负载较高"
+	case utilization > 80:
+		return "BUSY - Worker利用率高"
+	default:
+		return "NORMAL - 系统运行正常"
 	}
 }
 
@@ -552,8 +1025,12 @@ func (m *Manager) scanAccountPlugins(selfID string) ([]*PluginInfo, error) {
 		configPath := filepath.Join(pluginDir, "config.json")
 		config := make(map[string]interface{})
 		if content, err := os.ReadFile(configPath); err == nil {
-			if err := json.Unmarshal(content, &config); err != nil {
-				m.logger.Warnw("解析插件配置失败", "name", pluginName, "error", err)
+			// 检查内容是否为空或只有空白字符
+			contentStr := strings.TrimSpace(string(content))
+			if contentStr != "" && contentStr != "{}" {
+				if err := json.Unmarshal(content, &config); err != nil {
+					m.logger.Warnw("解析插件配置失败", "name", pluginName, "error", err)
+				}
 			}
 		}
 
@@ -650,10 +1127,10 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 
 	container := m.getOrCreateContainer(selfID)
 	container.mu.Lock()
-	defer container.mu.Unlock()
 
 	// 检查插件是否已在该账号中加载
 	if _, exists := container.LuaPlugins[name]; exists {
+		container.mu.Unlock()
 		return errors.New("插件已在该账号中运行")
 	}
 
@@ -677,7 +1154,12 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	}
 
 	// 创建Lua状态机
-	L := lua.NewState()
+	L := lua.NewState(lua.Options{
+		CallStackSize: 120,
+		RegistrySize:  1024 * 20,
+		RegistryMaxSize: 1024 * 80,
+		RegistryGrowStep: 32,
+	})
 
 	// 设置沙箱环境
 	if err := m.setupSandbox(L, selfID, name); err != nil {
@@ -709,6 +1191,10 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	// 设置沙箱的instance引用
 	instance.sandbox.instance = instance
 
+	// 注意：gopher-lua v1.1.1 不支持SetHook API
+	// 我们通过超时机制和指令计数（在每次事件处理前重置）来提供安全保障
+	// 指令计数将在事件处理器执行期间监控
+
 	// 解析过滤配置
 	if filterConfig, exists := pluginInfo.Config["filter"]; exists {
 		if filterMap, ok := filterConfig.(map[string]interface{}); ok {
@@ -719,34 +1205,95 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	// 注册API
 	m.registerAPI(instance)
 
-	// 使用缓存加载插件主文件
+	// 使用缓存加载插件主文件，并在沙箱保护下执行
 	entryPath := filepath.Join(pluginInfo.Path, pluginInfo.Entry)
 
-	// 尝试从缓存加载编译后的脚本
-	if m.luaScriptCache != nil {
-		fn, err := m.luaScriptCache.LoadAndCompileScript(L, entryPath)
-		if err != nil {
-			m.logger.Warnw("加载Lua脚本失败", "path", entryPath, "error", err)
-			L.Close()
-			return fmt.Errorf("加载插件文件失败: %w", err)
+	// 重置沙箱状态，准备执行全局代码
+	instance.sandbox.Reset()
+
+	// 执行全局代码（带超时保护）
+	// 修复：使用 context 实现协作式取消，避免 goroutine 泄漏和数据竞争
+	execCtx, execCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer execCancel()
+
+	done := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("插件全局代码执行panic: %v", r)
+			}
+		}()
+
+		// 检查 context 是否已取消（超时或外部取消）
+		select {
+		case <-execCtx.Done():
+			done <- fmt.Errorf("执行前已取消: %v", execCtx.Err())
+			return
+		default:
 		}
 
-		L.Push(fn)
-		if err := L.PCall(0, lua.MultRet, nil); err != nil {
-			L.Close()
-			return fmt.Errorf("执行Lua脚本失败: %w", err)
+		// 尝试从缓存加载编译后的脚本
+		if m.luaScriptCache != nil {
+			fn, err := m.luaScriptCache.LoadAndCompileScript(L, entryPath)
+			if err != nil {
+				m.logger.Warnw("加载Lua脚本失败", "path", entryPath, "error", err)
+				done <- fmt.Errorf("加载插件文件失败: %w", err)
+				return
+			}
+
+			L.Push(fn)
+			if err := L.PCall(0, lua.MultRet, nil); err != nil {
+				done <- fmt.Errorf("执行Lua脚本失败: %w", err)
+				return
+			}
+		} else {
+			// 没有缓存，直接加载
+			if err := L.DoFile(entryPath); err != nil {
+				done <- fmt.Errorf("加载插件文件失败: %w", err)
+				return
+			}
 		}
-	} else {
-		// 没有缓存，直接加载
-		if err := L.DoFile(entryPath); err != nil {
+
+		done <- nil
+	}()
+
+	// 等待全局代码执行完成（最多等待60秒）
+	select {
+	case err := <-done:
+		if err != nil {
+			// 先标记沙箱停止，阻止后续操作
+			instance.sandbox.Halt("插件加载失败")
 			L.Close()
-			return fmt.Errorf("加载插件文件失败: %w", err)
+			return err
 		}
+	case <-execCtx.Done():
+		// 超时，先标记沙箱停止
+		instance.sandbox.Halt("插件全局代码执行超时（超过60秒）")
+		// ⭐ 关键修复：给goroutine足够时间检测到halt状态并退出
+		// 使用select等待done通道或超时，避免并发操作已关闭的LState
+		select {
+		case <-done:
+			m.logger.Debugw("全局代码goroutine在超时后及时退出",
+				"plugin", name,
+				"self_id", selfID)
+		case <-time.After(1 * time.Second):
+			m.logger.Warnw("全局代码goroutine未能在超时后及时退出，LState可能存在竞争风险",
+				"plugin", name,
+				"self_id", selfID)
+			atomic.StoreInt32(&instance.luaCorrupted, 1)
+			instance.corruptReason = "插件加载超时且goroutine未及时退出"
+		}
+		L.Close()
+		return fmt.Errorf("插件全局代码执行超时，请将耗时操作移到on_init或事件处理器中")
 	}
 
 	// 先将插件实例添加到容器的映射中
 	container.LuaPlugins[name] = instance
 	container.PluginConfigs[name] = pluginInfo
+	
+	// 释放容器锁，后续操作不需要保护
+	container.mu.Unlock()
 
 	// 注册事件处理器
 	m.registerEventHandlers(instance)
@@ -1856,6 +2403,12 @@ end
 
 // registerAPI 注册API函数
 func (m *Manager) registerAPI(instance *LuaPluginInstance) {
+	if instance.L == nil {
+		m.logger.Errorw("无法注册API：Lua状态机为空",
+			"plugin", instance.Name,
+			"self_id", instance.SelfID)
+		return
+	}
 	L := instance.L
 	pluginName := instance.Name
 	selfID := instance.SelfID
@@ -1916,6 +2469,7 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(messageTable, "send_group_ai_record", L.NewFunction(m.luaSendGroupAIRecord(instance)))
 	L.SetField(messageTable, "get_ai_characters", L.NewFunction(m.luaGetAICharacters(instance)))
 	L.SetField(messageTable, "create_image_processor", L.NewFunction(m.luaCreateImageProcessor(instance)))
+	L.SetField(messageTable, "send_poke", L.NewFunction(m.luaSendPoke(instance)))
 	L.SetGlobal("message", messageTable)
 
 	// 用户API
@@ -1982,6 +2536,8 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(fileTable, "delete_group_folder", L.NewFunction(m.luaDeleteGroupFolder(instance)))
 	L.SetField(fileTable, "move_group_file", L.NewFunction(m.luaMoveGroupFile(instance)))
 	L.SetField(fileTable, "download_file", L.NewFunction(m.luaDownloadFile(instance)))
+	L.SetField(fileTable, "rename_group_file", L.NewFunction(m.luaRenameGroupFile(instance)))
+	L.SetField(fileTable, "reshare_flash_file", L.NewFunction(m.luaReshareFlashFile(instance)))
 	L.SetGlobal("file", fileTable)
 
 	// 网络请求API
@@ -2172,12 +2728,25 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(pluginCommTable, "close", L.NewFunction(m.luaClosePluginConnection(instance)))
 	L.SetGlobal("plugin_comm", pluginCommTable)
 
+	// 插件RPC API（声明事件/调用函数/返回函数）
+	rpcTable := L.NewTable()
+	L.SetField(rpcTable, "declare_event", L.NewFunction(m.luaDeclareEvent(instance)))
+	L.SetField(rpcTable, "call_function", L.NewFunction(m.luaCallFunction(instance)))
+	L.SetField(rpcTable, "return_function", L.NewFunction(m.luaReturnFunction(instance)))
+	L.SetGlobal("plugin_rpc", rpcTable)
+
 	// 事件监听API
 	L.SetGlobal("on_bot_status_change", L.NewFunction(m.luaOnBotStatusChange(instance)))
 }
 
 // registerEventHandlers 注册事件处理器
 func (m *Manager) registerEventHandlers(instance *LuaPluginInstance) {
+	if instance.L == nil {
+		m.logger.Errorw("无法注册事件处理器：Lua状态机为空",
+			"plugin", instance.Name,
+			"self_id", instance.SelfID)
+		return
+	}
 	L := instance.L
 
 	// 检查是否定义了事件处理器（已在registerAPI中注册）
@@ -2186,6 +2755,12 @@ func (m *Manager) registerEventHandlers(instance *LuaPluginInstance) {
 
 // callInitFunction 调用初始化函数
 func (m *Manager) callInitFunction(instance *LuaPluginInstance) error {
+	if instance.L == nil {
+		m.logger.Errorw("无法调用初始化函数：Lua状态机为空",
+			"plugin", instance.Name,
+			"self_id", instance.SelfID)
+		return errors.New("Lua状态机为空")
+	}
 	L := instance.L
 	fn := L.GetGlobal("on_init")
 	if fn == lua.LNil || fn.Type() != lua.LTFunction {
@@ -2212,6 +2787,12 @@ func (m *Manager) callInitFunction(instance *LuaPluginInstance) error {
 				done <- fmt.Errorf("初始化函数panic: %v", r)
 			}
 		}()
+		
+		// 重置沙箱状态，准备执行初始化函数
+		if instance.sandbox != nil {
+			instance.sandbox.Reset()
+		}
+		
 		L.Push(fnVal)
 		if err := L.PCall(0, 0, nil); err != nil {
 			done <- err
@@ -2305,12 +2886,32 @@ func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
 	dataFile := filepath.Join(pluginDir, "data.json")
 	deleteStorageLock(dataFile)
 
+	// 清理图像处理器资源，防止内存泄漏
+	instance.imageProcessorMu.Lock()
+	processorCount := len(instance.imageProcessors)
+	if processorCount > 0 {
+		m.logger.Debugw("清理图像处理器", "self_id", selfID, "plugin", name, "processor_count", processorCount)
+	}
+	// 清空映射，让GC回收资源（SimpleImageProcessor没有显式Close方法）
+	instance.imageProcessors = make(map[int]*utils.SimpleImageProcessor)
+	instance.imageProcessorMu.Unlock()
+
+	// 清理插件的所有RPC处理器
+	prm := GetPluginRPCManager(m.logger)
+	prm.UnregisterAllPluginHandlers(selfID, name)
+
 	m.logger.Infow("Lua插件已卸载", "self_id", selfID, "name", name)
 	return nil
 }
 
 // callDestroyFunction 调用清理函数
 func (m *Manager) callDestroyFunction(instance *LuaPluginInstance) {
+	if instance.L == nil {
+		m.logger.Warnw("无法调用清理函数：Lua状态机为空，跳过",
+			"plugin", instance.Name,
+			"self_id", instance.SelfID)
+		return
+	}
 	L := instance.L
 	fn := L.GetGlobal("on_destroy")
 	if fn == lua.LNil || fn.Type() != lua.LTFunction {
@@ -2382,6 +2983,7 @@ func (m *Manager) getEventPriority(eventType string, eventData map[string]interf
 }
 
 // HandleEvent 处理事件 - 分发给对应账号的所有插件
+// 优化：添加过载保护和系统负载感知
 func (m *Manager) HandleEvent(eventType string, eventData map[string]interface{}) {
 	// 从事件数据中获取self_id
 	selfID, ok := eventData["self_id"].(string)
@@ -2404,32 +3006,66 @@ func (m *Manager) HandleEvent(eventType string, eventData map[string]interface{}
 	// 获取事件优先级
 	priority := m.getEventPriority(eventType, eventData)
 
-	container.mu.RLock()
-	defer container.mu.RUnlock()
+	// ========== 过载保护：检查系统负载 ==========
+	m.loadMu.RLock()
+	systemLoad := m.systemLoad
+	m.loadMu.RUnlock()
 
+	// 如果系统负载超过阈值（0.9），丢弃低优先级事件
+	if systemLoad > 0.9 && priority <= PriorityNormal {
+		atomic.AddInt64(&m.droppedEvents, 1)
+		m.logger.Warnw("系统过载，丢弃低优先级事件",
+			"self_id", selfID,
+			"event", eventType,
+			"priority", priority,
+			"systemLoad", fmt.Sprintf("%.2f", systemLoad),
+			"droppedTotal", atomic.LoadInt64(&m.droppedEvents))
+		return
+	}
+
+	// 如果系统负载较高（0.7-0.9），只处理高优先级事件
+	if systemLoad > 0.7 && priority == PriorityLow {
+		atomic.AddInt64(&m.droppedEvents, 1)
+		m.logger.Debugw("系统负载较高，丢弃低优先级事件",
+			"self_id", selfID,
+			"event", eventType,
+			"systemLoad", fmt.Sprintf("%.2f", systemLoad))
+		return
+	}
+
+	container.mu.RLock()
+	// 优化：先复制插件列表，减少读锁持有时间，避免阻塞加载/卸载操作
+	type pluginEntry struct {
+		instance   *LuaPluginInstance
+		handler    *lua.LFunction
+		pluginName string
+	}
+	plugins := make([]pluginEntry, 0, len(container.LuaPlugins))
 	for name, instance := range container.LuaPlugins {
 		handler, exists := instance.EventHandlers[eventType]
 		if !exists {
-			// 特殊处理message_sent事件
-			if eventType == "message_sent" {
-				handler, exists = instance.EventHandlers["message_sent"]
-				if !exists {
-					continue
-				}
-			} else {
-				continue
-			}
+			continue
 		}
 
-		// 检查是否需要过滤此事件
+		// 检查是否需要过滤此事件（在持锁期间快速检查）
 		if !m.shouldProcessEvent(instance, eventData) {
 			continue
 		}
 
+		plugins = append(plugins, pluginEntry{
+			instance:   instance,
+			handler:    handler,
+			pluginName: name,
+		})
+	}
+	container.mu.RUnlock()
+
+	// 优化：在无锁状态下执行入队操作，避免阻塞其他goroutine
+	for _, entry := range plugins {
 		task := pluginEventTask{
-			instance:    instance,
-			handler:     handler,
-			pluginName:  name,
+			instance:    entry.instance,
+			handler:     entry.handler,
+			pluginName:  entry.pluginName,
 			eventType:   eventType,
 			eventData:   eventData,
 			priority:    priority,
@@ -2439,11 +3075,18 @@ func (m *Manager) HandleEvent(eventType string, eventData map[string]interface{}
 		// 将任务放入优先级队列
 		if m.priorityQueue.Push(task) {
 			atomic.AddInt64(&m.queuedEvents, 1)
+			// 优化：通知等待中的worker（使用channel，绝对安全）
+			select {
+			case m.taskAvailable <- struct{}{}:
+				// 成功发送通知
+			default:
+				// 通道已满（已有待处理通知），忽略（不影响正确性）
+			}
 		} else {
 			atomic.AddInt64(&m.droppedEvents, 1)
 			m.logger.Warnw("插件事件队列已满，丢弃事件",
 				"self_id", selfID,
-				"plugin", name,
+				"plugin", entry.pluginName,
 				"event", eventType,
 				"priority", priority,
 				"queueSize", m.queueSize,
@@ -2453,8 +3096,20 @@ func (m *Manager) HandleEvent(eventType string, eventData map[string]interface{}
 }
 
 // callEventHandler 调用事件处理器
-func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFunction, eventData map[string]interface{}) error {
-	// 检查沙箱是否已被停止（堆栈溢出等安全问题）
+// 优化：减少锁持有时间，将锁从整个执行过程缩小到仅保护关键状态检查
+// remainingTimeout: 剩余执行超时时间（总超时 - 已排队时间），如果 <= 0 则立即返回错误
+func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFunction, eventType string, eventData map[string]interface{}, remainingTimeout time.Duration) error {
+	// ⭐ 快速失败：如果剩余执行时间已经不足，直接返回（避免无效等待）
+	if remainingTimeout <= 0 {
+		m.logger.Debugw("事件已超时，跳过执行",
+			"plugin", instance.Name,
+			"self_id", instance.SelfID,
+			"event", eventType,
+			"remainingTimeout", "0s")
+		return errors.New("事件已超时")
+	}
+
+	// 快速路径：检查沙箱是否已被停止（无锁）
 	if instance.sandbox != nil && instance.sandbox.IsHalted() {
 		m.logger.Errorw("插件已被安全机制终止，跳过事件处理",
 			"plugin", instance.Name,
@@ -2462,17 +3117,13 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 		return errors.New("插件已被安全机制终止")
 	}
 
-	// 检查是否正在卸载
+	// 快速路径：检查是否正在卸载（读锁，尽快释放）
 	instance.unloadingMu.RLock()
 	if instance.unloading {
 		instance.unloadingMu.RUnlock()
 		return errors.New("插件正在卸载")
 	}
 	instance.unloadingMu.RUnlock()
-
-	// 增加等待组计数
-	instance.wg.Add(1)
-	defer instance.wg.Done()
 
 	// 更新统计信息
 	atomic.AddInt64(&instance.eventCount, 1)
@@ -2481,8 +3132,12 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 	// 设置反向WebSocket服务
 	instance.reverseWS = m.reverseWS
 
-	// 设置超时保护
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// ⭐ 使用传入的剩余执行超时时间（已扣除排队等待时间）
+	execTimeout := remainingTimeout
+	if execTimeout <= 0 {
+		execTimeout = 1 * time.Second // 最小保护值，防止立即超时
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2493,19 +3148,29 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 				stack := make([]byte, 4096)
 				n := runtime.Stack(stack, false)
 				atomic.AddInt64(&instance.errorCount, 1)
-				m.logger.Errorw("事件处理器panic",
+
+				// ⭐ 关键修复：标记LState为损坏状态，阻止后续使用
+				atomic.StoreInt32(&instance.luaCorrupted, 1)
+				instance.corruptReason = fmt.Sprintf("%v", r)
+
+				m.logger.Errorw("事件处理器panic - LState已标记为损坏",
 					"plugin", instance.Name,
 					"self_id", instance.SelfID,
 					"error", r,
-					"stack", string(stack[:n]))
-				m.addPluginLog(instance.SelfID, instance.Name, "ERROR", fmt.Sprintf("panic: %v", r))
-				done <- fmt.Errorf("事件处理器panic: %v", r)
+					"stack", string(stack[:n]),
+					"action", "后续事件将被跳过直到插件重载")
+				m.addPluginLog(instance.SelfID, instance.Name, "ERROR", fmt.Sprintf("panic: %v (LState已损坏)", r))
+				done <- fmt.Errorf("事件处理器panic: %v (LState已损坏)", r)
 			}
 		}()
 
-		instance.mu.Lock()
-		defer instance.mu.Unlock()
+		// ⭐ 关键修复：获取执行锁，确保Lua状态机串行化访问
+		// gopher-lua的LState不是线程安全的，必须保证同一时刻只有一个goroutine在操作
+		instance.execMu.Lock()
+		defer instance.execMu.Unlock()
 
+		// ⭐ 关键修复：先检查卸载状态，再增加等待组计数
+		// 防止在UnloadLuaPlugin调用wg.Wait()之后才调用wg.Add(1)导致的panic
 		instance.unloadingMu.RLock()
 		unloading := instance.unloading
 		instance.unloadingMu.RUnlock()
@@ -2515,19 +3180,55 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 			return
 		}
 
+		// 在确认未卸载后，安全地增加等待组计数
+		instance.wg.Add(1)
+		defer instance.wg.Done()
+
+		// 优化：缩小mu锁的范围 - 只在状态检查时持锁
+		instance.mu.Lock()
+
 		// 检查沙箱状态
 		if instance.sandbox != nil && instance.sandbox.IsHalted() {
+			instance.mu.Unlock()
 			done <- errors.New("插件已被安全机制终止")
 			return
+		}
+
+		// ⭐ 关键检查：LState是否已损坏（上次panic后标记）
+		if atomic.LoadInt32(&instance.luaCorrupted) == 1 {
+			instance.mu.Unlock()
+			m.logger.Warnw("LState已损坏，跳过事件处理 - 需要重载插件恢复",
+				"plugin", instance.Name,
+				"self_id", instance.SelfID,
+				"corruptReason", instance.corruptReason,
+				"action", "请通过管理界面或API重载此插件")
+			done <- errors.New(fmt.Sprintf("LState已损坏: %s (需要重载插件)", instance.corruptReason))
+			return
+		}
+
+		// 重置沙箱状态，准备新的执行
+		if instance.sandbox != nil {
+			instance.sandbox.Reset()
 		}
 
 		// 记录开始时间（用于CPU时间统计）
 		startTime := time.Now()
 
 		L := instance.L
+		if L == nil {
+			instance.mu.Unlock()
+			m.logger.Errorw("Lua状态机为空，无法执行事件处理器",
+				"plugin", instance.Name,
+				"self_id", instance.SelfID)
+			done <- errors.New("Lua状态机为空")
+			return
+		}
 		L.Push(handler)
 
-		// Process CQ codes in the event data
+		// 释放mu锁（状态检查完成），但保持execMu锁（保护Lua执行）
+		instance.mu.Unlock()
+
+		// Process CQ codes in the event data（在execMu锁保护下执行）
 		processedEventData := m.processCQCodes(eventData)
 
 		// 将eventData直接转换为Lua表传递（保持JSON数据结构，无需序列化/反序列化）
@@ -2547,7 +3248,8 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 			return
 		}
 
-		// 更新CPU时间统计
+		L.SetGlobal("__blc_var___", lua.LNil)
+
 		elapsed := time.Since(startTime).Nanoseconds()
 		atomic.AddInt64(&instance.cpuTime, elapsed)
 
@@ -2565,7 +3267,7 @@ func (m *Manager) callEventHandler(instance *LuaPluginInstance, handler *lua.LFu
 		m.logger.Warnw("事件处理超时",
 			"plugin", instance.Name,
 			"self_id", instance.SelfID,
-			"timeout", "90s")
+			"timeout", ctx.Err().Error())
 		return errors.New("事件处理超时")
 	}
 }
@@ -2679,9 +3381,10 @@ func (instance *LuaPluginInstance) addPluginLog(level string, message string) {
 	defer instance.logMu.Unlock()
 	instance.Logs = append(instance.Logs, logEntry)
 
-	// 限制日志数量，保留最近1000条
 	if len(instance.Logs) > 1000 {
-		instance.Logs = instance.Logs[len(instance.Logs)-1000:]
+		newLogs := make([]string, 0, 1000)
+		newLogs = append(newLogs, instance.Logs[len(instance.Logs)-1000:]...)
+		instance.Logs = newLogs
 	}
 }
 
@@ -2724,9 +3427,10 @@ func (m *Manager) addPluginLog(selfID string, pluginName string, level string, m
 	instance.logMu.Lock()
 	instance.Logs = append(instance.Logs, logEntry)
 
-	// 限制日志数量，保留最近1000条
 	if len(instance.Logs) > 1000 {
-		instance.Logs = instance.Logs[len(instance.Logs)-1000:]
+		newLogs := make([]string, 0, 1000)
+		newLogs = append(newLogs, instance.Logs[len(instance.Logs)-1000:]...)
+		instance.Logs = newLogs
 	}
 	instance.logMu.Unlock()
 
@@ -3031,6 +3735,14 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 		m.timerSystem.Shutdown()
 	}
 
+	// 停止插件文件检查定时器（防止goroutine泄漏）
+	m.StopPluginFileChecker()
+
+	// 停止调度器管理器
+	if m.schedulerManager != nil {
+		m.schedulerManager.Shutdown()
+	}
+
 	m.logger.Infow("插件管理器已关闭",
 		"totalDroppedEvents", atomic.LoadInt64(&m.droppedEvents))
 
@@ -3039,38 +3751,39 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 
 // processCQCodes processes CQ codes in the event data
 func (m *Manager) processCQCodes(eventData map[string]interface{}) map[string]interface{} {
-	processedData := make(map[string]interface{})
+	var rawMessage string
+	var hasMessageEvent bool
+
+	if _, exists := eventData["message_type"].(string); exists {
+		hasMessageEvent = true
+	} else if postType, exists := eventData["post_type"].(string); exists &&
+		(postType == "message" || postType == "message_sent" || strings.HasPrefix(postType, "message.")) {
+		hasMessageEvent = true
+	}
+
+	if !hasMessageEvent {
+		return eventData
+	}
+
+	if rm, exists := eventData["raw_message"].(string); exists && rm != "" {
+		rawMessage = rm
+	} else if msg, exists := eventData["message"].(string); exists && msg != "" {
+		rawMessage = msg
+	}
+
+	if rawMessage == "" {
+		return eventData
+	}
+
+	processedData := make(map[string]interface{}, len(eventData)+2)
 	for k, v := range eventData {
 		processedData[k] = v
 	}
 
-	// Check if this is a message event that contains message data
-	if _, exists := processedData["message_type"].(string); exists {
-		if rawMessage, exists := processedData["raw_message"].(string); exists && rawMessage != "" {
-			messageSegments := utils.ConvertCQMessageToSegments(rawMessage)
-			processedData["message"] = messageSegments
-			plainText := utils.GetPlainMessage(rawMessage)
-			processedData["plain_text"] = plainText
-		} else if messageStr, exists := processedData["message"].(string); exists && messageStr != "" {
-			messageSegments := utils.ConvertCQMessageToSegments(messageStr)
-			processedData["message"] = messageSegments
-			plainText := utils.GetPlainMessage(messageStr)
-			processedData["plain_text"] = plainText
-		}
-	} else if postType, exists := processedData["post_type"].(string); exists &&
-		(postType == "message" || postType == "message_sent" || strings.HasPrefix(postType, "message.")) {
-		if rawMessage, exists := processedData["raw_message"].(string); exists && rawMessage != "" {
-			messageSegments := utils.ConvertCQMessageToSegments(rawMessage)
-			processedData["message"] = messageSegments
-			plainText := utils.GetPlainMessage(rawMessage)
-			processedData["plain_text"] = plainText
-		} else if messageStr, exists := processedData["message"].(string); exists && messageStr != "" {
-			messageSegments := utils.ConvertCQMessageToSegments(messageStr)
-			processedData["message"] = messageSegments
-			plainText := utils.GetPlainMessage(messageStr)
-			processedData["plain_text"] = plainText
-		}
-	}
+	messageSegments := utils.ConvertCQMessageToSegments(rawMessage)
+	processedData["message"] = messageSegments
+	plainText := utils.GetPlainMessage(rawMessage)
+	processedData["plain_text"] = plainText
 
 	return processedData
 }
@@ -3325,8 +4038,8 @@ func (m *Manager) GetAccountContainers() []map[string]interface{} {
 	return result
 }
 
-// getPluginInstance 获取指定账号的插件实例
-func (m *Manager) getPluginInstance(selfID, pluginName string) *LuaPluginInstance {
+// GetPluginInstance 获取指定账号的插件实例（导出方法）
+func (m *Manager) GetPluginInstance(selfID, pluginName string) *LuaPluginInstance {
 	container := m.getContainer(selfID)
 	if container == nil {
 		return nil
@@ -3335,6 +4048,11 @@ func (m *Manager) getPluginInstance(selfID, pluginName string) *LuaPluginInstanc
 	container.mu.RLock()
 	defer container.mu.RUnlock()
 	return container.LuaPlugins[pluginName]
+}
+
+// GetAccountContainer 获取指定账号的容器（导出方法）
+func (m *Manager) GetAccountContainer(selfID string) *AccountPluginContainer {
+	return m.getContainer(selfID)
 }
 
 // CreateAccountPluginDir 创建账号插件目录

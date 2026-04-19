@@ -31,7 +31,7 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
 
   const toast = document.createElement('div')
   const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500'
-  toast.className = `toast-item px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium transform transition-all duration-300 translate-x-full ${bgColor}`
+  toast.className = `toast-item px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium transform transition-all duration-50 translate-x-full ${bgColor}`
   toast.textContent = message
 
   container.appendChild(toast)
@@ -48,7 +48,7 @@ export function showToast(message: string, type: 'success' | 'error' | 'info' = 
       if (toast.parentNode) {
         toast.parentNode.removeChild(toast)
       }
-    }, 300)
+    }, 50)
   }, duration)
 }
 

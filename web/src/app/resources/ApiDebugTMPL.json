@@ -318,9 +318,34 @@
         "integer",
         "对方 QQ 号",
         "必须"
+      ],
+      "target_id": [
+        "integer",
+        "目标 QQ 号",
+        ""
       ]
     },
     "json": {
+      "user_id": 0,
+      "target_id": 0
+    }
+  },
+  "send_poke": {
+    "PS": "消息:发送戳一戳",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        ""
+      ],
+      "user_id": [
+        "integer",
+        "QQ 号",
+        ""
+      ]
+    },
+    "json": {
+      "group_id": 0,
       "user_id": 0
     }
   },
@@ -1976,7 +2001,7 @@
     }
   },
   "set_msg_emoji_like": {
-    "PS": "消息:表情回应消息",
+    "PS": "消息:表情回应消息（支持取消）",
     "PS_json": {
       "message_id": [
         "integer",
@@ -1987,11 +2012,17 @@
         "integer",
         "表情 ID，参考 https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html#EmojiType",
         "必须"
+      ],
+      "set": [
+        "boolean",
+        "是否设置表情回应，false 为取消",
+        "True"
       ]
     },
     "json": {
       "message_id": 0,
-      "emoji_id": 0
+      "emoji_id": 0,
+      "set": true
     }
   },
   "set_online_status": {
@@ -2167,6 +2198,50 @@
     },
     "json": {
       "message_id": 0
+    }
+  },
+  "reshare_flash_file": {
+    "PS": "文件:重新分享闪传文件",
+    "PS_json": {
+      "share_link": [
+        "string",
+        "分享链接，和 file_set_id 二选一",
+        ""
+      ],
+      "file_set_id": [
+        "string",
+        "文件集 ID，和 share_link 二选一",
+        ""
+      ]
+    },
+    "json": {
+      "share_link": "",
+      "file_set_id": ""
+    }
+  },
+  "rename_group_file": {
+    "PS": "文件:重命名群文件",
+    "PS_json": {
+      "group_id": [
+        "integer",
+        "群号",
+        "必须"
+      ],
+      "file_id": [
+        "string",
+        "文件 ID",
+        "必须"
+      ],
+      "new_file_name": [
+        "string",
+        "新文件名",
+        "必须"
+      ]
+    },
+    "json": {
+      "group_id": 0,
+      "file_id": "",
+      "new_file_name": ""
     }
   }
 }

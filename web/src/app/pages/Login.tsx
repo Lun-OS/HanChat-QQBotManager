@@ -54,8 +54,8 @@ export function Login() {
             <div className="w-16 h-16 bg-[#165DFF] rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/30">
               <ShieldCheck className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">HanChat-QQBotManager</h1>
-            <p className="text-gray-500 dark:text-gray-400">llonebot-QQ机器人多账号管理后台</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">HanChat-QQBotManager AdminWeb</h1>
+            <p className="text-gray-500 dark:text-gray-400">OneBOt机器人多账号管理后台</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">

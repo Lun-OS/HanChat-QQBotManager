@@ -23,36 +23,34 @@ export enum RuntimeLibraryType {
 
 /**
  * 生成Lua原生的JSON编码代码
- * 将Lua表编码为JSON字符串，完全在Lua层面处理
+ * 将Lua表编码为JSON字符串，直接使用后端提供的 json 库
  */
 export function generateLuaJSONEncodeCode(valueExpr: string): string {
-  return `blockly_json.encode(${valueExpr})`;
+  return `json.encode(${valueExpr})`;
 }
 
 /**
  * 生成Lua原生的JSON解码代码
- * 将JSON字符串解析为Lua表，完全在Lua层面处理
+ * 将JSON字符串解析为Lua表，直接使用后端提供的 json 库
  */
 export function generateLuaJSONDecodeCode(jsonExpr: string): string {
-  return `blockly_json.decode(${jsonExpr})`;
+  return `json.decode(${jsonExpr})`;
 }
 
 /**
  * 生成Lua原生的JSON路径获取代码
- * 从JSON字符串中按路径获取值，完全在Lua层面处理
- * 使用预定义的辅助函数减少代码重复
+ * 从JSON字符串中按路径获取值，直接使用后端提供的 json 库
  */
 export function generateLuaJSONGetCode(jsonExpr: string, pathExpr: string): string {
-  return `blockly_json.get_path(${jsonExpr}, ${pathExpr})`;
+  return `json.get(${jsonExpr}, ${pathExpr})`;
 }
 
 /**
  * 生成Lua原生的JSON提取代码（支持复杂路径）
- * 从JSON字符串中提取指定路径的值
- * 使用预定义的辅助函数减少代码重复
+ * 从JSON字符串中提取指定路径的值，直接使用后端提供的 json 库
  */
 export function generateLuaJSONExtractCode(jsonExpr: string, pathExpr: string): string {
-  return `blockly_json.get_path(${jsonExpr}, ${pathExpr})`;
+  return `json.get(${jsonExpr}, ${pathExpr})`;
 }
 
 /**
@@ -565,6 +563,19 @@ function blockly_text_utils.split(text, delimiter)
   end
   table.insert(result, text:sub(start_pos))
   return result
+end
+
+-- 统计文本行数
+function blockly_text_utils.count_lines(text)
+  if type(text) ~= "string" then return 0 end
+  if text == "" then return 0 end
+  local count = 1
+  for i = 1, #text do
+    if text:sub(i, i) == "\n" then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 -- 去除文本首尾空格

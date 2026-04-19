@@ -24,6 +24,7 @@ type AsyncLogger struct {
 	processed   int64
 	bufferSize  int
 	workerCount int
+	closed      atomic.Bool
 }
 
 // logEntry 日志条目
@@ -173,6 +174,11 @@ func (al *AsyncLogger) Error(msg string, fields ...zap.Field) {
 
 // log 异步写入日志
 func (al *AsyncLogger) log(level zapcore.Level, msg string, fields ...zap.Field) {
+	if al.closed.Load() {
+		atomic.AddInt64(&al.dropped, 1)
+		return
+	}
+
 	entry := &logEntry{
 		level:  level,
 		msg:    msg,
@@ -202,14 +208,17 @@ func (al *AsyncLogger) Sugar() *AsyncSugarLogger {
 
 // Close 关闭异步日志器
 func (al *AsyncLogger) Close() error {
+	if !al.closed.CompareAndSwap(false, true) {
+		return nil
+	}
 	al.cancel()
 	close(al.logChan)
 	al.wg.Wait()
-	
+
 	// 记录最终统计
 	dropped := atomic.LoadInt64(&al.dropped)
 	processed := atomic.LoadInt64(&al.processed)
-	
+
 	if dropped > 0 {
 		al.sugar.Warnw("异步日志器关闭统计",
 			"dropped", dropped,
@@ -217,7 +226,7 @@ func (al *AsyncLogger) Close() error {
 			"drop_rate", float64(dropped)/float64(dropped+processed)*100,
 		)
 	}
-	
+
 	return nil
 }
 

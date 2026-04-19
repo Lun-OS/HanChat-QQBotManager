@@ -841,6 +841,17 @@ const CUSTOM_BLOCKS = [
     helpUrl: HELP_URL.block,
   },
   {
+    type: 'text_count_lines',
+    message0: '文本 %1 的行数',
+    args0: [
+      { type: 'input_value', name: 'TEXT', check: 'String' },
+    ],
+    output: 'Number',
+    colour: COLOR_HUE.text,
+    tooltip: '介绍：统计文本的行数\n输入：文本 - 字符串\n输出：数字（文本的行数）',
+    helpUrl: HELP_URL.block,
+  },
+  {
     type: 'logic_if_else',
     message0: '如果 %1 那么 %2 否则 %3',
     args0: [
@@ -4771,6 +4782,49 @@ const CUSTOM_BLOCKS = [
     output: 'Number',
     colour: COLOR_HUE.time,
     tooltip: '介绍：获取指定时间戳当天23点59分59秒的时间戳\n输入：时间戳 - 数字\n输出：数字（当天结束的时间戳）',
+    helpUrl: HELP_URL.block,
+  },
+  // ========== 插件RPC积木 - 声明事件 ==========
+  {
+    type: 'plugin_rpc_declare_event',
+    message0: '声明事件 函数名 %1 数据存储到 %2 %3',
+    args0: [
+      { type: 'field_input', name: 'FUNCTION_NAME', text: 'myFunction' },
+      { type: 'field_variable', name: 'DATA_VAR', variable: 'data' },
+      { type: 'input_statement', name: 'HANDLER' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.advanced,
+    tooltip: '介绍：声明一个可被其他插件调用的事件函数\n输入：函数名 - 英文名称；变量名 - 用于存储接收到的数据的变量\n输出：无（声明的函数可以被其他插件调用）',
+    helpUrl: HELP_URL.block,
+  },
+  // ========== 插件RPC积木 - 调用函数 ==========
+  {
+    type: 'plugin_rpc_call_function',
+    message0: '调用插件函数 函数名 %1 传入数据 %2 结果存入 %3',
+    args0: [
+      { type: 'input_value', name: 'FUNCTION_NAME', check: 'String' },
+      { type: 'input_value', name: 'DATA' },
+      { type: 'field_variable', name: 'RESULT_VAR', variable: 'result' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.advanced,
+    tooltip: '介绍：调用所有插件声明的同名事件函数\n输入：函数名 - 字符串；数据 - 任意类型（字符串、数字、对象等）；变量名 - 用于存储返回结果的变量\n输出：无（结果存入指定变量，返回数组包含所有插件的结果）',
+    helpUrl: HELP_URL.block,
+  },
+  // ========== 插件RPC积木 - 返回函数 ==========
+  {
+    type: 'plugin_rpc_return_function',
+    message0: '返回结果 %1',
+    args0: [
+      { type: 'input_value', name: 'RESULT' },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: COLOR_HUE.advanced,
+    tooltip: '介绍：从声明的事件函数中返回结果给调用者\n输入：结果 - 任意类型（字符串、数字、对象等）\n输出：无（返回给调用者）',
     helpUrl: HELP_URL.block,
   },
 ];

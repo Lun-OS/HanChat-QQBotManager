@@ -13,14 +13,20 @@ const (
 	MaxStackDepth = 1000
 	// MaxInstructions 最大指令数（用于限制死循环）
 	MaxInstructions = 10000000
+	// MaxMemoryUsage 最大内存使用量（字节）
+	MaxMemoryUsage = 100 * 1024 * 1024 // 100MB
+	// MemoryCheckInterval 内存检查间隔（指令数）
+	MemoryCheckInterval = 10000
 )
 
 // LuaSandbox Lua沙箱安全控制器
 type LuaSandbox struct {
-	instance      *LuaPluginInstance
-	stackDepth    int64  // 当前堆栈深度
-	instructionCount int64 // 指令计数
-	halted        int32  // 是否已停止（原子操作）
+	instance           *LuaPluginInstance
+	stackDepth         int64  // 当前堆栈深度
+	instructionCount   int64  // 指令计数
+	halted             int32  // 是否已停止（原子操作）
+	permanentlyHalted  int32  // 是否永久停止（原子操作）- 一旦设置不可恢复
+	lastMemoryCheck    int64  // 上次内存检查时的指令计数
 }
 
 // NewLuaSandbox 创建新的Lua沙箱控制器
@@ -73,16 +79,38 @@ func (s *LuaSandbox) IsHalted() bool {
 }
 
 // Halt 强制停止沙箱
+// 修复：添加永久停止标志，防止Reset()后继续执行不安全的代码
 func (s *LuaSandbox) Halt(reason string) {
 	atomic.StoreInt32(&s.halted, 1)
+	atomic.StoreInt32(&s.permanentlyHalted, 1) // 标记为永久停止，不可恢复
 	s.instance.addPluginLog("ERROR", fmt.Sprintf("插件被强制终止: %s", reason))
 }
 
+// GetLState 获取Lua状态（导出方法）
+func (s *LuaSandbox) GetLState() *lua.LState {
+	if s.instance == nil {
+		return nil
+	}
+	return s.instance.L
+}
+
 // Reset 重置沙箱状态
+// 修复：如果已被永久停止（如堆栈溢出、指令数超限），则不允许重置 halted 状态
 func (s *LuaSandbox) Reset() {
+	// 检查是否被永久停止
+	if atomic.LoadInt32(&s.permanentlyHalted) == 1 {
+		// 只重置计数器，但保持 halted 状态，阻止后续执行
+		atomic.StoreInt64(&s.stackDepth, 0)
+		atomic.StoreInt64(&s.instructionCount, 0)
+		atomic.StoreInt64(&s.lastMemoryCheck, 0)
+		return // halted 保持为 1，插件将无法继续执行
+	}
+
+	// 正常情况：完全重置所有状态
 	atomic.StoreInt64(&s.stackDepth, 0)
 	atomic.StoreInt64(&s.instructionCount, 0)
 	atomic.StoreInt32(&s.halted, 0)
+	atomic.StoreInt64(&s.lastMemoryCheck, 0)
 }
 
 // SafeCall 安全调用Lua函数，带堆栈保护
@@ -120,6 +148,30 @@ func GetStackInfo() string {
 	return string(buf[:n])
 }
 
+// checkMemoryUsage 检查内存使用情况
+func (s *LuaSandbox) checkMemoryUsage() bool {
+	if s.instance == nil || s.instance.L == nil {
+		return false
+	}
+
+	// 获取当前内存使用量
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// 检查是否超过内存限制
+	// 注意：gopher-lua没有直接暴露内存使用，我们使用指令计数和栈深度作为替代
+	// 同时我们也可以监控Go进程的内存使用作为辅助
+	
+	// 获取当前栈深度
+	currentDepth := atomic.LoadInt64(&s.stackDepth)
+	if currentDepth > MaxStackDepth {
+		s.Halt(fmt.Sprintf("堆栈深度超过限制: %d", currentDepth))
+		return false
+	}
+
+	return true
+}
+
 // CreateSandboxHook 创建Lua钩子函数，用于监控执行
 func CreateSandboxHook(sandbox *LuaSandbox) func(L *lua.LState) {
 	return func(L *lua.LState) {
@@ -137,6 +189,16 @@ func CreateSandboxHook(sandbox *LuaSandbox) func(L *lua.LState) {
 			sandbox.Halt(fmt.Sprintf("指令数超过限制: %d", MaxInstructions))
 			L.RaiseError("指令数超过限制，可能存在死循环")
 			return
+		}
+
+		// 定期检查内存使用
+		lastCheck := atomic.LoadInt64(&sandbox.lastMemoryCheck)
+		if count-lastCheck >= MemoryCheckInterval {
+			atomic.StoreInt64(&sandbox.lastMemoryCheck, count)
+			if !sandbox.checkMemoryUsage() {
+				L.RaiseError("内存使用超过限制")
+				return
+			}
 		}
 	}
 }

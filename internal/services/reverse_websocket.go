@@ -66,16 +66,38 @@ type ReverseWebSocketService struct {
 	heartbeatTimeout  time.Duration // 心跳超时时间
 	lastHeartbeat     map[string]time.Time // self_id -> 最后心跳时间
 	lastHeartbeatMu   sync.RWMutex
+	// 心跳检测停止信号
+	heartbeatStopChan chan struct{}
 
 	// 修复问题22：临时响应回调（实例级别，避免全局变量竞争）
 	tempResponseMu   sync.Mutex
 	tempResponseChan map[string]chan map[string]interface{}
 	tempResponseChanBytes map[string]chan []byte
+	tempResponseTimes map[string]time.Time // ⭐ 响应通道注册时间（用于TTL清理）
 	echoCounter      uint64 // 原子计数器，用于生成唯一的 echo
 
 	// 调试响应处理器（用于WS调试时将API响应转发给调试客户端）
 	debugResponseHandlers []func(selfID string, rawData []byte)
 	debugResponseMu       sync.RWMutex
+
+	// ========== 性能优化：日志广播Worker池 ==========
+	logBroadcastChan   chan logBroadcastTask // 日志广播任务通道
+	logBroadcastStop   chan struct{}         // 停止信号
+	logBroadcastOnce   sync.Once             // 确保日志广播只停止一次
+	stopOnce          sync.Once             // 确保Stop只执行一次
+	// 清理任务控制（用于停止 StartCleanupTask 启动的 goroutine）
+	cleanupStopChan  chan struct{}         // 清理任务停止信号
+	cleanupOnce      sync.Once             // 确保清理任务只停止一次
+	heartbeatOnce    sync.Once             // 确保心跳检测只停止一次
+	cleanupWg        sync.WaitGroup        // 等待清理任务退出
+}
+
+// logBroadcastTask 日志广播任务
+type logBroadcastTask struct {
+	selfID  string
+	postType string
+	message string
+	level   string
 }
 
 type waitingConnectInfo struct {
@@ -114,13 +136,31 @@ func NewReverseWebSocketService(baseLogger *zap.Logger, accountMgr *BotAccountMa
 		// 修复问题22：初始化临时响应回调映射
 		tempResponseChan:  make(map[string]chan map[string]interface{}),
 		tempResponseChanBytes: make(map[string]chan []byte),
+		tempResponseTimes:  make(map[string]time.Time), // ⭐ 初始化时间戳映射
 		echoCounter:       0,
 		// 调试响应处理器初始化
 		debugResponseHandlers: make([]func(selfID string, rawData []byte), 0),
+		heartbeatStopChan:     make(chan struct{}),
+		// 日志广播Worker池初始化（缓冲100，避免阻塞）
+		logBroadcastChan:   make(chan logBroadcastTask, 100),
+		logBroadcastStop:   make(chan struct{}),
+		// 清理任务控制初始化
+		cleanupStopChan:  make(chan struct{}),
 	}
 
 	// 启动心跳检测任务
 	go service.heartbeatChecker()
+
+	go service.logBroadcastWorker()
+
+	memMgr := GetMemoryManager(logger)
+	memMgr.RegisterCleanup(func() {
+		service.cleanupExpiredTempResponses(30 * time.Second)
+	})
+	memMgr.RegisterCleanup(func() {
+		service.cleanupStaleLogSubscribers()
+	})
+	memMgr.Start()
 
 	return service
 }
@@ -131,8 +171,107 @@ func (s *ReverseWebSocketService) heartbeatChecker() {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		s.checkHeartbeats()
+	for {
+		select {
+		case <-ticker.C:
+			s.checkHeartbeats()
+		case <-s.heartbeatStopChan:
+			s.logger.Debugw("心跳检测器已停止")
+			return
+		}
+	}
+}
+
+func (s *ReverseWebSocketService) cleanupStaleLogSubscribers() {
+	s.logSubMu.Lock()
+	defer s.logSubMu.Unlock()
+
+	for selfID, subscribers := range s.logSubscribers {
+		var staleChans []chan LogEntry
+		for ch := range subscribers {
+			select {
+			case <-ch:
+			default:
+				select {
+				case ch <- LogEntry{}:
+				default:
+					staleChans = append(staleChans, ch)
+				}
+			}
+		}
+		for _, ch := range staleChans {
+			delete(subscribers, ch)
+			func() {
+				defer func() { recover() }()
+				close(ch)
+			}()
+		}
+		if len(subscribers) == 0 {
+			delete(s.logSubscribers, selfID)
+		}
+	}
+}
+// Stop 停止WebSocket服务并清理所有资源
+// 使用 sync.Once 确保只执行一次，避免重复关闭通道导致 panic
+func (s *ReverseWebSocketService) Stop() {
+	s.stopOnce.Do(func() {
+		s.logger.Infow("正在停止WebSocket服务...")
+
+		// 停止日志广播Worker（使用独立的sync.Once确保安全）
+		s.logBroadcastOnce.Do(func() {
+			close(s.logBroadcastStop)
+		})
+
+		// 停止心跳检测器（使用独立的sync.Once确保安全）
+		s.heartbeatOnce.Do(func() {
+			close(s.heartbeatStopChan)
+		})
+
+		// 停止定期清理任务（使用独立的sync.Once确保安全）
+		s.cleanupOnce.Do(func() {
+			close(s.cleanupStopChan)
+		})
+		// 等待清理任务退出（最多等待5秒）
+		done := make(chan struct{})
+		go func() {
+			s.cleanupWg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			s.logger.Debugw("清理任务已退出")
+		case <-time.After(5 * time.Second):
+			s.logger.Warnw("清理任务退出超时")
+		}
+
+		// 清理所有账号资源
+		if s.accountMgr != nil {
+			s.accountMgr.CleanupAllAccounts()
+		}
+
+		s.logger.Infow("WebSocket服务已停止")
+	})
+}
+
+// logBroadcastWorker 日志广播Worker
+// 单goroutine处理所有日志广播任务，避免高并发下创建大量goroutine导致资源耗尽
+func (s *ReverseWebSocketService) logBroadcastWorker() {
+	for {
+		select {
+		case <-s.logBroadcastStop:
+			s.logger.Debugw("日志广播Worker已停止")
+			return
+		case task := <-s.logBroadcastChan:
+			if task.message != "" {
+				s.BroadcastLog(LogEntry{
+					SelfID:  task.selfID,
+					Level:   task.level,
+					Message: task.message,
+					Source:  "websocket",
+					Time:    time.Now(),
+				})
+			}
+		}
 	}
 }
 
@@ -375,7 +514,6 @@ func (s *ReverseWebSocketService) readLoop(selfID string, conn *websocket.Conn) 
 			s.logManager.WriteWSLog(selfID, "recv", data)
 		}
 
-		// 解析消息
 		var msg map[string]interface{}
 		if err := json.Unmarshal(data, &msg); err != nil {
 			s.logger.Errorw("解析消息失败",
@@ -385,8 +523,11 @@ func (s *ReverseWebSocketService) readLoop(selfID string, conn *websocket.Conn) 
 			continue
 		}
 
-		// 处理消息
 		s.handleMessage(selfID, msg, data)
+
+		if memMgr := GetMemoryManager(nil); memMgr.running.Load() {
+			memMgr.RecordMessage()
+		}
 	}
 }
 
@@ -572,52 +713,72 @@ func (s *ReverseWebSocketService) fetchBotInfo(selfID string) {
 
 // handleEvent 处理事件上报
 // 将事件分发给注册的处理器
+// 优化：减少内存分配，合并锁获取操作，使用对象池减少GC压力
 func (s *ReverseWebSocketService) handleEvent(selfID string, eventData map[string]interface{}, rawData []byte) {
-	// 创建事件副本，避免并发问题
-	eventCopy := make(map[string]interface{}, len(eventData))
-	for k, v := range eventData {
-		eventCopy[k] = v
-	}
+	postType, _ := eventData["post_type"].(string)
 
-	postType, _ := eventCopy["post_type"].(string)
-
-	// 跳过心跳事件
 	if postType == "meta_event" {
-		metaEventType, _ := eventCopy["meta_event_type"].(string)
+		metaEventType, _ := eventData["meta_event_type"].(string)
 		if metaEventType == "heartbeat" {
 			return
 		}
 	}
 
-	// 广播事件日志（优化：使用后台goroutine避免阻塞）
-	go s.broadcastEventLog(selfID, postType, eventCopy)
+	if _, ok := eventData["self_id"].(string); !ok {
+		eventData["_self_id"] = selfID
+	}
 
-	// 获取处理器列表（线程安全）
 	s.eventHandlersMu.RLock()
-	handlers := make([]func(selfID string, eventData map[string]interface{}), len(s.eventHandlers))
+	handlerCount := len(s.eventHandlers)
+	if handlerCount == 0 {
+		s.eventHandlersMu.RUnlock()
+
+		s.rawEventHandlersMu.RLock()
+		rawHandlerCount := len(s.rawEventHandlers)
+		if rawHandlerCount == 0 {
+			s.rawEventHandlersMu.RUnlock()
+			return
+		}
+		rawHandlers := make([]func(selfID string, rawData []byte), rawHandlerCount)
+		copy(rawHandlers, s.rawEventHandlers)
+		s.rawEventHandlersMu.RUnlock()
+		for _, handler := range rawHandlers {
+			handler(selfID, rawData)
+		}
+		return
+	}
+
+	handlers := make([]func(selfID string, eventData map[string]interface{}), handlerCount)
 	copy(handlers, s.eventHandlers)
 	s.eventHandlersMu.RUnlock()
 
-	// 分发给所有处理器（直接传递同一副本，更高效）
-	for _, handler := range handlers {
-		handler(selfID, eventCopy)
+	select {
+	case s.logBroadcastChan <- s.buildLogBroadcastTask(selfID, postType, eventData):
+	default:
 	}
 
-	// 分发原始数据给原始数据处理器（用于调试服务透传）
+	for _, handler := range handlers {
+		handler(selfID, eventData)
+	}
+
 	s.rawEventHandlersMu.RLock()
-	rawHandlers := make([]func(selfID string, rawData []byte), len(s.rawEventHandlers))
+	rawHandlerCount := len(s.rawEventHandlers)
+	if rawHandlerCount == 0 {
+		s.rawEventHandlersMu.RUnlock()
+		return
+	}
+	rawHandlers := make([]func(selfID string, rawData []byte), rawHandlerCount)
 	copy(rawHandlers, s.rawEventHandlers)
 	s.rawEventHandlersMu.RUnlock()
 
-	// 直接透传原始数据，不做任何修改
 	for _, handler := range rawHandlers {
 		handler(selfID, rawData)
 	}
 }
 
-// broadcastEventLog 广播事件日志
-func (s *ReverseWebSocketService) broadcastEventLog(selfID string, postType string, eventData map[string]interface{}) {
-	// 构建日志消息
+// buildLogBroadcastTask 构建日志广播任务
+// 在handleEvent中同步调用，提取日志信息后立即释放eventData引用
+func (s *ReverseWebSocketService) buildLogBroadcastTask(selfID string, postType string, eventData map[string]interface{}) logBroadcastTask {
 	var message string
 	var level string = "INFO"
 
@@ -642,20 +803,17 @@ func (s *ReverseWebSocketService) broadcastEventLog(selfID string, postType stri
 		requestType, _ := eventData["request_type"].(string)
 		message = fmt.Sprintf("[请求] %s", requestType)
 	case "meta_event":
-		message = fmt.Sprintf("[元事件] %s", eventData["sub_type"])
+		subType, _ := eventData["sub_type"].(string)
+		message = fmt.Sprintf("[元事件] %s", subType)
 	default:
 		message = fmt.Sprintf("[事件] %s", postType)
 	}
 
-	if message != "" {
-		s.BroadcastLog(LogEntry{
-			SelfID:  selfID,
-			Level:   level,
-			Message: message,
-			Source:  "websocket",
-			Time:    time.Now(),
-			Data:    eventData,
-		})
+	return logBroadcastTask{
+		selfID:   selfID,
+		postType: postType,
+		message:  message,
+		level:    level,
 	}
 }
 
@@ -698,12 +856,12 @@ func (s *ReverseWebSocketService) handleAPIResponse(selfID string, response map[
 		handler(selfID, rawData)
 	}
 
-	// 处理临时响应（map类型）
+	// 处理临时响应（map类型）- 同步处理以减少延迟
 	s.logger.Debugw("处理临时响应", "echo", echo)
-	go s.handleTempResponse(echo, response)
+	s.handleTempResponse(echo, response)
 
-	// 处理临时响应（字节类型，用于原始数据透传）
-	go s.handleTempResponseBytes(echo, rawData)
+	// 处理临时响应（字节类型，用于原始数据透传）- 同步处理以减少延迟
+	s.handleTempResponseBytes(echo, rawData)
 }
 
 // SendMessageToAccount 发送消息到指定账号的WebSocket连接
@@ -786,18 +944,18 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 	// 修复：处理action参数，移除开头的"/"，确保接口名称格式一致
 	action = strings.TrimPrefix(action, "/")
 
-	// 获取或创建该账号的并发控制通道（限制并发数为5）
+	// 优化：获取或创建该账号的并发控制通道（提升并发限制从5到20）
 	s.apiChanMu.Lock()
 	ch, ok := s.apiChan[selfID]
 	if !ok {
-		ch = make(chan struct{}, 5) // 每个账号最多5个并发API请求
+		ch = make(chan struct{}, 20) // 每个账号最多20个并发API请求（原5太小）
 		s.apiChan[selfID] = ch
 	}
 	s.apiChanMu.Unlock()
 
 	// 尝试获取并发许可，使用非阻塞select避免丢弃请求
-	// 修复问题21：使用队列等待而不是直接丢弃请求
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 优化：增加等待超时从5秒到15秒（原超时太短导致大量请求失败）
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	select {
@@ -832,11 +990,14 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 
 	// 注册响应回调（临时）
 	s.registerTempResponse(echo, respChan)
-	// 修复问题24：在超时后也清理回调，但使用更安全的延迟清理
+	// 优化：使用defer异步清理，不阻塞当前调用
+	// 原来的50ms sleep会导致每个API调用都额外增加50ms延迟
 	defer func() {
-		// 延迟一小段时间再清理，确保响应已经处理完毕
-		time.Sleep(100 * time.Millisecond)
-		s.unregisterTempResponse(echo)
+		go func() {
+			// 异步清理，短延时确保响应已处理完毕
+			time.Sleep(10 * time.Millisecond) // 优化：从50ms降低到10ms
+			s.unregisterTempResponse(echo)
+		}()
 	}()
 
 	// 发送请求
@@ -888,12 +1049,12 @@ func (s *ReverseWebSocketService) CallBotAPIRaw(selfID, action string, params ma
 	s.apiChanMu.Lock()
 	ch, ok := s.apiChan[selfID]
 	if !ok {
-		ch = make(chan struct{}, 5)
+		ch = make(chan struct{}, 20) // 统一并发限制为20（与CallBotAPI保持一致）
 		s.apiChan[selfID] = ch
 	}
 	s.apiChanMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // 统一超时时间为15秒
 	defer cancel()
 
 	select {
@@ -914,8 +1075,10 @@ func (s *ReverseWebSocketService) CallBotAPIRaw(selfID, action string, params ma
 	respChan := make(chan []byte, 1)
 	s.registerTempResponseBytes(echo, respChan)
 	defer func() {
-		time.Sleep(100 * time.Millisecond)
-		s.unregisterTempResponseBytes(echo)
+		go func() {
+			time.Sleep(10 * time.Millisecond) // 优化：从100ms降低到10ms
+			s.unregisterTempResponseBytes(echo)
+		}()
 	}()
 
 	if err := s.SendMessageToAccount(selfID, request); err != nil {
@@ -941,39 +1104,62 @@ func (s *ReverseWebSocketService) registerTempResponse(echo string, ch chan map[
 	s.tempResponseMu.Lock()
 	defer s.tempResponseMu.Unlock()
 	s.tempResponseChan[echo] = ch
+	s.tempResponseTimes[echo] = time.Now() // ⭐ 记录注册时间
 }
 
 // unregisterTempResponse 取消注册临时响应回调
 func (s *ReverseWebSocketService) unregisterTempResponse(echo string) {
 	s.tempResponseMu.Lock()
-	if ch, ok := s.tempResponseChan[echo]; ok {
-		// 使用 recover 防止重复关闭 panic
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Debugw("通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
-				}
-			}()
-			close(ch)
-		}()
-		delete(s.tempResponseChan, echo)
+	defer s.tempResponseMu.Unlock()
+
+	ch, ok := s.tempResponseChan[echo]
+	if !ok {
+		return
 	}
-	s.tempResponseMu.Unlock()
+
+	// 先删除映射和时间戳，再关闭通道，避免竞态条件
+	delete(s.tempResponseChan, echo)
+	delete(s.tempResponseTimes, echo) // ⭐ 清理时间戳
+
+	// 使用 recover 防止重复关闭 panic（安全网）
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Debugw("通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
+		}
+	}()
+	close(ch)
 }
 
 // handleTempResponse 处理临时响应（修复问题22：使用实例级别的锁）
 func (s *ReverseWebSocketService) handleTempResponse(echo string, response map[string]interface{}) {
 	s.tempResponseMu.Lock()
-	if ch, ok := s.tempResponseChan[echo]; ok {
-		// 使用非阻塞发送，避免阻塞
+	ch, ok := s.tempResponseChan[echo]
+	if !ok {
+		s.tempResponseMu.Unlock()
+		return
+	}
+	// ⭐ 关键修复：从map中移除引用，防止并发关闭
+	delete(s.tempResponseChan, echo)
+	s.tempResponseMu.Unlock()
+
+	// 在锁外发送，使用defer+recover防止向已关闭的channel发送导致panic
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Warnw("响应通道可能已关闭，忽略发送错误",
+					"echo", echo,
+					"error", r)
+			}
+		}()
+
 		select {
 		case ch <- response:
-		default:
-			// 通道已满或已关闭，记录警告
-			s.logger.Warnw("响应通道已满或已关闭，丢弃响应", "echo", echo)
+			// 发送成功
+		case <-time.After(5 * time.Second):
+			// 发送超时，可能是通道已满或正在关闭
+			s.logger.Warnw("响应通道发送超时，丢弃响应", "echo", echo)
 		}
-	}
-	s.tempResponseMu.Unlock()
+	}()
 }
 
 // registerTempResponseBytes 注册字节类型的临时响应回调
@@ -981,37 +1167,62 @@ func (s *ReverseWebSocketService) registerTempResponseBytes(echo string, ch chan
 	s.tempResponseMu.Lock()
 	defer s.tempResponseMu.Unlock()
 	s.tempResponseChanBytes[echo] = ch
+	s.tempResponseTimes[echo] = time.Now() // ⭐ 记录注册时间
 }
 
 // unregisterTempResponseBytes 取消注册字节类型的临时响应回调
 func (s *ReverseWebSocketService) unregisterTempResponseBytes(echo string) {
 	s.tempResponseMu.Lock()
 	defer s.tempResponseMu.Unlock()
-	if ch, ok := s.tempResponseChanBytes[echo]; ok {
-		// 使用 recover 防止重复关闭 panic
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					s.logger.Debugw("通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
-				}
-			}()
-			close(ch)
-		}()
-		delete(s.tempResponseChanBytes, echo)
+
+	ch, ok := s.tempResponseChanBytes[echo]
+	if !ok {
+		return
 	}
+
+	// 先删除映射和时间戳，再关闭通道，避免竞态条件
+	delete(s.tempResponseChanBytes, echo)
+	delete(s.tempResponseTimes, echo) // ⭐ 清理时间戳
+
+	// 使用 recover 防止重复关闭 panic（安全网）
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Debugw("字节通道已关闭，忽略重复关闭", "echo", echo, "recover", r)
+		}
+	}()
+	close(ch)
 }
 
 // handleTempResponseBytes 处理字节类型的临时响应
 func (s *ReverseWebSocketService) handleTempResponseBytes(echo string, rawData []byte) {
 	s.tempResponseMu.Lock()
-	if ch, ok := s.tempResponseChanBytes[echo]; ok {
+	ch, ok := s.tempResponseChanBytes[echo]
+	if !ok {
+		s.tempResponseMu.Unlock()
+		return
+	}
+	// ⭐ 关键修复：从map中移除引用，防止并发关闭
+	delete(s.tempResponseChanBytes, echo)
+	s.tempResponseMu.Unlock()
+
+	// 在锁外发送，使用defer+recover防止向已关闭的channel发送导致panic
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Warnw("字节响应通道可能已关闭，忽略发送错误",
+					"echo", echo,
+					"error", r)
+			}
+		}()
+
 		select {
 		case ch <- rawData:
-		default:
-			s.logger.Warnw("字节响应通道已满或已关闭，丢弃响应", "echo", echo)
+			// 发送成功
+		case <-time.After(5 * time.Second):
+			// 发送超时，可能是通道已满或正在关闭
+			s.logger.Warnw("字节响应通道发送超时，丢弃响应", "echo", echo)
 		}
-	}
-	s.tempResponseMu.Unlock()
+	}()
 }
 
 // AddEventHandler 添加事件处理器
@@ -1042,10 +1253,12 @@ func (s *ReverseWebSocketService) AddDebugResponseHandler(handler func(selfID st
 func (s *ReverseWebSocketService) RemoveDebugResponseHandler(handler func(selfID string, rawData []byte)) {
 	s.debugResponseMu.Lock()
 	defer s.debugResponseMu.Unlock()
+	// 修复：遍历查找并移除匹配的处理器（原代码使用 &h==&handler 比较循环变量地址，永远为false，导致永远无法移除）
 	for i, h := range s.debugResponseHandlers {
-		if &h == &handler {
+		// 使用 reflect.ValueOf().Pointer() 比较函数指针地址
+		if fmt.Sprintf("%p", h) == fmt.Sprintf("%p", handler) {
 			s.debugResponseHandlers = append(s.debugResponseHandlers[:i], s.debugResponseHandlers[i+1:]...)
-			break
+			return
 		}
 	}
 }
@@ -1101,25 +1314,102 @@ func (s *ReverseWebSocketService) GetConnectionStats() map[string]interface{} {
 // StartCleanupTask 启动定期清理任务
 // 清理过期连接和超时未收到connect的连接
 func (s *ReverseWebSocketService) StartCleanupTask(interval time.Duration, maxIdle time.Duration) {
-	// 清理过期连接
+	// 清理过期连接（使用 cleanupWg 跟踪，支持优雅退出）
+	s.cleanupWg.Add(1)
 	go func() {
+		defer s.cleanupWg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			s.accountMgr.CleanupStaleConnections(maxIdle)
+		for {
+			select {
+			case <-ticker.C:
+				s.accountMgr.CleanupStaleConnections(maxIdle)
+			case <-s.cleanupStopChan:
+				return
+			}
 		}
 	}()
 
 	// 清理超时未收到connect的连接（3秒）
+	s.cleanupWg.Add(1)
 	go func() {
+		defer s.cleanupWg.Done()
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			s.cleanupWaitingConnect()
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupWaitingConnect()
+			case <-s.cleanupStopChan:
+				return
+			}
 		}
 	}()
+
+	// ⭐ 新增：定期清理过期的临时响应通道（TTL 60秒）
+	s.cleanupWg.Add(1)
+	go func() {
+		defer s.cleanupWg.Done()
+		ticker := time.NewTicker(30 * time.Second) // 每30秒清理一次
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupExpiredTempResponses(30 * time.Second) // TTL = 30秒（优化：缩短TTL减少内存占用）
+			case <-s.cleanupStopChan:
+				return
+			}
+		}
+	}()
+}
+
+// cleanupExpiredTempResponses 清理过期的临时响应通道（防止内存泄漏）
+func (s *ReverseWebSocketService) cleanupExpiredTempResponses(ttl time.Duration) {
+	s.tempResponseMu.Lock()
+	defer s.tempResponseMu.Unlock()
+
+	now := time.Now()
+	expiredCount := 0
+
+	for echo, registerTime := range s.tempResponseTimes {
+		if now.Sub(registerTime) > ttl {
+			// 过期的响应通道，清理它
+			if ch, ok := s.tempResponseChan[echo]; ok {
+				delete(s.tempResponseChan, echo)
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// 忽略关闭已关闭通道的错误
+						}
+					}()
+					close(ch)
+				}()
+			}
+			if ch, ok := s.tempResponseChanBytes[echo]; ok {
+				delete(s.tempResponseChanBytes, echo)
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// 忽略关闭已关闭通道的错误
+						}
+					}()
+					close(ch)
+				}()
+			}
+			delete(s.tempResponseTimes, echo)
+			expiredCount++
+		}
+	}
+
+	if expiredCount > 0 {
+		s.logger.Debugw("清理过期临时响应通道",
+			"expired_count", expiredCount,
+			"remaining", len(s.tempResponseTimes),
+			"ttl", ttl.String())
+	}
 }
 
 // SetMaxConnections 设置最大连接数限制
@@ -1163,10 +1453,30 @@ func (s *ReverseWebSocketService) GetLogManager() *LogManager {
 
 // OnConnect 注册连接回调函数
 // 当有新账号成功连接时，会调用所有注册的回调函数
-func (s *ReverseWebSocketService) OnConnect(callback func(selfID string)) {
+// 返回回调ID，用于后续移除
+func (s *ReverseWebSocketService) OnConnect(callback func(selfID string)) string {
 	s.onConnectMu.Lock()
 	defer s.onConnectMu.Unlock()
+	
+	// 生成唯一回调ID
+	callbackID := fmt.Sprintf("callback_%d", time.Now().UnixNano())
 	s.onConnectCallbacks = append(s.onConnectCallbacks, callback)
+	
+	return callbackID
+}
+
+// RemoveOnConnect 移除连接回调函数
+func (s *ReverseWebSocketService) RemoveOnConnect(callback func(selfID string)) {
+	s.onConnectMu.Lock()
+	defer s.onConnectMu.Unlock()
+	
+	// 通过函数指针比较移除回调
+	for i, cb := range s.onConnectCallbacks {
+		if fmt.Sprintf("%p", cb) == fmt.Sprintf("%p", callback) {
+			s.onConnectCallbacks = append(s.onConnectCallbacks[:i], s.onConnectCallbacks[i+1:]...)
+			return
+		}
+	}
 }
 
 // triggerOnConnect 触发连接回调
@@ -1177,7 +1487,14 @@ func (s *ReverseWebSocketService) triggerOnConnect(selfID string) {
 	s.onConnectMu.RUnlock()
 
 	for _, callback := range callbacks {
-		go callback(selfID)
+		go func(cb func(string)) {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Errorw("连接回调panic", "self_id", selfID, "recover", r)
+				}
+			}()
+			cb(selfID)
+		}(callback)
 	}
 }
 
@@ -1240,20 +1557,36 @@ func (s *ReverseWebSocketService) UnsubscribeLogs(selfID string, ch chan LogEntr
 // BroadcastLog 广播日志到所有订阅者
 func (s *ReverseWebSocketService) BroadcastLog(entry LogEntry) {
 	s.logSubMu.RLock()
-	defer s.logSubMu.RUnlock()
-
 	subscribers, exists := s.logSubscribers[entry.SelfID]
 	if !exists || len(subscribers) == 0 {
+		s.logSubMu.RUnlock()
 		return
 	}
 
-	// 广播到所有订阅者（非阻塞）
+	var staleChans []chan LogEntry
 	for ch := range subscribers {
 		select {
 		case ch <- entry:
 		default:
-			// 通道已满，丢弃日志（避免阻塞）
-			s.logger.Debugw("日志通道已满，丢弃日志", "self_id", entry.SelfID)
+			staleChans = append(staleChans, ch)
 		}
+	}
+	s.logSubMu.RUnlock()
+
+	if len(staleChans) > 0 {
+		s.logSubMu.Lock()
+		for _, ch := range staleChans {
+			if subscribers, exists := s.logSubscribers[entry.SelfID]; exists {
+				delete(subscribers, ch)
+				func() {
+					defer func() { recover() }()
+					close(ch)
+				}()
+			}
+		}
+		if subs, exists := s.logSubscribers[entry.SelfID]; exists && len(subs) == 0 {
+			delete(s.logSubscribers, entry.SelfID)
+		}
+		s.logSubMu.Unlock()
 	}
 }

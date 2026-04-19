@@ -266,7 +266,7 @@ function registerLuaGenerators(generator: any) {
   };
 
   generator.forBlock['message_reply'] = function(block: Blockly.Block) {
-    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) || 'nil';
+    const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) ?? 'nil';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
     return `message.reply(${event}, ${content})
 `;
@@ -304,10 +304,10 @@ ${onError}end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'result';
 
     // 后端统一返回表类型，包含 success 字段
-    return `local ${varName} = message.send_group(${groupId}, ${content})
+    return `_G["${varName}"] = message.send_group(${groupId}, ${content})
 -- 确保返回的是表类型
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -318,10 +318,10 @@ end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'result';
 
     // 后端统一返回表类型，包含 success 字段
-    return `local ${varName} = message.send_private(${userId}, ${content})
+    return `_G["${varName}"] = message.send_private(${userId}, ${content})
 -- 确保返回的是表类型
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -839,14 +839,14 @@ ${statements}end)
   // 修复：添加命名空间隔离，避免不同插件间的存储冲突
   generator.forBlock['storage_set'] = function(block: Blockly.Block) {
     const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     // 使用插件名称作为命名空间前缀
     return `storage.set(plugin.name .. ":" .. ${key}, ${value})\n`;
   };
 
   generator.forBlock['storage_get'] = function(block: Blockly.Block) {
     const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
-    const defaultValue = generator.valueToCode(block, 'DEFAULT', generator.ORDER_NONE) || 'nil';
+    const defaultValue = generator.valueToCode(block, 'DEFAULT', generator.ORDER_NONE) ?? 'nil';
     // 使用插件名称作为命名空间前缀
     return [`storage.get(plugin.name .. ":" .. ${key}, ${defaultValue})`, generator.ORDER_HIGH];
   };
@@ -977,6 +977,12 @@ ${statements}end)
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     return [`(string.find(${text}, ${search}, 1, true) ~= nil)`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['text_count_lines'] = function(block: Blockly.Block) {
+    const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
+    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
+    return [`blockly_text_utils.count_lines(${text})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_split'] = function(block: Blockly.Block) {
@@ -1202,37 +1208,37 @@ ${elseBranch}end
 
   // ========== 数据类型判断积木 ==========
   generator.forBlock['type_is_string'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`type(${value}) == "string"`, generator.ORDER_RELATIONAL];
   };
 
   generator.forBlock['type_is_number'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`type(${value}) == "number"`, generator.ORDER_RELATIONAL];
   };
 
   generator.forBlock['type_is_boolean'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`type(${value}) == "boolean"`, generator.ORDER_RELATIONAL];
   };
 
   generator.forBlock['type_is_table'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`type(${value}) == "table"`, generator.ORDER_RELATIONAL];
   };
 
   generator.forBlock['type_is_array'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`blockly_utils.is_array(${value})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['type_is_nil'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`${value} == nil`, generator.ORDER_RELATIONAL];
   };
 
   generator.forBlock['type_get_type'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return [`type(${value})`, generator.ORDER_HIGH];
   };
 
@@ -1283,6 +1289,19 @@ ${doCode}until ${condition}
     const min = generator.valueToCode(block, 'MIN', generator.ORDER_NONE) || '1';
     const max = generator.valueToCode(block, 'MAX', generator.ORDER_NONE) || '100';
     return [`math.random(tonumber(${min}), tonumber(${max}))`, generator.ORDER_HIGH];
+  };
+
+  generator.forBlock['math_random_int'] = function(block: Blockly.Block) {
+    // 同时支持两种输入名称以确保兼容性
+    let from = generator.valueToCode(block, 'FROM', generator.ORDER_NONE);
+    let to = generator.valueToCode(block, 'TO', generator.ORDER_NONE);
+    if (!from) {
+      from = generator.valueToCode(block, 'MIN', generator.ORDER_NONE) || '1';
+    }
+    if (!to) {
+      to = generator.valueToCode(block, 'MAX', generator.ORDER_NONE) || '100';
+    }
+    return [`math.random(tonumber(${from}), tonumber(${to}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['math_random_float'] = function(block: Blockly.Block) {
@@ -1517,12 +1536,12 @@ ${doCode}until ${condition}
 
   // ========== 调试工具积木 ==========
   generator.forBlock['debug_print'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return `print(${value})\n`;
   };
 
   generator.forBlock['debug_dump'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return `blockly_utils.dump_table(${value})\n`;
   };
 
@@ -1584,18 +1603,18 @@ ${doCode}until ${condition}
   generator.forBlock['http_request_with_var'] = function(block: Blockly.Block) {
     const method = block.getFieldValue('METHOD') || 'GET';
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
-    const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) || 'nil';
+    const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) ?? 'nil';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
     // 响应体作为 JSON 字符串存入变量
     return `local __http_response = http.request("${method}", ${url}, nil, ${body})
-${varName} = __http_response and __http_response.body or ""
+_G["${varName}"] = __http_response and __http_response.body or ""
 `;
   };
 
   generator.forBlock['http_download_base64'] = function(block: Blockly.Block) {
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'base64data';
-    return `${varName} = http.download_base64(${url})
+    return `_G["${varName}"] = http.download_base64(${url})
 `;
   };
 
@@ -1667,24 +1686,20 @@ ${varName} = __http_response and __http_response.body or ""
   generator.forBlock['json_get'] = function(block: Blockly.Block) {
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    // 标记使用 JSON 和表操作库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TABLE_UTILS);
-    return [`blockly_json.get_path(${json}, ${path})`, generator.ORDER_HIGH];
+    // 直接使用后端的 json 库，不再需要运行时库
+    return [`json.get(${json}, ${path})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['json_encode'] = function(block: Blockly.Block) {
     const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || '{}';
-    // 标记使用 JSON 库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
-    return [`blockly_json.encode(${value})`, generator.ORDER_HIGH];
+    // 直接使用后端的 json 库，不再需要运行时库
+    return [`json.encode(${value})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['json_decode'] = function(block: Blockly.Block) {
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
-    // 标记使用 JSON 库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
-    return [`blockly_json.decode(${json})`, generator.ORDER_HIGH];
+    // 直接使用后端的 json 库，不再需要运行时库
+    return [`json.decode(${json})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['table_get'] = function(block: Blockly.Block) {
@@ -1698,7 +1713,7 @@ ${varName} = __http_response and __http_response.body or ""
   generator.forBlock['table_set'] = function(block: Blockly.Block) {
     const table = generator.valueToCode(block, 'TABLE', generator.ORDER_NONE) || '{}';
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     // 标记使用表操作库
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TABLE_UTILS);
     return `blockly_table_utils.set(${table}, ${path}, ${value})\n`;
@@ -1708,20 +1723,19 @@ ${varName} = __http_response and __http_response.body or ""
   generator.forBlock['data_from_json'] = function(block: Blockly.Block) {
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
     const pathType = block.getFieldValue('PATH_TYPE');
-    // 标记使用 JSON 库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
+    // 直接使用后端的 json 库，不再需要运行时库
     
     switch (pathType) {
       case 'first':
-        return [`(function() local _t = blockly_json.decode(${json}); return _t and _t[1] or nil end)()`, generator.ORDER_HIGH];
+        return [`(function() local _t = json.decode(${json}); return _t and _t[1] or nil end)()`, generator.ORDER_HIGH];
       case 'last':
-        return [`(function() local _t = blockly_json.decode(${json}); return _t and _t[#_t] or nil end)()`, generator.ORDER_HIGH];
+        return [`(function() local _t = json.decode(${json}); return _t and _t[#_t] or nil end)()`, generator.ORDER_HIGH];
       case 'index':
-        return [`blockly_json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${json})`, generator.ORDER_HIGH];
       case 'field':
-        return [`blockly_json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${json})`, generator.ORDER_HIGH];
       default:
-        return [`blockly_json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${json})`, generator.ORDER_HIGH];
     }
   };
 
@@ -1739,16 +1753,14 @@ ${varName} = __http_response and __http_response.body or ""
 
   generator.forBlock['data_to_json'] = function(block: Blockly.Block) {
     const data = generator.valueToCode(block, 'DATA', generator.ORDER_NONE) || '{}';
-    // 标记使用 JSON 库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
-    return [`blockly_json.encode(${data})`, generator.ORDER_HIGH];
+    // 直接使用后端的 json 库，不再需要运行时库
+    return [`json.encode(${data})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['table_to_json'] = function(block: Blockly.Block) {
     const table = generator.valueToCode(block, 'TABLE', generator.ORDER_NONE) || '{}';
-    // 标记使用 JSON 库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
-    return [`blockly_json.encode(${table})`, generator.ORDER_HIGH];
+    // 直接使用后端的 json 库，不再需要运行时库
+    return [`json.encode(${table})`, generator.ORDER_HIGH];
   };
 
   // ========== 文件管理积木 ==========
@@ -1778,7 +1790,7 @@ ${varName} = __http_response and __http_response.body or ""
   generator.forBlock['simple_db_set'] = function(block: Blockly.Block) {
     const dbName = generator.valueToCode(block, 'DB_NAME', generator.ORDER_NONE) || '""';
     const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return `db.set(${dbName}, ${key}, ${value})\n`;
   };
 
@@ -1813,7 +1825,7 @@ ${varName} = __http_response and __http_response.body or ""
   };
 
   generator.forBlock['array_add_item'] = function(block: Blockly.Block) {
-    const item = generator.valueToCode(block, 'ITEM', generator.ORDER_NONE) || 'nil';
+    const item = generator.valueToCode(block, 'ITEM', generator.ORDER_NONE) ?? 'nil';
     // 从 WeakMap 获取当前计数器值
     let counter = arrayCounters.get(generator) || 1;
     const result = `_array_items[${counter}] = ${item}\n`;
@@ -1843,6 +1855,7 @@ ${varName} = __http_response and __http_response.body or ""
     const statements = generator.statementToCode(block, 'DO') || '';
     
     return `for _, ${varName} in ipairs(${array}) do
+  _G["${varName}"] = ${varName}
 ${statements}end
 `;
   };
@@ -1866,7 +1879,7 @@ ${statements}end
   };
 
   generator.forBlock['is_type'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     const typeName = block.getFieldValue('TYPE');
     if (typeName === 'nil') {
       return [`${value} == nil`, generator.ORDER_RELATIONAL];
@@ -1882,7 +1895,7 @@ ${statements}end
   generator.forBlock['safe_get'] = function(block: Blockly.Block) {
     const table = generator.valueToCode(block, 'TABLE', generator.ORDER_NONE) || '{}';
     const key = generator.valueToCode(block, 'KEY', generator.ORDER_NONE) || '""';
-    const defaultValue = generator.valueToCode(block, 'DEFAULT', generator.ORDER_NONE) || 'nil';
+    const defaultValue = generator.valueToCode(block, 'DEFAULT', generator.ORDER_NONE) ?? 'nil';
     return [`(${table}[${key}] ~= nil and ${table}[${key}] or ${defaultValue})`, generator.ORDER_HIGH];
   };
 
@@ -1959,7 +1972,7 @@ ${onError}end
 
     const params = [param1, param2].filter(p => p).join(', ');
 
-    return `local ${varName} = ${apiName}(${params})
+    return `_G["${varName}"] = ${apiName}(${params})
 `;
   };
 
@@ -1969,9 +1982,9 @@ ${onError}end
     const enable = block.getFieldValue('ENABLE') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_whole_ban(${groupId}, ${enable})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_whole_ban(${groupId}, ${enable})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -1982,9 +1995,9 @@ end
     const enable = block.getFieldValue('ENABLE') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_admin(${groupId}, ${userId}, ${enable})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_admin(${groupId}, ${userId}, ${enable})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -1995,9 +2008,9 @@ end
     const card = generator.valueToCode(block, 'CARD', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_card(${groupId}, ${userId}, ${card})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_card(${groupId}, ${userId}, ${card})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2008,9 +2021,9 @@ end
     const reject = block.getFieldValue('REJECT') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.kick(${groupId}, ${userId}, ${reject})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.kick(${groupId}, ${userId}, ${reject})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2021,9 +2034,9 @@ end
     const duration = generator.valueToCode(block, 'DURATION', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_ban(${groupId}, ${userId}, ${duration})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_ban(${groupId}, ${userId}, ${duration})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2033,9 +2046,9 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_name(${groupId}, ${name})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_name(${groupId}, ${name})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2046,9 +2059,9 @@ end
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.send_group(${groupId}, ${content})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.send_group(${groupId}, ${content})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2058,9 +2071,9 @@ end
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.send_private(${userId}, ${content})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.send_private(${userId}, ${content})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2069,9 +2082,9 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.delete_msg(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.delete_msg(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2080,9 +2093,9 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.set_essence(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.set_essence(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2092,9 +2105,9 @@ end
     const times = generator.valueToCode(block, 'TIMES', generator.ORDER_NONE) || '1';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.send_like(${userId}, ${times})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.send_like(${userId}, ${times})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2105,9 +2118,9 @@ end
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.set_remark(${userId}, ${remark})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.set_remark(${userId}, ${remark})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2116,9 +2129,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.delete_friend(${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.delete_friend(${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2130,9 +2143,9 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = file.upload_group(${groupId}, ${file}, ${name})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = file.upload_group(${groupId}, ${file}, ${name})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2142,9 +2155,9 @@ end
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = file.delete_group_file(${groupId}, ${fileId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = file.delete_group_file(${groupId}, ${fileId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2154,9 +2167,9 @@ end
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = http.request("GET", ${url})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = http.request("GET", ${url})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2166,9 +2179,9 @@ end
     const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = http.request("POST", ${url}, nil, ${body})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = http.request("POST", ${url}, nil, ${body})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2179,9 +2192,9 @@ end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
     // 后端统一返回表类型，包含 success 字段和 data 字段
-    return `local ${varName} = message.get_msg(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.get_msg(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2190,9 +2203,9 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.get_forward_msg(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.get_forward_msg(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2204,9 +2217,9 @@ end
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.get_group_msg_history(${groupId}, ${messageSeq}, ${count}, ${reverseOrder})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.get_group_msg_history(${groupId}, ${messageSeq}, ${count}, ${reverseOrder})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2218,9 +2231,9 @@ end
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.get_friend_msg_history(${userId}, ${messageSeq}, ${count}, ${reverseOrder})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.get_friend_msg_history(${userId}, ${messageSeq}, ${count}, ${reverseOrder})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2231,9 +2244,9 @@ end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.forward_group_single_msg(${messageId}, ${groupId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.forward_group_single_msg(${messageId}, ${groupId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2243,9 +2256,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.forward_friend_single_msg(${messageId}, ${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.forward_friend_single_msg(${messageId}, ${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2254,9 +2267,9 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.delete_essence_msg(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.delete_essence_msg(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2265,9 +2278,9 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.mark_msg_as_read(${messageId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.mark_msg_as_read(${messageId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2277,9 +2290,9 @@ end
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.set_msg_emoji_like(${messageId}, ${emojiId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.set_msg_emoji_like(${messageId}, ${emojiId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2289,9 +2302,9 @@ end
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = message.unset_msg_emoji_like(${messageId}, ${emojiId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = message.unset_msg_emoji_like(${messageId}, ${emojiId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2301,9 +2314,9 @@ end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.get_info(${groupId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.get_info(${groupId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2313,9 +2326,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.get_member_info(${groupId}, ${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.get_member_info(${groupId}, ${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2324,9 +2337,9 @@ end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.get_member_list(${groupId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.get_member_list(${groupId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2334,9 +2347,9 @@ end
   generator.forBlock['onebot_get_group_list_with_var'] = function(block: Blockly.Block) {
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.get_list()
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.get_list()
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2347,9 +2360,9 @@ end
     const dismiss = block.getFieldValue('DISMISS') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_leave(${groupId}, ${dismiss})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_leave(${groupId}, ${dismiss})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2360,9 +2373,9 @@ end
     const title = generator.valueToCode(block, 'TITLE', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = group.set_special_title(${groupId}, ${userId}, ${title})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = group.set_special_title(${groupId}, ${userId}, ${title})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2372,9 +2385,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.get_stranger_info(${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.get_stranger_info(${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2383,9 +2396,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.get_info(${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.get_info(${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2393,9 +2406,9 @@ end
   generator.forBlock['onebot_get_friend_list_with_var'] = function(block: Blockly.Block) {
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.get_friends()
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.get_friends()
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2405,9 +2418,9 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.poke(${userId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.poke(${userId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2417,9 +2430,9 @@ end
     const categoryId = generator.valueToCode(block, 'CATEGORY_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.set_category(${userId}, ${categoryId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.set_category(${userId}, ${categoryId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2431,9 +2444,9 @@ end
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = request.set_friend_add(${flag}, ${approve}, ${remark})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = request.set_friend_add(${flag}, ${approve}, ${remark})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2444,9 +2457,9 @@ end
     const reason = generator.valueToCode(block, 'REASON', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = request.set_group_add(${flag}, ${approve}, ${reason})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = request.set_group_add(${flag}, ${approve}, ${reason})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2458,9 +2471,9 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = file.upload_private(${userId}, ${file}, ${name})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = file.upload_private(${userId}, ${file}, ${name})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2470,9 +2483,9 @@ end
     const folderId = generator.valueToCode(block, 'FOLDER_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = file.delete_group_folder(${groupId}, ${folderId})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = file.delete_group_folder(${groupId}, ${folderId})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2482,9 +2495,9 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = file.create_group_folder(${groupId}, ${name})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = file.create_group_folder(${groupId}, ${name})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2493,9 +2506,9 @@ end
   generator.forBlock['onebot_get_login_info_with_var'] = function(block: Blockly.Block) {
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = system.get_login_info()
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = system.get_login_info()
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2503,9 +2516,9 @@ end
   generator.forBlock['onebot_get_version_info_with_var'] = function(block: Blockly.Block) {
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = system.get_version_info()
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = system.get_version_info()
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2513,9 +2526,9 @@ end
   generator.forBlock['onebot_get_status_with_var'] = function(block: Blockly.Block) {
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = system.get_status()
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = system.get_status()
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2524,9 +2537,9 @@ end
     const domain = generator.valueToCode(block, 'DOMAIN', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = system.get_cookies(${domain})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = system.get_cookies(${domain})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2536,9 +2549,9 @@ end
     const personalNote = generator.valueToCode(block, 'PERSONAL_NOTE', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `local ${varName} = user.set_qq_profile(${nickname}, ${personalNote})
-if type(${varName}) ~= "table" then
-  ${varName} = {success = false, error = tostring(${varName})}
+    return `_G["${varName}"] = user.set_qq_profile(${nickname}, ${personalNote})
+if type(_G["${varName}"]) ~= "table" then
+  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
 `;
   };
@@ -2583,7 +2596,7 @@ ${body}end
 
   // 函数返回
   generator.forBlock['function_return'] = function(block: Blockly.Block) {
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     return `return ${value}\n`;
   };
 
@@ -2602,6 +2615,32 @@ ${body}end
     const funcName = block.getFieldValue('NAME') || '我的函数';
     const cleanFuncName = funcName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
     return `${cleanFuncName}(__blc_var_message)\n`;
+  };
+
+  // ========== 插件RPC积木 ==========
+  generator.forBlock['plugin_rpc_declare_event'] = function(block: Blockly.Block) {
+    const functionName = block.getFieldValue('FUNCTION_NAME') || 'myFunction';
+    const dataVar = generator.getVariableName(block, block.getFieldValue('DATA_VAR') || 'data');
+    const handler = generator.statementToCode(block, 'HANDLER') || '';
+    return `plugin_rpc.declare_event("${functionName}", function(__blc_rpc_data)
+    _G["${dataVar}"] = __blc_rpc_data
+${handler}end)
+
+`;
+  };
+
+  generator.forBlock['plugin_rpc_call_function'] = function(block: Blockly.Block) {
+    const functionName = generator.valueToCode(block, 'FUNCTION_NAME', generator.ORDER_NONE) || '""';
+    const data = generator.valueToCode(block, 'DATA', generator.ORDER_NONE) ?? 'nil';
+    const resultVar = generator.getVariableName(block, block.getFieldValue('RESULT_VAR') || 'result');
+    return `local __blc_rpc_result, __blc_rpc_err = plugin_rpc.call_function(${functionName}, ${data})
+    _G["${resultVar}"] = __blc_rpc_result
+`;
+  };
+
+  generator.forBlock['plugin_rpc_return_function'] = function(block: Blockly.Block) {
+    const result = generator.valueToCode(block, 'RESULT', generator.ORDER_NONE) ?? 'nil';
+    return `return ${result}\n`;
   };
 
   // ========== 定时任务积木 ==========
@@ -2698,7 +2737,7 @@ ${handler}end)
   generator.forBlock['variables_set'] = function(block: Blockly.Block) {
     const varName = block.getFieldValue('VAR');
     const variable = generator.getVariableName(block, varName);
-    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || 'nil';
+    const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     // 使用 _G 表设置全局变量，确保跨函数共享
     return `_G["${variable}"] = ${value}\n`;
   };
@@ -2790,6 +2829,7 @@ ${statements}end
     const by = generator.valueToCode(block, 'BY', generator.ORDER_NONE) || '1';
     const statements = generator.statementToCode(block, 'DO');
     return `for ${variable} = tonumber(${from}), tonumber(${to}), tonumber(${by}) do
+  _G["${variable}"] = ${variable}
 ${statements}end
 `;
   };
@@ -2799,6 +2839,7 @@ ${statements}end
     const list = generator.valueToCode(block, 'LIST', generator.ORDER_NONE) || '{}';
     const statements = generator.statementToCode(block, 'DO');
     return `for _, ${variable} in ipairs(${list}) do
+  _G["${variable}"] = ${variable}
 ${statements}end
 `;
   };
@@ -2834,7 +2875,7 @@ ${statements}end
   };
 
   generator.forBlock['lua_code_expression'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') || 'nil';
+    const code = block.getFieldValue('CODE') ?? 'nil';
     // 移除首尾空白，但保留内部格式
     const trimmedCode = code.trim();
     return [`(${trimmedCode})`, generator.ORDER_HIGH];

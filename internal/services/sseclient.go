@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,7 +16,7 @@ import (
 type SSEClient struct {
 	reverseWS   *ReverseWebSocketService
 	logger      *zap.SugaredLogger
-	running     bool
+	running     int32 // 原子操作：0=未运行, 1=运行中
 	pluginMgr   interface {
 		HandleEvent(eventType string, eventData map[string]interface{})
 	}
@@ -26,6 +27,8 @@ type SSEClient struct {
 	loginCommandMutex sync.Mutex
 	lastProcessedMsg  map[string]time.Time
 	mutex             sync.RWMutex
+	// 用于等待后台 goroutine 退出
+	cleanupWg sync.WaitGroup
 }
 
 // NewSSEClient 创建SSE客户端
@@ -36,7 +39,7 @@ func NewSSEClient(reverseWS *ReverseWebSocketService, base *zap.Logger, pluginMg
 	c := &SSEClient{
 		reverseWS:        reverseWS,
 		logger:           base.With(zap.String("module", "sse.client")).Sugar(),
-		running:          false,
+		running:          0, // int32原子操作：0=未运行
 		pluginMgr:        pluginMgr,
 		ctx:              ctx,
 		cancel:           cancel,
@@ -47,44 +50,52 @@ func NewSSEClient(reverseWS *ReverseWebSocketService, base *zap.Logger, pluginMg
 
 // Start 启动SSE客户端
 func (c *SSEClient) Start() {
-	if c.running {
-		return
+	// 原子操作：CAS（Compare-And-Swap）确保只有一个goroutine能成功启动
+	if !atomic.CompareAndSwapInt32(&c.running, 0, 1) {
+		return // 已经在运行中
 	}
-	c.running = true
 
 	// 注册事件处理器 - reverse_websocket 已创建副本，这里直接使用
 	c.reverseWS.AddEventHandler(func(selfID string, eventData map[string]interface{}) {
-		// 创建副本并添加 self_id（避免修改原始数据）
-		evt := make(map[string]interface{}, len(eventData)+1)
-		for k, v := range eventData {
-			evt[k] = v
-		}
-		evt["_self_id"] = selfID
-
-		// 分发事件到插件管理器
-		c.distributeEventToPlugins(evt)
+		c.distributeEventToPlugins(eventData)
 	})
 
-	// 启动定期清理过期记录的协程
-	go c.cleanupExpiredRecords()
+	// 启动定期清理过期记录的协程（使用 cleanupWg 跟踪，确保可等待退出）
+	c.cleanupWg.Add(1)
+	go func() {
+		defer c.cleanupWg.Done()
+		c.cleanupExpiredRecords()
+	}()
 
 	c.logger.Infow("SSE客户端已启动")
 }
 
 // Stop 停止SSE客户端
 func (c *SSEClient) Stop() {
-	if !c.running {
-		return
+	// 原子操作：CAS确保只有一个goroutine能成功停止
+	if !atomic.CompareAndSwapInt32(&c.running, 1, 0) {
+		return // 未运行或已经停止
 	}
 
 	c.logger.Infow("正在停止SSE客户端...")
-	c.running = false
 
 	if c.cancel != nil {
 		c.cancel()
 	}
 
-	c.logger.Infow("SSE客户端已停止")
+	// 等待后台清理协程结束（最多等待5秒）
+	done := make(chan struct{})
+	go func() {
+		c.cleanupWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		c.logger.Infow("SSE客户端已停止")
+	case <-time.After(5 * time.Second):
+		c.logger.Warnw("SSE客户端停止超时，强制返回")
+	}
 }
 
 // cleanupExpiredRecords 定期清理过期的记录

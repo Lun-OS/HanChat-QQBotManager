@@ -14,6 +14,21 @@ import (
 
 // WebQQMessage WebQQ消息结构
 type WebQQMessage struct {
+	MessageID   string `json:"message_id"`
+	UserID      string `json:"user_id"`
+	GroupID     string `json:"group_id,omitempty"`
+	RawMessage  string `json:"raw_message"`
+	SenderName  string `json:"sender_name"`
+	SenderID    string `json:"sender_id"`
+	Time        int64  `json:"time"`
+	MessageSeq  int64  `json:"message_seq,omitempty"`
+	MessageType string `json:"message_type"`
+	PostType    string `json:"post_type"`
+	SelfID      string `json:"self_id"`
+}
+
+// WebQQMessageFull 完整消息结构（仅用于实时广播，不缓存）
+type WebQQMessageFull struct {
 	MessageID   string                 `json:"message_id"`
 	UserID      string                 `json:"user_id"`
 	GroupID     string                 `json:"group_id,omitempty"`
@@ -30,11 +45,11 @@ type WebQQMessage struct {
 // WebQQClient WebQQ客户端连接
 type WebQQClient struct {
 	SelfID      string
-	UserID      string // 用户ID，用于区分不同浏览器会话
-	Chan        chan WebQQMessage
+	UserID      string
+	Chan        chan interface{}
 	LastPing    time.Time
-	MessageType string // "friend" | "group" | "all"
-	TargetID    string // 好友ID或群ID，为空表示接收所有
+	MessageType string
+	TargetID    string
 }
 
 // WebQQManager WebQQ消息管理器
@@ -59,7 +74,7 @@ func GetWebQQManager(baseLogger *zap.Logger, reverseWS *services.ReverseWebSocke
 			logger:     baseLogger.With(zap.String("module", "webqq")).Sugar(),
 			reverseWS:  reverseWS,
 			history:    make(map[string][]WebQQMessage),
-			maxHistory: 1000, // 每个会话最多缓存1000条消息
+			maxHistory: 100,
 		}
 		webQQManager.Start()
 	})
@@ -68,13 +83,37 @@ func GetWebQQManager(baseLogger *zap.Logger, reverseWS *services.ReverseWebSocke
 
 // Start 启动WebQQ管理器
 func (m *WebQQManager) Start() {
-	// 注册事件处理器
 	m.reverseWS.AddEventHandler(func(selfID string, eventData map[string]interface{}) {
 		m.handleEvent(selfID, eventData)
 	})
 
-	// 启动清理协程
 	go m.cleanupLoop()
+
+	memMgr := services.GetMemoryManager(nil)
+	memMgr.RegisterCleanup(func() {
+		m.historyMu.Lock()
+		total := 0
+		for key, history := range m.history {
+			if len(history) > 50 {
+				newHistory := make([]WebQQMessage, 0, 50)
+				newHistory = append(newHistory, history[len(history)-50:]...)
+				m.history[key] = newHistory
+				total += 50
+			} else {
+				total += len(history)
+			}
+		}
+		if len(m.history) > 100 {
+			keys := make([]string, 0, len(m.history))
+			for k := range m.history {
+				keys = append(keys, k)
+			}
+			for i := 0; i < len(keys)-50; i++ {
+				delete(m.history, keys[i])
+			}
+		}
+		m.historyMu.Unlock()
+	})
 
 	m.logger.Info("WebQQ管理器已启动")
 }
@@ -91,43 +130,60 @@ func (m *WebQQManager) handleEvent(selfID string, eventData map[string]interface
 		return
 	}
 
-	// 构建消息
-	msg := WebQQMessage{
+	cacheMsg := WebQQMessage{
 		PostType:    postType,
 		MessageType: messageType,
 		SelfID:      selfID,
 	}
 
 	if v, ok := eventData["message_id"].(float64); ok {
-		msg.MessageID = fmt.Sprintf("%.0f", v)
+		cacheMsg.MessageID = fmt.Sprintf("%.0f", v)
 	}
 	if v, ok := eventData["user_id"].(float64); ok {
-		msg.UserID = fmt.Sprintf("%.0f", v)
+		cacheMsg.UserID = fmt.Sprintf("%.0f", v)
 	}
 	if v, ok := eventData["group_id"].(float64); ok {
-		msg.GroupID = fmt.Sprintf("%.0f", v)
-	}
-	if v, ok := eventData["message"].([]interface{}); ok {
-		msg.Message = v
+		cacheMsg.GroupID = fmt.Sprintf("%.0f", v)
 	}
 	if v, ok := eventData["raw_message"].(string); ok {
-		msg.RawMessage = v
+		cacheMsg.RawMessage = v
 	}
-	if v, ok := eventData["sender"].(map[string]interface{}); ok {
-		msg.Sender = v
+	if sender, ok := eventData["sender"].(map[string]interface{}); ok {
+		if nickname, ok := sender["nickname"].(string); ok {
+			cacheMsg.SenderName = nickname
+		}
+		if uid, ok := sender["user_id"].(float64); ok {
+			cacheMsg.SenderID = fmt.Sprintf("%.0f", uid)
+		}
 	}
 	if v, ok := eventData["time"].(float64); ok {
-		msg.Time = int64(v)
+		cacheMsg.Time = int64(v)
 	}
 	if v, ok := eventData["message_seq"].(float64); ok {
-		msg.MessageSeq = int64(v)
+		cacheMsg.MessageSeq = int64(v)
 	}
 
-	// 缓存消息
-	m.cacheMessage(msg)
+	m.cacheMessage(cacheMsg)
 
-	// 广播给客户端
-	m.broadcastMessage(msg)
+	fullMsg := WebQQMessageFull{
+		MessageID:   cacheMsg.MessageID,
+		UserID:      cacheMsg.UserID,
+		GroupID:     cacheMsg.GroupID,
+		RawMessage:  cacheMsg.RawMessage,
+		Time:        cacheMsg.Time,
+		MessageSeq:  cacheMsg.MessageSeq,
+		MessageType: cacheMsg.MessageType,
+		PostType:    cacheMsg.PostType,
+		SelfID:      cacheMsg.SelfID,
+	}
+	if v, ok := eventData["message"].([]interface{}); ok {
+		fullMsg.Message = v
+	}
+	if v, ok := eventData["sender"].(map[string]interface{}); ok {
+		fullMsg.Sender = v
+	}
+
+	m.broadcastFullMessage(fullMsg)
 }
 
 // cacheMessage 缓存消息
@@ -145,12 +201,23 @@ func (m *WebQQManager) cacheMessage(msg WebQQMessage) {
 	history := m.history[key]
 	history = append(history, msg)
 
-	// 限制历史记录数量
 	if len(history) > m.maxHistory {
-		history = history[len(history)-m.maxHistory:]
+		newHistory := make([]WebQQMessage, 0, m.maxHistory)
+		newHistory = append(newHistory, history[len(history)-m.maxHistory:]...)
+		history = newHistory
 	}
 
 	m.history[key] = history
+
+	if len(m.history) > 50 {
+		keys := make([]string, 0, len(m.history))
+		for k := range m.history {
+			keys = append(keys, k)
+		}
+		for i := 0; i < len(keys)-25; i++ {
+			delete(m.history, keys[i])
+		}
+	}
 }
 
 // GetHistory 获取历史消息
@@ -172,17 +239,15 @@ func (m *WebQQManager) GetHistory(selfID string, chatType string, targetID strin
 }
 
 // broadcastMessage 广播消息给客户端
-func (m *WebQQManager) broadcastMessage(msg WebQQMessage) {
+func (m *WebQQManager) broadcastFullMessage(msg WebQQMessageFull) {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 
 	for _, client := range m.clients {
-		// 检查是否匹配客户端的订阅
 		if client.SelfID != "" && client.SelfID != msg.SelfID {
 			continue
 		}
 
-		// 检查消息类型匹配
 		if client.MessageType != "all" {
 			if msg.MessageType == "private" && client.MessageType != "friend" {
 				continue
@@ -192,7 +257,6 @@ func (m *WebQQManager) broadcastMessage(msg WebQQMessage) {
 			}
 		}
 
-		// 检查目标ID匹配
 		if client.TargetID != "" {
 			if msg.MessageType == "private" && client.TargetID != msg.UserID {
 				continue
@@ -202,11 +266,9 @@ func (m *WebQQManager) broadcastMessage(msg WebQQMessage) {
 			}
 		}
 
-		// 发送到客户端（非阻塞）
 		select {
 		case client.Chan <- msg:
 		default:
-			m.logger.Warnw("客户端消息通道已满，消息被丢弃", "client", client.SelfID)
 		}
 	}
 }
@@ -226,7 +288,7 @@ func (m *WebQQManager) RegisterClient(selfID, userID, messageType, targetID stri
 	client := &WebQQClient{
 		SelfID:      selfID,
 		UserID:      userID,
-		Chan:        make(chan WebQQMessage, 100),
+		Chan:        make(chan interface{}, 100),
 		LastPing:    time.Now(),
 		MessageType: messageType,
 		TargetID:    targetID,
@@ -264,7 +326,7 @@ func (m *WebQQManager) UpdatePing(selfID, userID string) {
 	}
 }
 
-// cleanupLoop 清理过期客户端
+// cleanupLoop 清理过期客户端和不活跃的历史记录
 func (m *WebQQManager) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -280,6 +342,19 @@ func (m *WebQQManager) cleanupLoop() {
 			}
 		}
 		m.clientsMu.Unlock()
+
+		m.historyMu.Lock()
+		if len(m.history) > 100 {
+			keys := make([]string, 0, len(m.history))
+			for k := range m.history {
+				keys = append(keys, k)
+			}
+			for i := 0; i < len(keys)-50; i++ {
+				delete(m.history, keys[i])
+			}
+			m.logger.Debugw("清理历史记录缓存", "remaining", len(m.history))
+		}
+		m.historyMu.Unlock()
 	}
 }
 

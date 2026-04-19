@@ -25,12 +25,16 @@ type ScriptInfo struct {
 }
 
 type LuaScriptCache struct {
-	scripts  map[string]*ScriptInfo
-	cacheMu  sync.RWMutex
-	logger   *zap.SugaredLogger
-	cacheDir string
-	enabled  bool
-	maxAge   time.Duration
+	scripts        map[string]*ScriptInfo
+	cacheMu        sync.RWMutex
+	logger         *zap.SugaredLogger
+	cacheDir       string
+	enabled        bool
+	maxAge         time.Duration
+	maxEntries     int
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cleanupWg      sync.WaitGroup
 }
 
 func readFileUTF8(path string) ([]byte, error) {
@@ -59,13 +63,23 @@ func NewLuaScriptCache(logger *zap.SugaredLogger, cacheDir string) *LuaScriptCac
 		cacheDir = ""
 	}
 
-	return &LuaScriptCache{
-		scripts:  make(map[string]*ScriptInfo),
-		logger:   logger,
-		cacheDir: cacheDir,
-		enabled:  true,
-		maxAge:   24 * time.Hour,
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cache := &LuaScriptCache{
+		scripts:    make(map[string]*ScriptInfo),
+		logger:     logger,
+		cacheDir:   cacheDir,
+		enabled:    true,
+		maxAge:     24 * time.Hour,
+		maxEntries: 100,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
+
+	cache.cleanupWg.Add(1)
+	go cache.periodicCleanup()
+
+	return cache
 }
 
 // GetScriptHash 获取脚本内容的哈希值
@@ -90,17 +104,29 @@ func (c *LuaScriptCache) GetCachedScript(scriptPath string) ([]byte, bool) {
 
 	// 检查缓存是否过期
 	if time.Since(info.CompileTime) >= c.maxAge {
+		// ⭐ 关键修复：惰性删除过期缓存条目，防止 map 无限增长
+		c.cacheMu.Lock()
+		delete(c.scripts, scriptPath)
+		c.cacheMu.Unlock()
 		return nil, false
 	}
 
 	// 检查文件是否被修改
 	fileInfo, err := os.Stat(scriptPath)
 	if err != nil {
+		// 文件不存在或无法访问，删除缓存
+		c.cacheMu.Lock()
+		delete(c.scripts, scriptPath)
+		c.cacheMu.Unlock()
 		return nil, false
 	}
 
 	// 如果文件修改时间比缓存时间新，说明文件已被修改
 	if fileInfo.ModTime().After(info.ModTime) {
+		// ⭐ 删除过时的缓存条目
+		c.cacheMu.Lock()
+		delete(c.scripts, scriptPath)
+		c.cacheMu.Unlock()
 		return nil, false
 	}
 
@@ -122,12 +148,65 @@ func (c *LuaScriptCache) CacheScript(scriptPath string, content []byte) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
 
+	if _, exists := c.scripts[scriptPath]; !exists && len(c.scripts) >= c.maxEntries {
+		c.evictOldestEntriesLocked()
+	}
+
 	c.scripts[scriptPath] = &ScriptInfo{
 		Hash:        c.GetScriptHash(content),
 		Content:     content,
 		CompileTime: time.Now(),
 		ModTime:     modTime,
 	}
+}
+
+func (c *LuaScriptCache) evictOldestEntriesLocked() {
+	var oldestPath string
+	var oldestTime time.Time
+
+	for path, info := range c.scripts {
+		if oldestTime.IsZero() || info.CompileTime.Before(oldestTime) {
+			oldestPath = path
+			oldestTime = info.CompileTime
+		}
+	}
+
+	if oldestPath != "" {
+		delete(c.scripts, oldestPath)
+	}
+}
+
+func (c *LuaScriptCache) periodicCleanup() {
+	defer c.cleanupWg.Done()
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.cleanupExpired()
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *LuaScriptCache) cleanupExpired() {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+
+	now := time.Now()
+	for path, info := range c.scripts {
+		if now.Sub(info.CompileTime) > c.maxAge {
+			delete(c.scripts, path)
+		}
+	}
+}
+
+// Close 关闭缓存清理
+func (c *LuaScriptCache) Close() {
+	c.cancel()
+	c.cleanupWg.Wait()
 }
 
 // LoadAndCompileScript 加载并编译Lua脚本（带缓存）

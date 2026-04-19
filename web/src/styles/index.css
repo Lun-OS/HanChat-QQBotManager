@@ -2,6 +2,52 @@
 @import './tailwind.css';
 @import './theme.css';
 
+/* 将所有动画加快6倍 */
+*, *::before, *::after {
+  animation-duration: calc(var(--original-animation-duration, 0s) / 6) !important;
+  transition-duration: calc(var(--original-transition-duration, 0s) / 6) !important;
+}
+
+/* 保存原始的动画和过渡时间 */
+[data-state="open"], [data-state="closed"], .animate-in, .animate-out,
+.transition-all, .transition-opacity, .transition-transform,
+[data-motion^="from-"], [data-motion^="to-"] {
+  --original-animation-duration: initial;
+  --original-transition-duration: initial;
+}
+
+/* 覆盖常见的动画时长类 */
+.duration-1000 {
+  --original-transition-duration: 1000ms;
+  transition-duration: 166.67ms !important;
+}
+.duration-500 {
+  --original-transition-duration: 500ms;
+  transition-duration: 83.33ms !important;
+}
+.duration-300 {
+  --original-transition-duration: 300ms;
+  transition-duration: 50ms !important;
+}
+.duration-200 {
+  --original-transition-duration: 200ms;
+  transition-duration: 33.33ms !important;
+}
+.duration-150 {
+  --original-transition-duration: 150ms;
+  transition-duration: 25ms !important;
+}
+
+/* 覆盖 tw-animate-css 的动画 */
+.animate-in, .animate-out {
+  animation-duration: calc(var(--tw-duration, 0s) / 6) !important;
+}
+
+/* 覆盖 Toast 组件中的动画 */
+.toast-item {
+  transition-duration: 50ms !important;
+}
+
 /* Blockly 容器 - 确保可以接收鼠标事件 */
 .blocklyContainer {
   width: 100% !important;

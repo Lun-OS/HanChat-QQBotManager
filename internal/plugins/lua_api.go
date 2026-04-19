@@ -40,6 +40,7 @@ var (
 	// 存储API文件锁（保护并发访问）
 	storageLocks      = make(map[string]*sync.RWMutex)
 	storageLocksMutex sync.Mutex
+	maxStorageLocks   = 1000 // ⭐ 最大锁数量限制（防止内存耗尽）
 )
 
 // getStorageLock 获取指定存储文件的锁
@@ -50,6 +51,15 @@ func getStorageLock(dataFile string) *sync.RWMutex {
 
 	if lock, exists := storageLocks[dataFile]; exists {
 		return lock
+	}
+
+	// ⭐ 安全检查：限制最大锁数量，防止恶意插件耗尽内存
+	if len(storageLocks) >= maxStorageLocks {
+		// 清理最旧的条目（简单策略：删除第一个找到的）
+		for key := range storageLocks {
+			delete(storageLocks, key)
+			break // 只删除一个
+		}
 	}
 
 	lock := &sync.RWMutex{}
@@ -211,7 +221,12 @@ func (m *Manager) luaLogDebug(selfID string, pluginName string) func(*lua.LState
 
 func (m *Manager) luaConfigGet(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		key := L.ToString(1)
+		// ⭐ 安全修复：使用 safeCheckString 替代 L.ToString，防止空参数 panic
+		key := safeCheckString(L, 1, "")
+		if key == "" {
+			L.Push(lua.LNil)
+			return 1
+		}
 		defaultVal := L.OptString(2, "")
 
 		if val, exists := instance.Config[key]; exists {
@@ -679,6 +694,79 @@ func (m *Manager) luaMoveGroupFile(instance *LuaPluginInstance) func(*lua.LState
 		result, err := callBotAPI(instance, "move_group_file", params)
 		if err != nil {
 			return luaAPIError(L, err, fmt.Sprintf("移动群文件失败 [group_id=%d, file_id=%s]", groupIDInt, fileId))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 重命名群文件
+func (m *Manager) luaRenameGroupFile(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "重命名群文件失败")
+		}
+
+		// 验证参数
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		fileId, err := validateStringParam(L, 2, "file_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		newFileName, err := validateStringParam(L, 3, "new_file_name", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		// 调用服务
+		groupIDInt := int64(groupId)
+		params := map[string]interface{}{
+			"group_id":       groupIDInt,
+			"file_id":        fileId,
+			"new_file_name": newFileName,
+		}
+		result, err := callBotAPI(instance, "rename_group_file", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("重命名群文件失败 [group_id=%d, file_id=%s, new_file_name=%s]", groupIDInt, fileId, newFileName))
+		}
+
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// 重新分享闪传文件
+func (m *Manager) luaReshareFlashFile(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		// 检查服务
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "重新分享闪传文件失败")
+		}
+
+		params := make(map[string]interface{})
+
+		// 支持 share_link 或 file_set_id，二选一
+		if L.GetTop() >= 1 {
+			arg1 := L.Get(1)
+			if arg1.Type() == lua.LTString {
+				arg1Str := arg1.String()
+				if strings.Contains(arg1Str, "share_link") || strings.Contains(arg1Str, "http") {
+					params["share_link"] = arg1Str
+				} else {
+					params["file_set_id"] = arg1Str
+				}
+			}
+		}
+
+		// 调用服务
+		result, err := callBotAPI(instance, "reshare_flash_file", params)
+		if err != nil {
+			return luaAPIError(L, err, "重新分享闪传文件失败")
 		}
 
 		return luaAPISuccessWithTable(L, m, result)
@@ -1886,7 +1974,47 @@ func (m *Manager) luaFriendPoke(instance *LuaPluginInstance) func(*lua.LState) i
 		params := map[string]interface{}{
 			"user_id": int64(userId),
 		}
+		// 支持 target_id 参数
+		if L.GetTop() >= 2 {
+			targetId := L.CheckNumber(2)
+			params["target_id"] = int64(targetId)
+		}
 		result, err := callBotAPI(instance, "/friend_poke", params)
+		if err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LTrue)
+		L.Push(m.convertToLuaTable(L, result))
+		return 2
+	}
+}
+
+// 发送戳一戳
+func (m *Manager) luaSendPoke(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		var params map[string]interface{}
+		// 第一个参数可以是 group_id 或 user_id
+		arg1 := L.Get(1)
+		if arg1.Type() == lua.LTNumber {
+			if L.GetTop() >= 2 && L.Get(2).Type() == lua.LTNumber {
+				// group_id 和 user_id 都有
+				groupId := float64(L.CheckNumber(1))
+				userId := float64(L.CheckNumber(2))
+				params = map[string]interface{}{
+					"group_id": int64(groupId),
+					"user_id":  int64(userId),
+				}
+			} else {
+				// 只有一个参数，可能是 user_id
+				userId := float64(L.CheckNumber(1))
+				params = map[string]interface{}{
+					"user_id": int64(userId),
+				}
+			}
+		}
+		result, err := callBotAPI(instance, "send_poke", params)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -2788,16 +2916,19 @@ func validateHTTPURL(urlStr string) error {
 		return fmt.Errorf("URL缺少主机名")
 	}
 
-	// 解析IP地址
-	ips, err := net.LookupIP(hostname)
-	if err != nil {
-		// 如果无法解析，可能是域名，继续检查
-		// 但禁止直接使用IP地址访问内网
-		ip := net.ParseIP(hostname)
-		if ip != nil && isPrivateIP(ip) {
+	// 首先检查是否是直接的IP地址
+	if ip := net.ParseIP(hostname); ip != nil {
+		if isPrivateIP(ip) {
 			return fmt.Errorf("禁止访问内网地址")
 		}
-		return nil // 域名暂时允许，实际请求时会再次检查
+		return nil
+	}
+
+	// 是域名，尝试解析所有IP并检查
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		// 无法解析的域名，禁止访问（防止通过DNS rebinding绕过）
+		return fmt.Errorf("域名解析失败: %w", err)
 	}
 
 	// 检查所有解析到的IP地址
@@ -3353,8 +3484,37 @@ func (m *Manager) luaUdpSend(selfID string, pluginName string) func(*lua.LState)
 			return 2
 		}
 
-		// 创建 UDP 连接
-		conn, err := net.DialUDP("udp", nil, addr)
+		// 安全检查：禁止访问内网地址
+		if addr.IP != nil && isPrivateIP(addr.IP) {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString("禁止访问内网地址"))
+			return 2
+		}
+
+		// 如果是主机名，解析并检查所有IP
+		if addr.IP == nil {
+			hostname := addr.IP.String()
+			if hostname == "<nil>" {
+				hostname = addr.String()
+				// 提取主机名
+				if colonIdx := strings.LastIndex(hostname, ":"); colonIdx != -1 {
+					hostname = hostname[:colonIdx]
+				}
+			}
+			ips, err := net.LookupIP(hostname)
+			if err == nil {
+				for _, ip := range ips {
+					if isPrivateIP(ip) {
+						L.Push(lua.LFalse)
+						L.Push(lua.LString("禁止访问内网地址"))
+						return 2
+					}
+				}
+			}
+		}
+
+		// 创建 UDP 连接（带超时）
+		conn, err := net.DialTimeout("udp", address, 10*time.Second)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -3362,7 +3522,15 @@ func (m *Manager) luaUdpSend(selfID string, pluginName string) func(*lua.LState)
 		}
 		defer conn.Close()
 
-		// 发送数据
+		// 设置发送超时
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+		// 发送数据（限制大小）
+		if len(message) > 65507 { // UDP最大数据报大小
+			L.Push(lua.LFalse)
+			L.Push(lua.LString("消息太大"))
+			return 2
+		}
 		_, err = conn.Write([]byte(message))
 		if err != nil {
 			L.Push(lua.LFalse)
@@ -3382,6 +3550,39 @@ func (m *Manager) luaTcpConnect(selfID string, pluginName string) func(*lua.LSta
 		message := L.CheckString(2)
 		timeout := L.OptNumber(3, 10) // 默认10秒超时
 
+		// 解析主机名和端口，检查内网地址
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			// 尝试直接作为主机名处理
+			host = address
+		}
+
+		// 检查是否是IP地址
+		if ip := net.ParseIP(host); ip != nil {
+			if isPrivateIP(ip) {
+				L.Push(lua.LNil)
+				L.Push(lua.LString("禁止访问内网地址"))
+				return 2
+			}
+		} else {
+			// 是域名，解析并检查所有IP
+			ips, err := net.LookupIP(host)
+			if err == nil {
+				for _, ip := range ips {
+					if isPrivateIP(ip) {
+						L.Push(lua.LNil)
+						L.Push(lua.LString("禁止访问内网地址"))
+						return 2
+					}
+				}
+			}
+		}
+
+		// 限制超时最大为30秒
+		if timeout > 30 {
+			timeout = 30
+		}
+
 		// 创建 TCP 连接
 		conn, err := net.DialTimeout("tcp", address, time.Duration(timeout)*time.Second)
 		if err != nil {
@@ -3391,8 +3592,14 @@ func (m *Manager) luaTcpConnect(selfID string, pluginName string) func(*lua.LSta
 		}
 		defer conn.Close()
 
-		// 发送数据
+		// 发送数据（限制大小）
 		if message != "" {
+			if len(message) > 10*1024*1024 { // 限制10MB
+				L.Push(lua.LNil)
+				L.Push(lua.LString("消息太大"))
+				return 2
+			}
+			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			_, err = conn.Write([]byte(message))
 			if err != nil {
 				L.Push(lua.LNil)
@@ -3401,9 +3608,9 @@ func (m *Manager) luaTcpConnect(selfID string, pluginName string) func(*lua.LSta
 			}
 		}
 
-		// 读取响应（如果有）
+		// 读取响应（限制大小）
 		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		buffer := make([]byte, 4096)
+		buffer := make([]byte, 64*1024) // 限制64KB
 		n, err := conn.Read(buffer)
 		if err != nil && err != io.EOF {
 			// 读取失败，但可能只是没有响应
@@ -5557,10 +5764,17 @@ func (m *Manager) luaSetMsgEmojiLike(instance *LuaPluginInstance) func(*lua.LSta
 			return luaAPIError(L, err, "参数验证失败")
 		}
 
+		// 可选参数：set（默认为 true）
+		set := true
+		if L.GetTop() >= 3 {
+			set = L.ToBool(3)
+		}
+
 		// 调用服务
 		result, err := callBotAPI(instance, "set_msg_emoji_like", map[string]interface{}{
 			"message_id": messageID,
 			"emoji_id":   emojiID,
+			"set":        set,
 		})
 		if err != nil {
 			return luaAPIError(L, err, fmt.Sprintf("设置消息表情点赞失败 [message_id=%d]", messageID))

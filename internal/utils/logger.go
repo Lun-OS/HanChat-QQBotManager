@@ -68,6 +68,11 @@ func InitLogger(cfg LoggerConfig) *zap.Logger {
 	)
 
 	logger := zap.New(core, zap.AddCaller())
+
+	// 注册 cleanup 函数，确保程序退出时刷新日志缓冲区
+	// 注意：这里不直接调用 Close()，而是由调用者负责在 Shutdown 时关闭
+	_ = asyncFileWS // 避免未使用变量警告（实际使用通过 fileCore）
+
 	return logger
 }
 

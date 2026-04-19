@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ type TimeWheelTask struct {
 	ExecFunc   func()
 	Expiration time.Time
 	PluginTask *PluginTimerTask
+	cancelled  int32 // 原子操作：0=未取消, 1=已取消
 }
 
 // MultiLevelTimeWheel 多级时间轮
@@ -48,7 +50,7 @@ func NewMultiLevelTimeWheel(logger *zap.SugaredLogger) *MultiLevelTimeWheel {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 初始化多级时间轮，支持不同精度
-	// 级别1: 1ms精度，1000个槽位，覆盖1秒
+	// 级别1: 10ms精度，100个槽位，覆盖1秒（降低精度减少CPU开销）
 	// 级别2: 1s精度，60个槽位，覆盖1分钟
 	// 级别3: 1min精度，60个槽位，覆盖1小时
 	// 级别4: 1h精度，24个槽位，覆盖1天
@@ -82,10 +84,10 @@ func NewMultiLevelTimeWheel(logger *zap.SugaredLogger) *MultiLevelTimeWheel {
 		nextLevel: levels[2],
 	}
 	levels[0] = &timeWheelLevel{
-		interval:  time.Millisecond,
-		wheelSize: 1000,
+		interval:  10 * time.Millisecond, // 从1ms改为10ms，减少tick频率
+		wheelSize: 100,                   // 从1000改为100，保持1秒覆盖
 		slotMap:   make(map[string]*TimeWheelTask),
-		slots:     make([][]*TimeWheelTask, 1000),
+		slots:     make([][]*TimeWheelTask, 100),
 		nextLevel: levels[1],
 	}
 
@@ -171,7 +173,20 @@ func (mtw *MultiLevelTimeWheel) tickLevel(levelIndex int) {
 		// 执行当前槽位的所有任务
 		for _, task := range tasksToExec {
 			if task.ExecFunc != nil {
-				go task.ExecFunc()
+				// 检查任务是否已被取消（原子操作，线程安全）
+				if atomic.LoadInt32(&task.cancelled) == 1 {
+					continue // 跳过已取消的任务
+				}
+				
+				// 异步执行任务，但传入任务引用以便在执行期间可以检查状态
+				taskToExec := task
+				go func() {
+					// 二次检查取消状态（防止在调度和执行之间的竞态窗口）
+					if atomic.LoadInt32(&taskToExec.cancelled) == 1 {
+						return
+					}
+					taskToExec.ExecFunc()
+				}()
 			}
 		}
 	}
@@ -231,7 +246,10 @@ func (mtw *MultiLevelTimeWheel) addTaskToLevel(level *timeWheelLevel, task *Time
 // RemoveTask 从多级时间轮中移除任务
 func (mtw *MultiLevelTimeWheel) RemoveTask(taskID string) bool {
 	for _, level := range mtw.levels {
-		if _, exists := level.slotMap[taskID]; exists {
+		if task, exists := level.slotMap[taskID]; exists {
+			// 先标记任务为已取消（原子操作），防止正在执行的goroutine产生不一致状态
+			atomic.StoreInt32(&task.cancelled, 1)
+			
 			delete(level.slotMap, taskID)
 			// 遍历所有槽位找到并移除任务，而不是依赖时间计算
 			for slotIndex, slot := range level.slots {

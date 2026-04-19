@@ -88,7 +88,7 @@ func LoadConfig() *Config {
 
 	// 反向WebSocket配置
 	v.SetDefault("websocket.authorization", getEnvString("WEBSOCKET_AUTHORIZATION", ""))
-	v.SetDefault("websocket.port", getEnvInt("WEBSOCKET_PORT", 8765))
+	v.SetDefault("websocket.port", getEnvInt("WEBSOCKET_PORT", 59178))
 	v.SetDefault("websocket.maxConnections", getEnvInt("WEBSOCKET_MAX_CONNECTIONS", 10))
 
 	// 插件配置
@@ -131,6 +131,18 @@ func LoadConfig() *Config {
 	cfg.Env = env
 
 	log.Printf("[config] 配置加载完成，服务器端口: %d, CORS: %v", cfg.Server.Port, cfg.Server.CORS.Enabled)
+
+	// ⭐ 安全检查：检测默认空密码
+	if cfg.WebLogin.Password == "" {
+		log.Printf("[config] !!!  警告：Web登录密码为空！这在生产环境中非常危险。")
+		log.Printf("[config] !!!  请设置环境变量 WEB_LOGIN_PWD 或在配置文件中指定密码。")
+		log.Printf("[config] !!!  当前用户名: %s", cfg.WebLogin.Username)
+	}
+
+	// ⭐ 安全检查：CORS 允许所有来源
+	if cfg.Server.CORS.Enabled && cfg.Server.CORS.Origin == "*" {
+		log.Printf("[config] !!!  警告：CORS 允许所有来源 (*)！这在生产环境中可能导致安全风险。")
+	}
 
 	return &cfg
 }

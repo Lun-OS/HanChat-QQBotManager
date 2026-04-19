@@ -603,7 +603,7 @@ on_message(function(event)
             if not success then
                 log.error("所有撤回尝试均已失败，消息未被撤回")
                 -- 发送警告信息给管理员或记录
-                local warnMsg = "⚠️ 检测到违规词汇 \"" .. tostring(violatedWord) .. "\"，但自动撤回失败！\n请手动处理。"
+                local warnMsg = "!!! 检测到违规词汇 \"" .. tostring(violatedWord) .. "\"，但自动撤回失败！\n请手动处理。"
                 message.send_group(groupId, warnMsg)
             end
         else

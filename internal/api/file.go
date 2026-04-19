@@ -372,4 +372,43 @@ func RegisterFileRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": res["data"], "message": "文件下载成功"})
 	})
+
+	// 重新分享闪传文件 - 符合 OneBot 标准 API
+	r.POST("/reshare_flash_file", func(c *gin.Context) {
+		var body map[string]interface{}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+			return
+		}
+		shareLink := body["share_link"]
+		fileSetId := body["file_set_id"]
+		logger.Infow("重新分享闪传文件", "requestId", c.GetString("requestId"), "shareLink", shareLink, "fileSetId", fileSetId)
+		res, err := ll.ReshareFlashFile(shareLink, fileSetId)
+		if err != nil {
+			c.Error(err)
+			c.Status(http.StatusBadGateway)
+			return
+		}
+		respondWithData(c, res)
+	})
+
+	// 重命名群文件 - 符合 OneBot 标准 API
+	r.POST("/rename_group_file", func(c *gin.Context) {
+		var body map[string]interface{}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+			return
+		}
+		groupId := body["group_id"]
+		fileId := body["file_id"]
+		newFileName := body["new_file_name"]
+		logger.Infow("重命名群文件", "requestId", c.GetString("requestId"), "groupId", groupId, "fileId", fileId, "newFileName", newFileName)
+		res, err := ll.RenameGroupFile(groupId, fileId, newFileName)
+		if err != nil {
+			c.Error(err)
+			c.Status(http.StatusBadGateway)
+			return
+		}
+		respondWithData(c, res)
+	})
 }
