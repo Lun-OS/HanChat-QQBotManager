@@ -1,3 +1,8 @@
 *.go linguist-detectable=true
 *.mod linguist-detectable=true
 *.sum linguist-detectable=true
+*.js linguist-language=Go
+*.ts linguist-language=Go
+*.css linguist-language=Go
+*.html linguist-language=Go
+*.json linguist-language=Go
