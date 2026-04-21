@@ -20,10 +20,21 @@ type AccountConfig struct {
 
 // ConfigFile 配置文件结构
 type ConfigFile struct {
-	Server    ServerConfig             `json:"server"`
-	Logger    LoggerConfig             `json:"logger"`
-	Websocket WebsocketConfig          `json:"websocket"`
-	Accounts  map[string]*models.BotAccount `json:"accounts"` // key: self_id
+	Server       ServerConfig             `json:"server"`
+	Logger       LoggerConfig             `json:"logger"`
+	Websocket    WebsocketConfig          `json:"websocket"`
+	Memory       MemoryConfig             `json:"memory"`
+	Accounts     map[string]*models.BotAccount `json:"accounts"` // key: self_id
+}
+
+// MemoryConfig 内存管理器配置
+type MemoryConfig struct {
+	TargetMB         int `json:"target_mb"`          // 目标内存使用量(MB)
+	SoftLimitMB      int `json:"soft_limit_mb"`      // 软限制内存(MB)
+	HardLimitMB      int `json:"hard_limit_mb"`      // 硬限制内存(MB)
+	IdleTimeoutSecs  int `json:"idle_timeout_secs"`  // 空闲超时时间(秒)
+	MonitorInterval  int `json:"monitor_interval_ms"`// 监控间隔(毫秒)
+	GCCheckInterval  int `json:"gc_check_interval"`  // GC检查间隔(消息数)
 }
 
 // ServerConfig 服务器配置
@@ -72,6 +83,14 @@ func (ac *AccountConfig) LoadConfig() (*ConfigFile, error) {
 			Websocket: WebsocketConfig{
 				Authorization: "",
 				Port:          59178,
+			},
+			Memory: MemoryConfig{
+				TargetMB:         20,
+				SoftLimitMB:      30,
+				HardLimitMB:      50,
+				IdleTimeoutSecs:  30,
+				MonitorInterval:  10000, // 10秒
+				GCCheckInterval:  50000,
 			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil
@@ -182,6 +201,14 @@ func (ac *AccountConfig) loadConfigUnsafe() (*ConfigFile, error) {
 			Websocket: WebsocketConfig{
 				Authorization: "",
 				Port:          59178,
+			},
+			Memory: MemoryConfig{
+				TargetMB:         20,
+				SoftLimitMB:      30,
+				HardLimitMB:      50,
+				IdleTimeoutSecs:  30,
+				MonitorInterval:  10000, // 10秒
+				GCCheckInterval:  50000,
 			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil

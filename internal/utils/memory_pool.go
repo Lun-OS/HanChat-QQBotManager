@@ -2,6 +2,7 @@ package utils
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // HTTPRequestContext HTTP请求上下文

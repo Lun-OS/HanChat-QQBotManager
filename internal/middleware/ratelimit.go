@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -148,10 +149,10 @@ func RateLimit(limit int, window time.Duration, logger *zap.Logger) gin.HandlerF
 		}
 
 		// 设置限流响应头
-		remaining := limiter.GetRemaining(ip)
-		c.Header("X-RateLimit-Limit", string(rune(limit)))
-		c.Header("X-RateLimit-Remaining", string(rune(remaining)))
-		c.Header("X-RateLimit-Window", window.String())
+	remaining := limiter.GetRemaining(ip)
+	c.Header("X-RateLimit-Limit", strconv.Itoa(limit))
+	c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	c.Header("X-RateLimit-Window", window.String())
 
 		c.Next()
 	}

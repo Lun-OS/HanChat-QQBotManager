@@ -280,6 +280,8 @@ func (m *BotAccountManager) HandleDisconnect(selfID string, reason error) {
 	if err := m.config.SaveAccountConfig(account); err != nil {
 		m.logger.Errorw("保存账号离线状态失败", "self_id", selfID, "error", err)
 	}
+
+	m.logger.Infow("账号已标记为离线，保留在缓存中以便重连", "self_id", selfID)
 }
 
 // GetOrCreateAccount 获取或创建账号

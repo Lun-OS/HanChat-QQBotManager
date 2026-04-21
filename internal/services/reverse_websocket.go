@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -28,6 +29,12 @@ type LogEntry struct {
 	Data      map[string]interface{} `json:"data,omitempty"`
 }
 
+// logSubscriber 日志订阅者信息
+type logSubscriber struct {
+	ch      chan LogEntry
+	lastUse time.Time
+}
+
 // ReverseWebSocketService 反向WebSocket服务端
 // 完全替代原有正向WS，实现多账号接入、鉴权、事件处理
 type ReverseWebSocketService struct {
@@ -44,10 +51,10 @@ type ReverseWebSocketService struct {
 	rawEventHandlers []func(selfID string, rawData []byte)
 	rawEventHandlersMu sync.RWMutex
 	waitingConnect   map[string]*waitingConnectInfo // 等待connect消息的连接
-	waitingMu        sync.Mutex // 保护waitingConnect
+	waitingMu        sync.RWMutex // 保护waitingConnect
 	
 	// 日志广播机制
-	logSubscribers   map[string]map[chan LogEntry]bool // self_id -> 订阅者通道集合
+	logSubscribers   map[string]map[chan LogEntry]*logSubscriber // self_id -> 订阅者信息集合
 	logSubMu         sync.RWMutex
 
 	// 并发控制 - 使用channel模拟信号量，每个账号最多同时处理5个API请求
@@ -60,6 +67,9 @@ type ReverseWebSocketService struct {
 
 	// 日志管理器
 	logManager  *LogManager
+
+	// 账号清理回调
+	onAccountCleanup func(selfID string)
 
 	// 心跳检测
 	heartbeatInterval time.Duration // 心跳间隔
@@ -112,7 +122,7 @@ type waitingConnectInfo struct {
 func NewReverseWebSocketService(baseLogger *zap.Logger, accountMgr *BotAccountManager, cfg *config.AccountConfig, globalToken string) *ReverseWebSocketService {
 	logger := utils.NewModuleLogger(baseLogger, "service.reverse_websocket")
 
-	service := &ReverseWebSocketService{
+	s := &ReverseWebSocketService{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -128,7 +138,7 @@ func NewReverseWebSocketService(baseLogger *zap.Logger, accountMgr *BotAccountMa
 		maxConnections:    10, // 默认最大10个连接
 		eventHandlers:     make([]func(selfID string, eventData map[string]interface{}), 0),
 		waitingConnect:    make(map[string]*waitingConnectInfo),
-		logSubscribers:    make(map[string]map[chan LogEntry]bool),
+		logSubscribers:    make(map[string]map[chan LogEntry]*logSubscriber),
 		apiChan:           make(map[string]chan struct{}),
 		heartbeatInterval: 30 * time.Second, // 默认30秒心跳间隔
 		heartbeatTimeout:  60 * time.Second, // 默认60秒超时
@@ -149,20 +159,26 @@ func NewReverseWebSocketService(baseLogger *zap.Logger, accountMgr *BotAccountMa
 	}
 
 	// 启动心跳检测任务
-	go service.heartbeatChecker()
+	// go s.heartbeatChecker() // 修复CPU过高：暂时关闭心跳检测器，减少不必要的检查
 
-	go service.logBroadcastWorker()
+	go s.logBroadcastWorker()
 
 	memMgr := GetMemoryManager(logger)
 	memMgr.RegisterCleanup(func() {
-		service.cleanupExpiredTempResponses(30 * time.Second)
+		s.cleanupExpiredTempResponses(30 * time.Second)
 	})
 	memMgr.RegisterCleanup(func() {
-		service.cleanupStaleLogSubscribers()
+		s.cleanupStaleLogSubscribers()
 	})
+	// 加载并应用内存配置
+	if cfg != nil {
+		if fullCfg, err := cfg.LoadConfig(); err == nil {
+			memMgr.SetConfig(fullCfg.Memory)
+		}
+	}
 	memMgr.Start()
 
-	return service
+	return s
 }
 
 // heartbeatChecker 心跳检测任务
@@ -186,17 +202,14 @@ func (s *ReverseWebSocketService) cleanupStaleLogSubscribers() {
 	s.logSubMu.Lock()
 	defer s.logSubMu.Unlock()
 
+	now := time.Now()
+	staleThreshold := 5 * time.Minute // 5分钟无活动视为过期
+
 	for selfID, subscribers := range s.logSubscribers {
 		var staleChans []chan LogEntry
-		for ch := range subscribers {
-			select {
-			case <-ch:
-			default:
-				select {
-				case ch <- LogEntry{}:
-				default:
-					staleChans = append(staleChans, ch)
-				}
+		for ch, sub := range subscribers {
+			if now.Sub(sub.lastUse) > staleThreshold {
+				staleChans = append(staleChans, ch)
 			}
 		}
 		for _, ch := range staleChans {
@@ -327,7 +340,6 @@ func (s *ReverseWebSocketService) CleanupAccount(selfID string) {
 	
 	// 4. 清理临时响应通道（与该账号相关的所有 echo）
 	s.tempResponseMu.Lock()
-	// 找出所有以 selfID 开头的 echo 并删除
 	for echo := range s.tempResponseChan {
 		if strings.HasPrefix(echo, "echo_"+selfID+"_") {
 			delete(s.tempResponseChan, echo)
@@ -339,7 +351,32 @@ func (s *ReverseWebSocketService) CleanupAccount(selfID string) {
 		}
 	}
 	s.tempResponseMu.Unlock()
-	
+
+	// 5. 清理日志订阅者
+	s.logSubMu.Lock()
+	if subscribers, exists := s.logSubscribers[selfID]; exists {
+		// 关闭所有通道
+		for ch := range subscribers {
+			func() {
+				defer func() { recover() }()
+				close(ch)
+			}()
+		}
+		// 删除整个账号的订阅者
+		delete(s.logSubscribers, selfID)
+	}
+	s.logSubMu.Unlock()
+
+	// 6. 清理日志管理器里的该账号日志
+	if s.logManager != nil {
+		s.logManager.CleanupAccount(selfID)
+	}
+
+	// 7. ⭐ 关键优化：调用账号清理回调
+	if s.onAccountCleanup != nil {
+		s.onAccountCleanup(selfID)
+	}
+
 	s.logger.Infow("账号资源清理完成", "self_id", selfID)
 }
 
@@ -397,26 +434,31 @@ func (s *ReverseWebSocketService) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// 3. 升级WebSocket连接
+	// 3. 检查连接数限制：同时检查已在线账号和正在等待连接的账号（在升级WebSocket之前）
+	s.waitingMu.RLock()
+	waitingCount := len(s.waitingConnect)
+	s.waitingMu.RUnlock()
+	currentCount := s.accountMgr.GetOnlineCount() + waitingCount
+	
+	if currentCount >= s.maxConnections {
+		s.logger.Warnw("WebSocket连接被拒绝：达到最大连接数限制",
+			"ip", c.ClientIP(),
+			"custom_name", customName,
+			"online", s.accountMgr.GetOnlineCount(),
+			"waiting", waitingCount,
+			"total", currentCount,
+			"max", s.maxConnections)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "达到最大连接数限制"})
+		return
+	}
+
+	// 4. 升级WebSocket连接
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		s.logger.Errorw("WebSocket升级失败",
 			"error", err,
 			"ip", c.ClientIP(),
 			"custom_name", customName)
-		return
-	}
-
-	// 4. 检查连接数限制
-	currentCount := s.accountMgr.GetOnlineCount()
-	if currentCount >= s.maxConnections {
-		s.logger.Warnw("WebSocket连接被拒绝：达到最大连接数限制",
-			"ip", c.ClientIP(),
-			"custom_name", customName,
-			"current", currentCount,
-			"max", s.maxConnections)
-		conn.Close()
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "达到最大连接数限制"})
 		return
 	}
 
@@ -525,8 +567,21 @@ func (s *ReverseWebSocketService) readLoop(selfID string, conn *websocket.Conn) 
 
 		s.handleMessage(selfID, msg, data)
 
-		if memMgr := GetMemoryManager(nil); memMgr.running.Load() {
-			memMgr.RecordMessage()
+		// 心跳消息不计入消息计数，避免频繁GC检查
+		isHeartbeat := false
+		if postType, hasPostType := msg["post_type"]; hasPostType {
+			if pt, ok := postType.(string); ok && pt == "meta_event" {
+				if metaType, hasMetaType := msg["meta_event_type"]; hasMetaType {
+					if mt, ok := metaType.(string); ok && mt == "heartbeat" {
+						isHeartbeat = true
+					}
+				}
+			}
+		}
+		if !isHeartbeat {
+			if memMgr := GetMemoryManager(nil); memMgr.running.Load() {
+				memMgr.RecordMessage()
+			}
 		}
 	}
 }
@@ -1314,11 +1369,25 @@ func (s *ReverseWebSocketService) GetConnectionStats() map[string]interface{} {
 // StartCleanupTask 启动定期清理任务
 // 清理过期连接和超时未收到connect的连接
 func (s *ReverseWebSocketService) StartCleanupTask(interval time.Duration, maxIdle time.Duration) {
+	// 添加启动延迟，避免刚启动时大量goroutine同时运行
+	time.Sleep(2 * time.Second)
+
 	// 清理过期连接（使用 cleanupWg 跟踪，支持优雅退出）
 	s.cleanupWg.Add(1)
 	go func() {
 		defer s.cleanupWg.Done()
-		ticker := time.NewTicker(interval)
+		// 延长清理间隔，从传入的interval改为至少30秒
+		cleanInterval := interval
+		if cleanInterval < 30*time.Second {
+			cleanInterval = 30 * time.Second
+		}
+		// 添加随机初始偏移
+		if cleanInterval > 0 {
+			initialDelay := time.Duration(rand.Int63n(int64(cleanInterval)))
+			time.Sleep(initialDelay)
+		}
+		
+		ticker := time.NewTicker(cleanInterval)
 		defer ticker.Stop()
 
 		for {
@@ -1331,11 +1400,18 @@ func (s *ReverseWebSocketService) StartCleanupTask(interval time.Duration, maxId
 		}
 	}()
 
-	// 清理超时未收到connect的连接（3秒）
+	// 清理超时未收到connect的连接（10秒）
 	s.cleanupWg.Add(1)
 	go func() {
 		defer s.cleanupWg.Done()
-		ticker := time.NewTicker(500 * time.Millisecond)
+		cleanInterval := 10 * time.Second
+		// 添加随机初始偏移
+		if cleanInterval > 0 {
+			initialDelay := time.Duration(rand.Int63n(int64(cleanInterval)))
+			time.Sleep(initialDelay)
+		}
+		
+		ticker := time.NewTicker(cleanInterval)
 		defer ticker.Stop()
 
 		for {
@@ -1348,17 +1424,24 @@ func (s *ReverseWebSocketService) StartCleanupTask(interval time.Duration, maxId
 		}
 	}()
 
-	// ⭐ 新增：定期清理过期的临时响应通道（TTL 60秒）
+	// ⭐ 新增：定期清理过期的临时响应通道（TTL 30秒）
 	s.cleanupWg.Add(1)
 	go func() {
 		defer s.cleanupWg.Done()
-		ticker := time.NewTicker(30 * time.Second) // 每30秒清理一次
+		cleanInterval := 30 * time.Second
+		// 添加随机初始偏移
+		if cleanInterval > 0 {
+			initialDelay := time.Duration(rand.Int63n(int64(cleanInterval)))
+			time.Sleep(initialDelay)
+		}
+		
+		ticker := time.NewTicker(cleanInterval) // 每30秒清理一次
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
-				s.cleanupExpiredTempResponses(30 * time.Second) // TTL = 30秒（优化：缩短TTL减少内存占用）
+				s.cleanupExpiredTempResponses(30 * time.Second) // TTL = 30秒
 			case <-s.cleanupStopChan:
 				return
 			}
@@ -1451,6 +1534,11 @@ func (s *ReverseWebSocketService) GetLogManager() *LogManager {
 	return s.logManager
 }
 
+// SetAccountCleanupCallback 设置账号清理回调
+func (s *ReverseWebSocketService) SetAccountCleanupCallback(callback func(selfID string)) {
+	s.onAccountCleanup = callback
+}
+
 // OnConnect 注册连接回调函数
 // 当有新账号成功连接时，会调用所有注册的回调函数
 // 返回回调ID，用于后续移除
@@ -1530,9 +1618,12 @@ func (s *ReverseWebSocketService) SubscribeLogs(selfID string) chan LogEntry {
 
 	// 初始化该账号的订阅者集合
 	if s.logSubscribers[selfID] == nil {
-		s.logSubscribers[selfID] = make(map[chan LogEntry]bool)
+		s.logSubscribers[selfID] = make(map[chan LogEntry]*logSubscriber)
 	}
-	s.logSubscribers[selfID][ch] = true
+	s.logSubscribers[selfID][ch] = &logSubscriber{
+		ch:      ch,
+		lastUse: time.Now(),
+	}
 
 	s.logger.Debugw("日志订阅者添加", "self_id", selfID, "subscribers", len(s.logSubscribers[selfID]))
 	return ch
@@ -1545,7 +1636,10 @@ func (s *ReverseWebSocketService) UnsubscribeLogs(selfID string, ch chan LogEntr
 
 	if subscribers, exists := s.logSubscribers[selfID]; exists {
 		delete(subscribers, ch)
-		close(ch)
+		func() {
+			defer func() { recover() }()
+			close(ch)
+		}()
 
 		// 如果没有订阅者了，清理该账号的映射
 		if len(subscribers) == 0 {
@@ -1564,9 +1658,11 @@ func (s *ReverseWebSocketService) BroadcastLog(entry LogEntry) {
 	}
 
 	var staleChans []chan LogEntry
-	for ch := range subscribers {
+	now := time.Now()
+	for ch, sub := range subscribers {
 		select {
 		case ch <- entry:
+			sub.lastUse = now // 更新最后使用时间
 		default:
 			staleChans = append(staleChans, ch)
 		}

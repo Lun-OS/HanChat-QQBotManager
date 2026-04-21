@@ -211,17 +211,23 @@ func main() {
 	logManager := services.NewLogManager(baseLogger, "./logs")
 
 	// ========== 反向WebSocket服务端 ==========
-	// 从配置加载全局Token（优先从环境变量读取，否则从config.json读取）
-	cfgFile, _ := accountConfig.LoadConfig()
-	globalToken := cfgFile.Websocket.Authorization
-	// 如果环境变量设置了WEBSOCKET_AUTHORIZATION，优先使用环境变量的值
-	if envToken := os.Getenv("WEBSOCKET_AUTHORIZATION"); envToken != "" {
-		globalToken = envToken
-	}
+	// 从已经加载的配置获取 Token
+	globalToken := cfg.Websocket.Authorization
 
 	// 创建反向WebSocket服务
 	reverseWS := services.NewReverseWebSocketService(baseLogger, accountMgr, accountConfig, globalToken)
 	reverseWS.SetLogManager(logManager)
+
+	// ========== 插件系统（多账号隔离）==========
+	// 使用新的反向WebSocket服务
+	pm := plugins.NewManager(cfg, nil)
+	pm.SetLogger(utils.NewModuleLogger(baseLogger, "plugins.manager"))
+	pm.SetReverseWebSocketService(reverseWS)
+	
+	// 设置账号清理回调（暂时禁用，保留插件容器让插件持续运行）
+	// reverseWS.SetAccountCleanupCallback(func(selfID string) {
+	// 	pm.CleanupAccount(selfID)
+	// })
 
 	// 设置最大连接数限制
 	maxConnections := cfg.Websocket.MaxConnections
@@ -242,12 +248,6 @@ func main() {
 	// 注册调试路由 /debug/{self_id}
 	r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
 	appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
-
-	// ========== 插件系统（多账号隔离）==========
-	// 使用新的反向WebSocket服务
-	pm := plugins.NewManager(cfg, nil)
-	pm.SetLogger(utils.NewModuleLogger(baseLogger, "plugins.manager"))
-	pm.SetReverseWebSocketService(reverseWS)
 
 	// 自动启动预配置的插件
 	pm.AutoStartPlugins()

@@ -2,10 +2,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -613,7 +613,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 		}
 
 		// 加密时间戳
-		timestampStr := fmt.Sprintf("%d", body.Timestamp)
+		timestampStr := strconv.FormatInt(body.Timestamp, 10)
 		encryptedToken, err := utils.AESEncrypt(proxyKey, timestampStr)
 		if err != nil {
 			logger.Errorw("加密WebSocket令牌失败", "error", err)
@@ -638,10 +638,10 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 	r.GET("/info", func(c *gin.Context) {
 		logger.Infow("获取系统信息", "requestId", c.GetString("requestId"))
 
-		// 从环境变量获取版本号，默认为v5
+		// 从环境变量获取版本号
 		version := os.Getenv("LLBOT_VERSION")
 		if version == "" {
-			version = "v5"
+			version = "v5.1"
 		}
 
 		c.JSON(http.StatusOK, gin.H{

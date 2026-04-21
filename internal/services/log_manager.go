@@ -3,10 +3,10 @@ package services
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +33,7 @@ type LogManager struct {
 	logCache map[string][]string // key: "ws:selfID:date" or "plugin:selfID:date" -> 日志行
 	logCacheMu sync.RWMutex
 	maxCacheLines int // 每个缓存最多保留的行数
+	maxCacheDays int // 最多保留几天的缓存，防止历史日期缓存无限增长
 	// 磁盘写入缓冲
 	writeBuffer map[string][]byte // filename -> 缓冲内容
 	writeBufferMu sync.Mutex
@@ -63,16 +64,21 @@ func NewLogManager(baseLogger *zap.Logger, logsDir string) *LogManager {
 		maxFiles:      7,
 		maxOpenFiles:  50, // 最大同时打开50个文件，防止文件描述符耗尽
 		logCache:      make(map[string][]string),
-		maxCacheLines: 50, // 内存中最多保留50条日志
-		writeBuffer:   make(map[string][]byte),
-		bufferSize:    64 * 1024, // 64KB 缓冲
-		flushInterval: 5 * time.Second,
-		stopChan:      make(chan struct{}),
-	}
+	maxCacheLines: 20, // 减少到 20 条
+	maxCacheDays:  3,  // 最多保留 3 天的缓存
+	writeBuffer:   make(map[string][]byte),
+	bufferSize:    256 * 1024,
+	flushInterval: 15 * time.Second,
+	stopChan:      make(chan struct{}),
+}
 
 	// 启动定期刷新 goroutine
 	m.wg.Add(1)
 	go m.flushLoop()
+
+	// 启动日志缓存过期清理 goroutine
+	m.wg.Add(1)
+	go m.cleanupOldCache()
 
 	return m
 }
@@ -232,6 +238,103 @@ func (m *LogManager) flushAll() {
 	// 逐个刷新
 	for filename, buf := range buffers {
 		m.flushFile(filename, buf)
+	}
+}
+
+// CleanupAccount 清理指定账号的所有日志相关资源
+// 防止账号断开后内存泄漏
+func (m *LogManager) CleanupAccount(selfID string) {
+	m.logger.Debugw("清理账号日志资源", "self_id", selfID)
+
+	// 1. 清理日志缓存
+	m.logCacheMu.Lock()
+	// 找出所有与该账号相关的缓存（ws:selfID:... 或 plugin:selfID:...）
+	for cacheKey := range m.logCache {
+		// 检查 key 是否以 "ws:"+selfID+":" 或 "plugin:"+selfID+":" 开头
+		wsPrefix := "ws:" + selfID + ":"
+		pluginPrefix := "plugin:" + selfID + ":"
+		if strings.HasPrefix(cacheKey, wsPrefix) || strings.HasPrefix(cacheKey, pluginPrefix) {
+			delete(m.logCache, cacheKey)
+		}
+	}
+	m.logCacheMu.Unlock()
+
+	// 2. 清理写缓冲区并刷新（先刷新该账号的所有缓存，避免数据丢失）
+	m.writeBufferMu.Lock()
+	// 找出所有与该账号相关的缓冲
+	buffers := make(map[string][]byte)
+	for filename, buf := range m.writeBuffer {
+		// 检查文件名是否包含该账号ID（假设文件名格式是 logs/{selfID}_...）
+		if strings.Contains(filename, selfID) {
+			buffers[filename] = buf
+			delete(m.writeBuffer, filename)
+		}
+	}
+	m.writeBufferMu.Unlock()
+
+	// 刷新这些缓冲区
+	for filename, buf := range buffers {
+		m.flushFile(filename, buf)
+	}
+
+	m.logger.Infow("账号日志资源清理完成", "self_id", selfID)
+}
+
+// cleanupOldCache 清理过期日期的日志缓存
+// 防止历史日期的缓存无限增长
+func (m *LogManager) cleanupOldCache() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			m.doCleanupOldCache()
+		case <-m.stopChan:
+			return
+		}
+	}
+}
+
+func (m *LogManager) doCleanupOldCache() {
+	if m.maxCacheDays <= 0 {
+		return
+	}
+
+	cutoffDate := time.Now().AddDate(0, 0, -m.maxCacheDays).Format("2006-01-02")
+
+	m.logCacheMu.Lock()
+	defer m.logCacheMu.Unlock()
+
+	deletedCount := 0
+	for cacheKey := range m.logCache {
+		// 解析 cacheKey 格式: "type:selfID:date"
+		parts := []byte(cacheKey)
+		dateStart := 0
+		datePart := ""
+		// 找到最后一个冒号
+		for i := len(parts) - 1; i >= 0; i-- {
+			if parts[i] == ':' {
+				dateStart = i + 1
+				break
+			}
+		}
+		if dateStart > 0 && dateStart < len(parts) {
+			datePart = string(parts[dateStart:])
+		}
+
+		if datePart != "" && datePart < cutoffDate {
+			delete(m.logCache, cacheKey)
+			deletedCount++
+		}
+	}
+
+	if deletedCount > 0 {
+		m.logger.Debugw("清理过期日志缓存", 
+			"deleted_count", deletedCount, 
+			"remaining_count", len(m.logCache))
 	}
 }
 

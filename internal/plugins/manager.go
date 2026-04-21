@@ -382,9 +382,11 @@ type Manager struct {
 	activeWorkers   int64 // 当前活跃的worker数
 	busyWorkers     int64 // 正在处理任务的worker数
 	// 动态扩容控制
-	scaleUpChan   chan struct{}         // 扩容信号通道
-	scaleDownChan chan struct{}         // 缩容信号通道
-	workerMutex    sync.Mutex           // 保护worker增减操作
+	scaleUpChan        chan struct{}         // 扩容信号通道
+	scaleDownChan      chan struct{}         // 缩容信号通道
+	workerMutex        sync.Mutex           // 保护worker增减操作
+	enableAutoScale    bool                 // 是否启用动态扩缩容
+	scaleCheckInterval time.Duration        // 扩缩容检查间隔
 
 	// ========== 性能优化：Channel通知机制替代忙等待 ==========
 	taskAvailable chan struct{} // 任务可用通知通道（替代sync.Cond，更安全）
@@ -426,47 +428,61 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 	// 从配置读取工作池参数
 	minWorkers := cfg.Plugin.Workers
 	if minWorkers <= 0 {
-		minWorkers = 4 // 优化：降低默认最小worker数（原8太大）
+		minWorkers = 1 // 最小worker数保持1
 	}
-	// 优化：最大worker数限制为CPU核心数*2，避免过度扩展导致CPU 100%
-	cpuCount := runtime.NumCPU()
-	maxWorkers := minWorkers * 2 // 最大worker数为最小的2倍（原4倍太激进）
-	if maxWorkers > cpuCount*2 {
-		maxWorkers = cpuCount * 2 // 硬上限：不超过CPU核心数*2
-	}
-	if maxWorkers < 8 {
-		maxWorkers = 8 // 至少8个worker
+	
+	// 计算最大worker数：基于CPU核心数动态调整
+	maxWorkers := cfg.Plugin.MaxWorkers
+	if maxWorkers <= 0 {
+		// 自动计算：CPU核心数的2倍，但不超过8
+		cpuCores := runtime.NumCPU()
+		maxWorkers = cpuCores * 2
+		if maxWorkers < minWorkers+1 {
+			maxWorkers = minWorkers + 1
+		}
+		if maxWorkers > 8 {
+			maxWorkers = 8
+		}
 	}
 	queueSize := cfg.Plugin.QueueSize
 	if queueSize <= 0 {
-		queueSize = 4096 // 默认队列大小提升到4096（原1024太小）
+		queueSize = 2048 // 减少队列大小
+	}
+
+	// 从配置读取动态扩缩容参数
+	enableAutoScale := cfg.Plugin.EnableAutoScale
+	scaleCheckIntervalSec := cfg.Plugin.ScaleCheckIntervalSec
+	if scaleCheckIntervalSec <= 0 {
+		scaleCheckIntervalSec = 30 // 默认30秒检查间隔
 	}
 
 	m := &Manager{
-		cfg:           cfg,
-		containers:    make(map[string]*AccountPluginContainer),
-		pluginInfos:   make(map[string]*PluginInfo),
-		pluginsDir:    pluginsDir,
-		logger:        zap.NewNop().Sugar(),
-		llService:     llService,
-		queueSize:     queueSize,
-		workers:       minWorkers,
-		minWorkers:    minWorkers,
-		maxWorkers:    maxWorkers, // 优化：限制最大worker数为CPU核心数*2，避免过度扩展
-		ctx:           ctx,
-		cancel:        cancel,
-		queuedEvents:  0,
-		droppedEvents: 0,
-		activeWorkers: int64(minWorkers),
-		busyWorkers:   0,
-		scaleUpChan:   make(chan struct{}, 1),
-		scaleDownChan: make(chan struct{}, 1),
+		cfg:                 cfg,
+		containers:          make(map[string]*AccountPluginContainer),
+		pluginInfos:         make(map[string]*PluginInfo),
+		pluginsDir:          pluginsDir,
+		logger:              zap.NewNop().Sugar(),
+		llService:           llService,
+		queueSize:           queueSize,
+		workers:             minWorkers,
+		minWorkers:          minWorkers,
+		maxWorkers:          maxWorkers, // 优化：限制最大worker数为CPU核心数*2，避免过度扩展
+		ctx:                 ctx,
+		cancel:              cancel,
+		queuedEvents:        0,
+		droppedEvents:       0,
+		activeWorkers:       int64(minWorkers),
+		busyWorkers:         0,
+		scaleUpChan:         make(chan struct{}, 1),
+		scaleDownChan:       make(chan struct{}, 1),
+		enableAutoScale:     enableAutoScale,
+		scaleCheckInterval:  time.Duration(scaleCheckIntervalSec) * time.Second,
 		// 初始化任务通知通道（带缓冲，避免阻塞Push操作）
-		taskAvailable: make(chan struct{}, 1),
+		taskAvailable:       make(chan struct{}, 1),
 		// 初始化负载监控
-		scaleCooldown: 10 * time.Second, // 扩容冷却时间10秒
-		lastScaleTime: time.Now(),
-		systemLoad:    0.0,
+		scaleCooldown:       10 * time.Second, // 扩容冷却时间10秒
+		lastScaleTime:       time.Now(),
+		systemLoad:          0.0,
 	}
 
 	// 初始化定时任务系统
@@ -487,11 +503,20 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 	// 启动初始工作池
 	for i := 0; i < m.workers; i++ {
 		m.workerWg.Add(1)
-		go m.workerLoop(i)
+		go func(id int) {
+			// 修复：添加启动延迟，避免所有worker同时启动造成CPU spike
+			time.Sleep(time.Duration(id) * 100 * time.Millisecond)
+			m.workerLoop(id)
+		}(i)
 	}
 
 	// 启动动态扩容监控协程
-	go m.scaleMonitor()
+	if m.enableAutoScale {
+		go m.scaleMonitor() // 启用扩缩容监控，根据负载自动调整worker数量
+		m.logger.Infow("动态扩缩容监控已启用", "checkInterval", m.scaleCheckInterval.String())
+	} else {
+		m.logger.Infow("动态扩缩容监控已禁用")
+	}
 
 	// 预编译Lua脚本
 	if err := m.luaScriptCache.PrecompileScripts(m.pluginsDir); err != nil {
@@ -656,6 +681,10 @@ type pluginEventTask struct {
 func (m *Manager) workerLoop(id int) {
 	defer m.workerWg.Done()
 
+	// 修复：复用timer，避免频繁创建
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
 	for {
 		// 检查是否应该退出
 		select {
@@ -680,11 +709,20 @@ func (m *Manager) workerLoop(id int) {
 		task, ok := m.priorityQueue.Pop()
 		if !ok {
 			// 队列为空，阻塞等待任务通知或超时
+			// 修复：重置timer而不是创建新的，增加超时时间减少唤醒
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(30 * time.Second) // 增加到 30秒，减少唤醒频率
+
 			select {
 			case <-m.taskAvailable:
 				// 收到任务通知，重新尝试获取
 				continue
-			case <-time.After(5 * time.Second):
+			case <-timer.C:
 				// 超时保护，重新检查（防止死锁）
 				continue
 			case <-m.ctx.Done():
@@ -763,7 +801,7 @@ func (m *Manager) workerLoop(id int) {
 // scaleMonitor 动态扩容监控协程
 // 根据队列积压情况和worker利用率动态调整worker数量
 func (m *Manager) scaleMonitor() {
-	ticker := time.NewTicker(2 * time.Second) // 每2秒检查一次
+	ticker := time.NewTicker(m.scaleCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -4101,6 +4139,18 @@ func (m *Manager) StopPluginFileChecker() {
 		close(m.fileCheckStop)
 		m.fileCheckTicker = nil
 	}
+}
+
+// CleanupAccount 清理指定账号的所有插件资源
+// 防止账号断开后插件容器和内存泄漏
+func (m *Manager) CleanupAccount(selfID string) {
+	m.containersMu.Lock()
+	defer m.containersMu.Unlock()
+
+	// 从 map 中删除容器，让 GC 清理
+	delete(m.containers, selfID)
+
+	m.logger.Infow("账号插件容器清理完成", "self_id", selfID)
 }
 
 // CheckPluginFilesExist 手动检查插件文件是否存在

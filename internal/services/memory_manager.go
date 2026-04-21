@@ -1,23 +1,19 @@
 package services
 
 import (
+	"math/rand"
 	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"HanChat-QQBotManager/internal/config"
+	"HanChat-QQBotManager/internal/utils"
 	"go.uber.org/zap"
 )
 
-const (
-	MemoryTargetMB    = 20
-	MemorySoftLimitMB = 30
-	MemoryHardLimitMB = 50
-	IdleTimeoutSecs   = 30
-	MonitorInterval   = 2 * time.Second
-	GCCheckInterval   = 1000
-)
+
 
 type MemoryManager struct {
 	logger            *zap.SugaredLogger
@@ -30,11 +26,17 @@ type MemoryManager struct {
 	forceGCChan       chan struct{}
 	gcCount           atomic.Int64
 	lastAllocMB       atomic.Int64
-	mapPool           sync.Pool
 	cachedMemStats    runtime.MemStats
 	cachedMemStatsMu  sync.RWMutex
 	lastMemStatsTime  atomic.Int64
 	memStatsCacheTime time.Duration
+	// 可配置的参数
+	targetMB        atomic.Int64
+	softLimitMB     atomic.Int64
+	hardLimitMB     atomic.Int64
+	idleTimeoutSecs atomic.Int64
+	monitorInterval time.Duration
+	gcCheckInterval atomic.Int64
 }
 
 var (
@@ -49,15 +51,52 @@ func GetMemoryManager(logger *zap.SugaredLogger) *MemoryManager {
 			stopChan:          make(chan struct{}),
 			forceGCChan:       make(chan struct{}, 1),
 			memStatsCacheTime: 500 * time.Millisecond,
-			mapPool: sync.Pool{
-				New: func() interface{} {
-					m := make(map[string]interface{}, 16)
-					return &m
-				},
-			},
+			// 默认配置
+			monitorInterval: 10 * time.Second,
 		}
+		// 设置默认值
+		memManager.targetMB.Store(20)
+		memManager.softLimitMB.Store(30)
+		memManager.hardLimitMB.Store(50)
+		memManager.idleTimeoutSecs.Store(30)
+		memManager.gcCheckInterval.Store(50000)
 	})
 	return memManager
+}
+
+// SetConfig 设置内存管理器配置
+func (m *MemoryManager) SetConfig(cfg config.MemoryConfig) {
+	// 设置默认值，防止配置值为 0
+	if cfg.TargetMB <= 0 {
+		cfg.TargetMB = 20
+	}
+	if cfg.SoftLimitMB <= 0 {
+		cfg.SoftLimitMB = 30
+	}
+	if cfg.HardLimitMB <= 0 {
+		cfg.HardLimitMB = 50
+	}
+	if cfg.IdleTimeoutSecs <= 0 {
+		cfg.IdleTimeoutSecs = 30
+	}
+	if cfg.MonitorInterval <= 0 {
+		cfg.MonitorInterval = 10000 // 10秒
+	}
+	if cfg.GCCheckInterval <= 0 {
+		cfg.GCCheckInterval = 50000
+	}
+
+	m.targetMB.Store(int64(cfg.TargetMB))
+	m.softLimitMB.Store(int64(cfg.SoftLimitMB))
+	m.hardLimitMB.Store(int64(cfg.HardLimitMB))
+	m.idleTimeoutSecs.Store(int64(cfg.IdleTimeoutSecs))
+	m.monitorInterval = time.Duration(cfg.MonitorInterval) * time.Millisecond
+	m.gcCheckInterval.Store(int64(cfg.GCCheckInterval))
+	m.logger.Infow("内存管理器配置已更新",
+		"target_mb", cfg.TargetMB,
+		"soft_limit_mb", cfg.SoftLimitMB,
+		"hard_limit_mb", cfg.HardLimitMB,
+		"monitor_interval_ms", cfg.MonitorInterval)
 }
 
 func (m *MemoryManager) getMemStats() runtime.MemStats {
@@ -87,16 +126,16 @@ func (m *MemoryManager) Start() {
 		return
 	}
 
-	debug.SetGCPercent(10)
+	debug.SetGCPercent(100) // 修复CPU过高：从10恢复到默认值100
 
 	go m.monitorLoop()
 	go m.idleDetectorLoop()
 	m.logger.Infow("内存管理器已启动",
-		"target_mb", MemoryTargetMB,
-		"soft_limit_mb", MemorySoftLimitMB,
-		"hard_limit_mb", MemoryHardLimitMB,
-		"gc_percent", 10,
-		"gc_check_interval", GCCheckInterval)
+		"target_mb", m.targetMB.Load(),
+		"soft_limit_mb", m.softLimitMB.Load(),
+		"hard_limit_mb", m.hardLimitMB.Load(),
+		"gc_percent", 100,
+		"gc_check_interval", m.gcCheckInterval.Load())
 }
 
 func (m *MemoryManager) Stop() {
@@ -116,32 +155,10 @@ func (m *MemoryManager) RegisterCleanup(fn func()) {
 func (m *MemoryManager) RecordMessage() {
 	m.lastMsgTime.Store(time.Now().Unix())
 	count := m.msgCounter.Add(1)
-	if count%GCCheckInterval == 0 {
+	gcInterval := m.gcCheckInterval.Load()
+	if gcInterval > 0 && count%gcInterval == 0 {
 		go m.checkAndGC("periodic")
 	}
-}
-
-func (m *MemoryManager) AcquireMap() *map[string]interface{} {
-	ptr := m.mapPool.Get()
-	if ptr == nil {
-		m := make(map[string]interface{}, 16)
-		return &m
-	}
-	return ptr.(*map[string]interface{})
-}
-
-func (m *MemoryManager) ReleaseMap(ptr *map[string]interface{}) {
-	if ptr == nil {
-		return
-	}
-	mp := *ptr
-	for k := range mp {
-		delete(mp, k)
-	}
-	if len(mp) > 64 {
-		return
-	}
-	m.mapPool.Put(ptr)
 }
 
 func (m *MemoryManager) ForceGC() {
@@ -165,27 +182,38 @@ func (m *MemoryManager) checkAndGC(reason string) {
 	allocMB := m.GetAllocMB()
 	m.lastAllocMB.Store(int64(allocMB))
 
-	if allocMB <= MemoryTargetMB {
+	target := int(m.targetMB.Load())
+	softLimit := int(m.softLimitMB.Load())
+	hardLimit := int(m.hardLimitMB.Load())
+
+	if allocMB <= target {
 		return
 	}
 
-	if allocMB > MemoryHardLimitMB {
+	if allocMB > hardLimit {
 		m.executeCleanup("hard_limit")
 		return
 	}
 
-	if allocMB > MemorySoftLimitMB {
+	if allocMB > softLimit {
 		m.executeCleanup("soft_limit")
 		return
 	}
 
-	if reason == "periodic" && allocMB > MemoryTargetMB {
+	if reason == "periodic" && allocMB > target/2 {
 		runtime.GC()
 	}
 }
 
 func (m *MemoryManager) monitorLoop() {
-	ticker := time.NewTicker(MonitorInterval)
+	// 添加随机初始延迟，避免与其他任务同时触发
+	interval := m.monitorInterval
+	if interval > 0 {
+		initialDelay := time.Duration(rand.Int63n(int64(interval)))
+		time.Sleep(initialDelay)
+	}
+	
+	ticker := time.NewTicker(m.monitorInterval)
 	defer ticker.Stop()
 
 	for {
@@ -197,7 +225,8 @@ func (m *MemoryManager) monitorLoop() {
 		case <-ticker.C:
 			allocMB := m.GetAllocMB()
 			m.lastAllocMB.Store(int64(allocMB))
-			if allocMB > MemorySoftLimitMB {
+			softLimit := int(m.softLimitMB.Load())
+			if allocMB > softLimit {
 				m.executeCleanup("monitor")
 			}
 		}
@@ -205,7 +234,14 @@ func (m *MemoryManager) monitorLoop() {
 }
 
 func (m *MemoryManager) idleDetectorLoop() {
-	ticker := time.NewTicker(5 * time.Second)
+	idleInterval := 5 * time.Second
+	// 添加随机初始延迟
+	if idleInterval > 0 {
+		initialDelay := time.Duration(rand.Int63n(int64(idleInterval)))
+		time.Sleep(initialDelay)
+	}
+	
+	ticker := time.NewTicker(idleInterval)
 	defer ticker.Stop()
 
 	for {
@@ -218,9 +254,11 @@ func (m *MemoryManager) idleDetectorLoop() {
 				continue
 			}
 			elapsed := time.Now().Unix() - lastMsg
-			if elapsed >= IdleTimeoutSecs {
+			idleTimeout := m.idleTimeoutSecs.Load()
+			if elapsed >= idleTimeout {
 				allocMB := m.GetAllocMB()
-				if allocMB > MemoryTargetMB/2 {
+				target := int(m.targetMB.Load())
+				if allocMB > target/2 {
 					m.executeCleanup("idle")
 				}
 			}
@@ -245,6 +283,12 @@ func (m *MemoryManager) executeCleanup(reason string) {
 		}()
 	}
 	m.cleanupMu.RUnlock()
+
+	// 输出内存池统计信息
+	if utils.GlobalMemoryPool != nil {
+		stats := utils.GlobalMemoryPool.GetStats()
+		m.logger.Debugw("内存池统计", "stats", stats)
+	}
 
 	runtime.GC()
 

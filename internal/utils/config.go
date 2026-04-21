@@ -42,8 +42,11 @@ type WebSocketConfig struct {
 
 // PluginConfig 插件配置
 type PluginConfig struct {
-	Workers   int `mapstructure:"workers"`
-	QueueSize int `mapstructure:"queueSize"`
+	Workers               int  `mapstructure:"workers"`
+	MaxWorkers            int  `mapstructure:"maxWorkers"`
+	QueueSize             int  `mapstructure:"queueSize"`
+	EnableAutoScale       bool `mapstructure:"enableAutoScale"`       // 是否启用动态扩缩容
+	ScaleCheckIntervalSec int  `mapstructure:"scaleCheckIntervalSec"` // 扩缩容检查间隔(秒)
 }
 
 // WebLoginConfig Web登录配置
@@ -93,7 +96,10 @@ func LoadConfig() *Config {
 
 	// 插件配置
 	v.SetDefault("plugin.workers", getEnvInt("PLUGIN_WORKERS", 8))
+	v.SetDefault("plugin.maxWorkers", getEnvInt("PLUGIN_MAX_WORKERS", 0)) // 0表示自动计算
 	v.SetDefault("plugin.queueSize", getEnvInt("PLUGIN_QUEUE_SIZE", 1024))
+	v.SetDefault("plugin.enableAutoScale", getEnvBool("PLUGIN_ENABLE_AUTO_SCALE", true)) // 默认启用动态扩缩容
+	v.SetDefault("plugin.scaleCheckIntervalSec", getEnvInt("PLUGIN_SCALE_CHECK_INTERVAL", 30)) // 默认30秒检查间隔
 
 	// Web登录配置
 	v.SetDefault("weblogin.username", getEnvString("WEB_LOGIN_USER", "admin"))
