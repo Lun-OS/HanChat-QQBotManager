@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { settingsApi, systemApi } from '../services/api';
 
 // 前端版本号（从环境变量读取，默认为v5）
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'v5.1';
+const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V5.2';
 
 export function Settings() {
   const [websocketAuthorization, setWebsocketAuthorization] = useState('');

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -181,7 +182,6 @@ func NewPriorityEventQueue(maxSize int) *PriorityEventQueue {
 // Push 添加任务到队列（根据优先级选择通道）
 // 优化：当队列满时自动扩容而不是直接丢弃，最大可扩容到初始大小的4倍
 func (q *PriorityEventQueue) Push(task pluginEventTask) bool {
-	// 使用循环重试代替递归，避免栈溢出风险
 PushLoop:
 	for {
 		switch task.priority {
@@ -190,19 +190,16 @@ PushLoop:
 			case q.highPriority <- task:
 				return true
 			default:
-				// 高优先级队列满，尝试动态扩容
 				if q.tryExpand() {
-					continue PushLoop // 重试（循环而非递归）
+					continue PushLoop
 				}
-				// 扩容失败，尝试丢弃最旧的低优先级任务
 				select {
 				case <-q.lowPriority:
 					atomic.AddInt64(&q.droppedCount, 1)
 					q.highPriority <- task
 					return true
 				default:
-					atomic.AddInt64(&q.droppedCount, 1)
-					return false
+					break PushLoop
 				}
 			}
 		case PriorityNormal:
@@ -210,38 +207,31 @@ PushLoop:
 			case q.normalPriority <- task:
 				return true
 			default:
-				// 普通优先级队列满，尝试动态扩容
 				if q.tryExpand() {
-					continue PushLoop // 重试（循环而非递归）
+					continue PushLoop
 				}
-				// 扩容失败，尝试丢弃低优先级任务
 				select {
 				case <-q.lowPriority:
 					atomic.AddInt64(&q.droppedCount, 1)
 					q.normalPriority <- task
 					return true
 				default:
-					atomic.AddInt64(&q.droppedCount, 1)
-					return false
+					break PushLoop
 				}
 			}
-		default: // PriorityLow
+		default:
 			select {
 			case q.lowPriority <- task:
 				return true
 			default:
-				// 低优先级队列满，尝试动态扩容
 				if q.tryExpand() {
-					continue PushLoop // 重试（循环而非递归）
+					continue PushLoop
 				}
-				// 扩容失败才丢弃
-				atomic.AddInt64(&q.droppedCount, 1)
-				return false
+				break PushLoop
 			}
 		}
-		break PushLoop // 理论上不会执行到这里（所有路径都有return），但满足编译器要求
 	}
-	// 满足编译器要求：实际上不会执行到这里
+	atomic.AddInt64(&q.droppedCount, 1)
 	return false
 }
 
@@ -1159,6 +1149,33 @@ func (m *Manager) parsePluginInfoFromLua(luaPath string) (version, remark string
 
 // LoadLuaPlugin 加载Lua插件到指定账号
 func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
+	loadStart := time.Now()
+	runtime.GC()
+	runtime.GC()
+	var memBeforeLoad uint64
+	{
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		memBeforeLoad = ms.HeapAlloc
+	}
+	memSnap := func(step string) uint64 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		delta := int64(ms.HeapAlloc) - int64(memBeforeLoad)
+		m.logger.Infow("[MEM-PROFILE] 插件加载步骤",
+			"plugin", name, "self_id", selfID,
+			"step", step,
+			"heap_alloc_mb", fmt.Sprintf("%.2f", float64(ms.HeapAlloc)/1024/1024),
+			"delta_mb", fmt.Sprintf("%.2f", float64(delta)/1024/1024),
+			"heap_sys_mb", fmt.Sprintf("%.2f", float64(ms.HeapSys)/1024/1024),
+			"stack_inuse_mb", fmt.Sprintf("%.2f", float64(ms.StackInuse)/1024/1024),
+			"num_gc", ms.NumGC,
+		)
+		return ms.HeapAlloc
+	}
+	memSnap("start")
+
 	if selfID == "" {
 		return errors.New("必须指定账号ID")
 	}
@@ -1175,6 +1192,7 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	// 扫描该账号的插件
 	plugins, err := m.scanAccountPlugins(selfID)
 	if err != nil {
+		container.mu.Unlock()
 		return fmt.Errorf("扫描插件失败: %w", err)
 	}
 
@@ -1188,42 +1206,48 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	}
 
 	if pluginInfo == nil {
+		container.mu.Unlock()
 		return fmt.Errorf("插件不存在: %s (账号: %s)", name, selfID)
 	}
 
 	// 创建Lua状态机
 	L := lua.NewState(lua.Options{
-		CallStackSize: 120,
-		RegistrySize:  1024 * 20,
-		RegistryMaxSize: 1024 * 80,
-		RegistryGrowStep: 32,
+		CallStackSize:      120,
+		RegistrySize:       512,
+		RegistryMaxSize:    1024 * 20,
+		RegistryGrowStep:   16,
+		SkipOpenLibs:       true,
+		MinimizeStackMemory: true,
 	})
+	memSnap("lua.NewState")
 
-	// 设置沙箱环境
 	if err := m.setupSandbox(L, selfID, name); err != nil {
 		L.Close()
+		container.mu.Unlock()
 		return fmt.Errorf("设置沙箱环境失败: %w", err)
 	}
+	memSnap("setupSandbox")
 
 	// 创建插件实例
 	instance := &LuaPluginInstance{
-		L:             L,
-		Name:          name,
-		Config:        pluginInfo.Config,
-		EventHandlers: make(map[string]*lua.LFunction),
-		StartTime:     time.Now(),
-		llService:     m.llService,
-		reverseWS:     m.reverseWS, // 设置反向WebSocket服务
-		SelfID:        selfID,      // 绑定到指定账号
-		Logs:          make([]string, 0, 1000),
-		eventCount:    0,
-		errorCount:    0,
-		lastEventTime: time.Now(),
-		sandbox:       NewLuaSandbox(nil), // 先创建空沙箱，后面再设置instance
-		cpuTime:       0,
-		memoryUsage:   0,
-		imageProcessors: make(map[int]*utils.SimpleImageProcessor),
-		nextProcessorID: 1,
+		L:                   L,
+		Name:                name,
+		Config:              pluginInfo.Config,
+		EventHandlers:       make(map[string]*lua.LFunction),
+		StartTime:           time.Now(),
+		llService:           m.llService,
+		reverseWS:           m.reverseWS,
+		SelfID:              selfID,
+		Logs:                make([]string, 0, 1000),
+		eventCount:          0,
+		errorCount:           0,
+		lastEventTime:        time.Now(),
+		sandbox:              NewLuaSandbox(nil),
+		cpuTime:              0,
+		memoryUsage:          0,
+		imageProcessors:      make(map[int]*utils.SimpleImageProcessor),
+		nextProcessorID:      1,
+		schedulerCallbacks:   make(map[string]*lua.LFunction),
 	}
 
 	// 设置沙箱的instance引用
@@ -1240,8 +1264,12 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 		}
 	}
 
-	// 注册API
 	m.registerAPI(instance)
+	memSnap("registerAPI")
+
+	// 重要：在执行 Lua 代码之前释放锁，避免死锁
+	// Lua 代码中的 log.info 等 API 需要获取 container.mu.RLock()
+	container.mu.Unlock()
 
 	// 使用缓存加载插件主文件，并在沙箱保护下执行
 	entryPath := filepath.Join(pluginInfo.Path, pluginInfo.Entry)
@@ -1271,11 +1299,9 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 		default:
 		}
 
-		// 尝试从缓存加载编译后的脚本
 		if m.luaScriptCache != nil {
 			fn, err := m.luaScriptCache.LoadAndCompileScript(L, entryPath)
 			if err != nil {
-				m.logger.Warnw("加载Lua脚本失败", "path", entryPath, "error", err)
 				done <- fmt.Errorf("加载插件文件失败: %w", err)
 				return
 			}
@@ -1296,47 +1322,105 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 		done <- nil
 	}()
 
-	// 等待全局代码执行完成（最多等待60秒）
+	m.logger.Infow("插件goroutine已启动，即将等待执行结果", "plugin", name, "self_id", selfID)
+	memSnap("before_execute_script")
+
+	m.logger.Infow("[TIME] L.PCall执行开始",
+		"plugin", name, "self_id", selfID,
+		"elapsed_since_load", time.Since(loadStart).String())
+
+	execStart := time.Now()
+
+	// 熔断清理辅助函数
+	haltAndCleanup := func(reason string) {
+		instance.sandbox.Halt(reason)
+		atomic.StoreInt32(&instance.luaCorrupted, 1)
+		instance.corruptReason = reason
+		// 清理 Lua 回调引用
+		instance.mu.Lock()
+		instance.schedulerCallbacks = nil
+		instance.EventHandlers = nil
+		instance.mu.Unlock()
+		// 关闭 LState
+		if instance.L != nil {
+			instance.L.Close()
+		}
+		instance.L = nil
+		// GC 清理
+		runtime.GC()
+		runtime.GC()
+		debug.FreeOSMemory()
+		runtime.GC()
+		debug.FreeOSMemory()
+	}
+
 	select {
 	case err := <-done:
 		if err != nil {
-			// 先标记沙箱停止，阻止后续操作
-			instance.sandbox.Halt("插件加载失败")
-			L.Close()
+			haltAndCleanup(fmt.Sprintf("插件加载失败: %v", err))
 			return err
 		}
 	case <-execCtx.Done():
-		// 超时，先标记沙箱停止
 		instance.sandbox.Halt("插件全局代码执行超时（超过60秒）")
-		// ⭐ 关键修复：给goroutine足够时间检测到halt状态并退出
-		// 使用select等待done通道或超时，避免并发操作已关闭的LState
+		atomic.StoreInt32(&instance.luaCorrupted, 1)
+		instance.corruptReason = "插件全局代码执行超时"
 		select {
 		case <-done:
 			m.logger.Debugw("全局代码goroutine在超时后及时退出",
 				"plugin", name,
 				"self_id", selfID)
-		case <-time.After(1 * time.Second):
-			m.logger.Warnw("全局代码goroutine未能在超时后及时退出，LState可能存在竞争风险",
+		case <-time.After(5 * time.Second):
+			m.logger.Warnw("全局代码goroutine未能在超时后及时退出，但不再强制关闭LState以避免panic",
 				"plugin", name,
 				"self_id", selfID)
-			atomic.StoreInt32(&instance.luaCorrupted, 1)
-			instance.corruptReason = "插件加载超时且goroutine未及时退出"
 		}
-		L.Close()
+		m.logger.Infow("[TIME] L.PCall执行超时返回",
+			"plugin", name, "self_id", selfID,
+			"elapsed_since_load", time.Since(loadStart).String(),
+			"pcall_duration", time.Since(execStart).String())
+
 		return fmt.Errorf("插件全局代码执行超时，请将耗时操作移到on_init或事件处理器中")
 	}
 
-	// 先将插件实例添加到容器的映射中
+	memSnap("after_execute_script")
+
+	m.logger.Infow("[TIME] after_execute_script完成",
+		"plugin", name, "self_id", selfID,
+		"total_since_load", time.Since(loadStart).String(),
+		"pcall_duration", time.Since(execStart).String())
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	memDelta := int64(memStats.HeapAlloc) - int64(memBeforeLoad)
+	if memDelta > int64(maxMemoryUsage) {
+		// 熔断时完整清理（插件尚未注册到map，无法使用UnloadLuaPlugin）
+		instance.schedulerCallbacks = nil
+		instance.EventHandlers = nil
+		if instance.L != nil {
+			instance.L.Close()
+		}
+		instance.L = nil
+		atomic.StoreInt32(&instance.luaCorrupted, 1)
+		instance.corruptReason = "插件加载后内存增量超限"
+		instance.sandbox.Halt(fmt.Sprintf("插件加载后内存增量超限: %.1fMB / %dMB", float64(memDelta)/1024/1024, maxMemoryUsage/1024/1024))
+		runtime.GC()
+		runtime.GC()
+		debug.FreeOSMemory()
+		runtime.GC()
+		debug.FreeOSMemory()
+
+		return fmt.Errorf("插件加载后内存增量超限(%.1fMB)，请优化插件代码减少内存占用", float64(memDelta)/1024/1024)
+	}
+
+	// 重新获取锁来注册插件
+	container.mu.Lock()
 	container.LuaPlugins[name] = instance
 	container.PluginConfigs[name] = pluginInfo
-	
-	// 释放容器锁，后续操作不需要保护
 	container.mu.Unlock()
 
-	// 注册事件处理器
 	m.registerEventHandlers(instance)
+	memSnap("registerEventHandlers")
 
-	// 异步调用初始化函数，不阻塞插件加载
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1350,6 +1434,7 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	}()
 
 	m.logger.Infow("Lua插件已加载", "self_id", selfID, "name", name)
+	memSnap("load_complete")
 	return nil
 }
 
@@ -1498,13 +1583,25 @@ func luaFormatToGoFormat(luaFormat string) string {
 
 // setupSandbox 设置沙箱环境
 func (m *Manager) setupSandbox(L *lua.LState, selfID string, pluginName string) error {
-	// 移除危险函数
-	L.SetGlobal("os", lua.LNil)
+	for _, lib := range []struct {
+		name string
+		fn   lua.LGFunction
+	}{
+		{"_G", lua.OpenBase},
+		{lua.StringLibName, lua.OpenString},
+		{lua.TabLibName, lua.OpenTable},
+		{lua.MathLibName, lua.OpenMath},
+		{lua.CoroutineLibName, lua.OpenCoroutine},
+	} {
+		L.Push(L.NewFunction(lib.fn))
+		L.Push(lua.LString(lib.name))
+		L.Call(1, 0)
+	}
+
 	L.SetGlobal("io", lua.LNil)
 	L.SetGlobal("package", lua.LNil)
 	L.SetGlobal("debug", lua.LNil)
 
-	// 创建受限的os表
 	osTable := L.NewTable()
 	L.SetField(osTable, "time", L.NewFunction(func(L *lua.LState) int {
 		L.Push(lua.LNumber(time.Now().Unix()))
@@ -1514,7 +1611,6 @@ func (m *Manager) setupSandbox(L *lua.LState, selfID string, pluginName string) 
 		format := L.OptString(1, "%c")
 		timestamp := L.OptNumber(2, lua.LNumber(time.Now().Unix()))
 		
-		// 将 Lua 的 strftime 格式转换为 Go 的 time 格式
 		goFormat := luaFormatToGoFormat(format)
 		
 		t := time.Unix(int64(timestamp), 0)
@@ -2434,9 +2530,36 @@ function blockly_time.end_of_day(timestamp)
 end
 
 `
-	if err := L.DoString(runtimeLib); err != nil {
-		m.logger.Warnw("加载 Lua 运行时库失败", "plugin", instance.Name, "error", err)
+	runtime.GC()
+	var msBefore runtime.MemStats
+	runtime.ReadMemStats(&msBefore)
+
+	fn, loadErr := L.LoadString(runtimeLib)
+	if loadErr != nil {
+		m.logger.Warnw("加载 Lua 运行时库失败", "plugin", instance.Name, "error", loadErr)
+		return
 	}
+
+	runtime.GC()
+	var msAfterCompile runtime.MemStats
+	runtime.ReadMemStats(&msAfterCompile)
+	m.logger.Infow("[MEM-PROFILE] runtimeLib编译",
+		"plugin", instance.Name,
+		"source_len", len(runtimeLib),
+		"compile_delta_kb", (msAfterCompile.HeapAlloc-msBefore.HeapAlloc)/1024,
+	)
+
+	L.Push(fn)
+	L.Call(0, 0)
+
+	runtime.GC()
+	var msAfterExec runtime.MemStats
+	runtime.ReadMemStats(&msAfterExec)
+	m.logger.Infow("[MEM-PROFILE] runtimeLib执行",
+		"plugin", instance.Name,
+		"exec_delta_kb", (msAfterExec.HeapAlloc-msAfterCompile.HeapAlloc)/1024,
+		"total_delta_kb", (msAfterExec.HeapAlloc-msBefore.HeapAlloc)/1024,
+	)
 }
 
 // registerAPI 注册API函数
@@ -2849,6 +2972,28 @@ func (m *Manager) callInitFunction(instance *LuaPluginInstance) error {
 
 // UnloadLuaPlugin 卸载指定账号的Lua插件
 func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
+	runtime.GC()
+	var memBeforeUnload uint64
+	{
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		memBeforeUnload = ms.HeapAlloc
+	}
+	unloadSnap := func(step string) {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		delta := int64(ms.HeapAlloc) - int64(memBeforeUnload)
+		m.logger.Infow("[MEM-PROFILE] 插件卸载步骤",
+			"plugin", name, "self_id", selfID,
+			"step", step,
+			"heap_alloc_mb", fmt.Sprintf("%.2f", float64(ms.HeapAlloc)/1024/1024),
+			"heap_sys_mb", fmt.Sprintf("%.2f", float64(ms.HeapSys)/1024/1024),
+			"delta_mb", fmt.Sprintf("%.2f", float64(delta)/1024/1024),
+		)
+	}
+	unloadSnap("start")
+
 	if selfID == "" {
 		return errors.New("必须指定账号ID")
 	}
@@ -2889,40 +3034,65 @@ func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
 		m.logger.Warnw("等待插件事件处理器完成超时，强制卸载", "self_id", selfID, "name", name)
 	}
 
-	// 调用清理函数（在等待完成后）
+	atomic.StoreInt32(&instance.luaCorrupted, 1)
+	instance.corruptReason = "插件已卸载"
+
+	// 调用清理函数（在确保没有代码在执行后）
 	m.callDestroyFunction(instance)
+	unloadSnap("after_on_destroy")
 
-	// 清理HTTP接口
-	if m.httpInterfaceManager != nil {
-		m.httpInterfaceManager.UnregisterPluginHandlers(fmt.Sprintf("%s/%s", selfID, name))
-	}
-
-	// 取消该插件的所有定时任务
+	// 取消该插件的所有定时任务（必须在 L.Close() 之前）
 	if m.timerSystem != nil {
 		m.timerSystem.CancelPluginTasks(fmt.Sprintf("%s/%s", selfID, name))
 	}
 
-	// 取消该插件的调度器任务
+	// 取消该插件的调度器任务（必须在 L.Close() 之前）
 	if m.schedulerManager != nil {
 		m.schedulerManager.CancelPluginTasks(fmt.Sprintf("%s/%s", selfID, name))
 	}
 
-	// 记录最后5条日志
-	lastLogs := instance.getLastLogs(5)
-	if len(lastLogs) > 0 {
-		m.logger.Infow("插件最后日志",
-			"self_id", selfID,
-			"name", name,
-			"lastLogs", lastLogs)
+	// 清理调度器回调函数引用，防止Lua LFunction对象阻止GC回收
+	instance.mu.Lock()
+	instance.schedulerCallbacks = nil
+	instance.EventHandlers = nil
+	instance.mu.Unlock()
+
+	// 彻底清理调度器相关的所有引用（在 L.Close() 之前）
+	if m.schedulerManager != nil {
+		m.schedulerManager.CleanupPluginReferences(selfID, name)
 	}
 
-	// 关闭Lua状态机（在确保没有代码在执行后）
-	instance.L.Close()
+	unloadSnap("after_ref_cleanup")
 
-	// 清理该插件的storage锁，防止内存泄漏
-	pluginDir := filepath.Join("plugins", selfID, name)
-	dataFile := filepath.Join(pluginDir, "data.json")
-	deleteStorageLock(dataFile)
+	// 在关闭前清理全局表中的插件数据，减少allocator保留的内存
+	if instance.L != nil {
+		func() {
+			defer func() { recover() }()
+			instance.L.SetGlobal("_G", lua.LNil)
+			instance.L.DoString(`
+				for k in pairs(_G) do
+					_G[k] = nil
+				end
+				_G = nil
+			`)
+		}()
+	}
+
+	// 清理该插件注册的所有HTTP接口处理器
+	if m.httpInterfaceManager != nil {
+		m.httpInterfaceManager.UnregisterPluginHandlers(fmt.Sprintf("%s/%s", selfID, name))
+	}
+
+	// 关闭Lua状态机（只调用一次）
+	if instance.L != nil {
+		instance.L.Close()
+	}
+	instance.L = nil // 明确释放引用，帮助GC
+	unloadSnap("after_L.Close")
+
+	// 第一阶段GC：回收Lua状态机相关的对象
+	runtime.GC()
+	unloadSnap("after_phase1_gc")
 
 	// 清理图像处理器资源，防止内存泄漏
 	instance.imageProcessorMu.Lock()
@@ -2930,13 +3100,37 @@ func (m *Manager) UnloadLuaPlugin(selfID string, name string) error {
 	if processorCount > 0 {
 		m.logger.Debugw("清理图像处理器", "self_id", selfID, "plugin", name, "processor_count", processorCount)
 	}
-	// 清空映射，让GC回收资源（SimpleImageProcessor没有显式Close方法）
-	instance.imageProcessors = make(map[int]*utils.SimpleImageProcessor)
+	instance.imageProcessors = nil
 	instance.imageProcessorMu.Unlock()
 
 	// 清理插件的所有RPC处理器
 	prm := GetPluginRPCManager(m.logger)
 	prm.UnregisterAllPluginHandlers(selfID, name)
+
+	// 第二阶段GC：回收所有被延迟释放的对象
+	runtime.GC()
+	runtime.GC()
+	unloadSnap("after_phase2_gc")
+
+	// 第三阶段GC：在LState关闭后再次GC，确保所有Lua对象被回收
+	runtime.GC()
+	runtime.GC()
+	unloadSnap("after_phase3_gc")
+
+	// 强制将内存归还OS
+	debug.FreeOSMemory()
+	unloadSnap("after_FreeOSMemory")
+
+	// 第四阶段GC：最终清理
+	runtime.GC()
+	debug.FreeOSMemory()
+	unloadSnap("after_final_cleanup")
+
+	// 清理沙箱引用，打破循环引用，帮助GC回收
+	if instance.sandbox != nil {
+		instance.sandbox.instance = nil
+	}
+	instance.sandbox = nil
 
 	m.logger.Infow("Lua插件已卸载", "self_id", selfID, "name", name)
 	return nil
@@ -3779,6 +3973,11 @@ func (m *Manager) Shutdown(timeout time.Duration) error {
 	// 停止调度器管理器
 	if m.schedulerManager != nil {
 		m.schedulerManager.Shutdown()
+	}
+
+	// 关闭Lua脚本缓存（停止后台清理goroutine）
+	if m.luaScriptCache != nil {
+		m.luaScriptCache.Close()
 	}
 
 	m.logger.Infow("插件管理器已关闭",

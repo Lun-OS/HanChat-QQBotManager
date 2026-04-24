@@ -184,6 +184,17 @@ func convertToBase64(v interface{}) string {
 func (m *Manager) luaLogInfo(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		msg := m.formatLogValue(L, 1)
+		instance := m.GetPluginInstance(selfID, pluginName)
+		if instance != nil {
+			timestamp := time.Now().Format("15:04:05")
+			logEntry := fmt.Sprintf("[%s] [INFO] %s", timestamp, msg)
+			instance.logMu.Lock()
+			instance.Logs = append(instance.Logs, logEntry)
+			if len(instance.Logs) > 1000 {
+				instance.Logs = instance.Logs[len(instance.Logs)-1000:]
+			}
+			instance.logMu.Unlock()
+		}
 		m.logger.Infow("插件日志", "plugin", pluginName, "level", "info", "message", msg)
 		m.addPluginLog(selfID, pluginName, "INFO", msg)
 		return 0
@@ -1933,15 +1944,27 @@ func (m *Manager) luaDeleteFriend(instance *LuaPluginInstance) func(*lua.LState)
 
 func (m *Manager) luaGetFriends(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		// 检查服务
+		m.logger.Infow("[luaGetFriends 调用]", "plugin", instance.Name, "self_id", instance.SelfID)
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIError(L, err, "获取好友列表失败")
 		}
 
-		// 调用服务
 		result, err := callBotAPI(instance, "get_friend_list", nil)
 		if err != nil {
+			m.logger.Warnw("[luaGetFriends API失败]", "plugin", instance.Name, "error", err)
 			return luaAPIError(L, err, "获取好友列表失败")
+		}
+
+		if jsonBytes, jerr := json.Marshal(result); jerr == nil {
+			m.logger.Infow("[MEM-PROFILE] get_friend_list响应",
+				"plugin", instance.Name, "self_id", instance.SelfID,
+				"response_size_kb", len(jsonBytes)/1024,
+			)
+			if dataArr, ok := result["data"].([]interface{}); ok {
+				m.logger.Infow("[MEM-PROFILE] get_friend_list详情",
+					"friend_count", len(dataArr),
+				)
+			}
 		}
 
 		return luaAPISuccessWithTable(L, m, result)

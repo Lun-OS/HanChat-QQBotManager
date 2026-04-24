@@ -117,7 +117,13 @@ func (m *Manager) luaScheduleWeekly(instance *LuaPluginInstance) func(*lua.LStat
 			return luaAPIError(L, fmt.Errorf("第五个参数必须为函数"), "注册每周任务失败")
 		}
 
+		m.logger.Infow("[MEM-PROFILE] scheduler.weekly注册开始",
+			"plugin", instance.Name, "self_id", instance.SelfID)
+
 		callbackFunc := L.ToFunction(5)
+
+		m.logger.Infow("[MEM-PROFILE] scheduler.weekly ToFunction完成",
+			"plugin", instance.Name, "self_id", instance.SelfID)
 
 		callbackID := fmt.Sprintf("%s_weekly_%d", pluginName, time.Now().UnixNano())
 
@@ -128,11 +134,22 @@ func (m *Manager) luaScheduleWeekly(instance *LuaPluginInstance) func(*lua.LStat
 		instance.schedulerCallbacks[callbackID] = callbackFunc
 		instance.mu.Unlock()
 
+		m.logger.Infow("[MEM-PROFILE] scheduler.weekly callbacks存储完成",
+			"plugin", instance.Name, "self_id", instance.SelfID)
+
 		cronSpec := fmt.Sprintf("%d %d %d * * %d", second, minute, hour, int(weekday))
 		executor := m.createSchedulerExecutor(instance, callbackID)
+
+		m.logger.Infow("[MEM-PROFILE] scheduler.weekly RegisterTask开始",
+			"plugin", instance.Name, "self_id", instance.SelfID, "cronSpec", cronSpec)
+
 		task, err := m.schedulerManager.RegisterTask(pluginName, SchedulerTypeCron, cronSpec, callbackID, 0, map[string]interface{}{
 			"task_type": "weekly",
 		}, executor)
+
+		m.logger.Infow("[MEM-PROFILE] scheduler.weekly RegisterTask完成",
+			"plugin", instance.Name, "self_id", instance.SelfID, "hasTask", task != nil)
+
 		if err != nil {
 			instance.mu.Lock()
 			delete(instance.schedulerCallbacks, callbackID)
@@ -287,12 +304,20 @@ func (m *Manager) luaScheduleDaily(instance *LuaPluginInstance) func(*lua.LState
 
 func (m *Manager) createSchedulerExecutor(instance *LuaPluginInstance, callbackID string) TaskExecutor {
 	return func(task *ScheduledTask) error {
+		if instance == nil {
+			return fmt.Errorf("插件实例不存在")
+		}
+
 		instance.unloadingMu.RLock()
 		isUnloading := instance.unloading
 		instance.unloadingMu.RUnlock()
 
 		if isUnloading {
 			return fmt.Errorf("插件正在卸载，跳过执行")
+		}
+
+		if instance.IsLuaCorrupted() {
+			return fmt.Errorf("Lua状态已损坏，跳过执行")
 		}
 
 		instance.mu.Lock()
@@ -314,6 +339,10 @@ func (m *Manager) createSchedulerExecutor(instance *LuaPluginInstance, callbackI
 
 		if isUnloadingNow {
 			return fmt.Errorf("插件正在卸载，跳过执行")
+		}
+
+		if instance.IsLuaCorrupted() {
+			return fmt.Errorf("Lua状态已损坏，跳过执行")
 		}
 
 		return instance.sandbox.SafeCall(L, callbackFunc)

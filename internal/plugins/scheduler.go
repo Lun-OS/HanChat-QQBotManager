@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -303,14 +304,15 @@ func (sm *SchedulerManager) CancelTask(taskID string) bool {
 	task.UpdatedAt = time.Now()
 	delete(sm.cronEntries, taskID)
 
-	// 清理 executors 中注册的回调函数，避免内存泄漏
 	if task.CallbackID != "" {
 		delete(sm.executors, task.CallbackID)
 	}
 
+	delete(sm.tasks, taskID)
+
 	if sm.persistStore != nil {
-		if err := sm.persistStore.UpdateTask(task); err != nil {
-			sm.logger.Warnw("Failed to update task in persistence",
+		if err := sm.persistStore.DeleteTask(taskID); err != nil {
+			sm.logger.Warnw("Failed to delete task from persistence",
 				"task_id", taskID,
 				"error", err,
 			)
@@ -434,6 +436,27 @@ func (sm *SchedulerManager) UnregisterExecutor(callbackID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	delete(sm.executors, callbackID)
+}
+
+func (sm *SchedulerManager) CleanupPluginReferences(selfID, pluginName string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	prefix := selfID + "/" + pluginName + "_"
+
+	for callbackID := range sm.executors {
+		if strings.HasPrefix(callbackID, prefix) {
+			delete(sm.executors, callbackID)
+		}
+	}
+
+	for taskID, task := range sm.tasks {
+		if strings.Contains(task.PluginName, pluginName) {
+			task.Status = TaskStatusStopped
+			delete(sm.tasks, taskID)
+			delete(sm.cronEntries, taskID)
+		}
+	}
 }
 
 func generateTaskID() string {

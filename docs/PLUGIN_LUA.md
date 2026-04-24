@@ -1536,6 +1536,45 @@ log.info("用户 " .. userId .. " 
 log.info({
     action = "send_message",
     target = groupId,
-    content_length = #message
+    content_length = #message
 })
 ```
+
+### 6. gopher-lua 大数字 Key 内存问题
+
+在使用哈希表存储用户ID等大数字时，**禁止使用数字作为表的 key**，否则会导致严重的内存问题。
+
+**错误示例（内存暴涨）**：
+```lua
+local BLACKLIST = {
+    [2970293688] = true,     -- 大数字作为key
+    [2265407768] = true,
+    [66600000] = true
+}
+
+-- 查询时也会导致问题
+local uid = tonumber(friend.user_id)
+if BLACKLIST[uid] then  -- 使用数字key查询
+    -- 过滤
+end
+```
+
+**正确示例（内存正常）**：
+```lua
+local BLACKLIST = {
+    ["2970293688"] = true,   -- 字符串作为key
+    ["2265407768"] = true,
+    ["66600000"] = true
+}
+
+-- 查询时转换为字符串
+local uid = tonumber(friend.user_id)
+local uid_str = tostring(uid)
+if uid and not BLACKLIST[uid_str] then  -- 使用字符串key查询
+    -- 过滤
+end
+```
+
+**问题原因**：gopher-lua（Go语言实现的Lua虚拟机）在处理大数字作为哈希表key时存在内存分配问题，大数字key会导致内存暴涨数GB。
+
+**适用场景**：用户ID、群号、消息ID等QQ号段的数字都应使用字符串形式存储和查询。

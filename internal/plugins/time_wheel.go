@@ -164,29 +164,29 @@ func (mtw *MultiLevelTimeWheel) tickLevel(levelIndex int) {
 	// 复制当前槽位的任务，避免立即清空导致的竞态条件
 	currentSlot := level.slots[current]
 	if len(currentSlot) > 0 {
-		// 先复制任务列表再启动执行，避免立即清空导致的问题
 		tasksToExec := make([]*TimeWheelTask, len(currentSlot))
 		copy(tasksToExec, currentSlot)
-		// 清空当前槽位
 		level.slots[current] = nil
 
-		// 执行当前槽位的所有任务
 		for _, task := range tasksToExec {
 			if task.ExecFunc != nil {
-				// 检查任务是否已被取消（原子操作，线程安全）
 				if atomic.LoadInt32(&task.cancelled) == 1 {
-					continue // 跳过已取消的任务
+					delete(level.slotMap, task.ID)
+					continue
 				}
 				
-				// 异步执行任务，但传入任务引用以便在执行期间可以检查状态
 				taskToExec := task
 				go func() {
-					// 二次检查取消状态（防止在调度和执行之间的竞态窗口）
 					if atomic.LoadInt32(&taskToExec.cancelled) == 1 {
 						return
 					}
 					taskToExec.ExecFunc()
+					if taskToExec.TaskType == TaskTypeOnce || taskToExec.TaskType == TaskTypeDelay {
+						delete(level.slotMap, taskToExec.ID)
+					}
 				}()
+			} else {
+				delete(level.slotMap, task.ID)
 			}
 		}
 	}

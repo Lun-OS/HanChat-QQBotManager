@@ -13,11 +13,21 @@ const (
 	MaxStackDepth = 1000
 	// MaxInstructions 最大指令数（用于限制死循环）
 	MaxInstructions = 10000000
-	// MaxMemoryUsage 最大内存使用量（字节）
-	MaxMemoryUsage = 100 * 1024 * 1024 // 100MB
 	// MemoryCheckInterval 内存检查间隔（指令数）
 	MemoryCheckInterval = 10000
 )
+
+var maxMemoryUsage uint64 = 128 * 1024 * 1024 // 128MB 默认值
+
+// SetMaxMemoryUsage 设置最大内存使用量（字节）
+func SetMaxMemoryUsage(bytes uint64) {
+	maxMemoryUsage = bytes
+}
+
+// GetMaxMemoryUsage 获取最大内存使用量（字节）
+func GetMaxMemoryUsage() uint64 {
+	return maxMemoryUsage
+}
 
 // LuaSandbox Lua沙箱安全控制器
 type LuaSandbox struct {
@@ -32,10 +42,11 @@ type LuaSandbox struct {
 // NewLuaSandbox 创建新的Lua沙箱控制器
 func NewLuaSandbox(instance *LuaPluginInstance) *LuaSandbox {
 	return &LuaSandbox{
-		instance:         instance,
-		stackDepth:       0,
-		instructionCount: 0,
-		halted:           0,
+		instance:           instance,
+		stackDepth:         0,
+		instructionCount:   0,
+		halted:             0,
+		permanentlyHalted:  0,
 	}
 }
 
@@ -154,15 +165,14 @@ func (s *LuaSandbox) checkMemoryUsage() bool {
 		return false
 	}
 
-	// 获取当前内存使用量
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	// 检查是否超过内存限制
-	// 注意：gopher-lua没有直接暴露内存使用，我们使用指令计数和栈深度作为替代
-	// 同时我们也可以监控Go进程的内存使用作为辅助
-	
-	// 获取当前栈深度
+	if memStats.HeapAlloc > maxMemoryUsage {
+		s.Halt(fmt.Sprintf("内存使用超过限制: %.1fMB / %dMB", float64(memStats.HeapAlloc)/1024/1024, maxMemoryUsage/1024/1024))
+		return false
+	}
+
 	currentDepth := atomic.LoadInt64(&s.stackDepth)
 	if currentDepth > MaxStackDepth {
 		s.Halt(fmt.Sprintf("堆栈深度超过限制: %d", currentDepth))

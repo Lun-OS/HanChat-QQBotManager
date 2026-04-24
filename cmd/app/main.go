@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -353,6 +354,16 @@ func main() {
 			appLogger.Errorw("服务器启动失败", "error", err)
 		}
 	}()
+
+	if *debugMode {
+		go func() {
+			pprofAddr := "127.0.0.1:57891"
+			appLogger.Infow("pprof调试服务器启动", "addr", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				appLogger.Warnw("pprof服务器启动失败", "error", err)
+			}
+		}()
+	}
 
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)

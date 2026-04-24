@@ -277,7 +277,7 @@ func (c *Console) handleHelp(args []string) error {
 	for _, cmd := range c.commands {
 		fmt.Printf("  %-15s %s\n", cmd.Name, cmd.Description)
 	}
-	fmt.Println("\n使用 /help <command> 查看命令详细用法\n")
+	fmt.Println("\n使用 /help <command> 查看命令详细用法")
 	return nil
 }
 
@@ -591,7 +591,7 @@ func (c *Console) tailSystemLogs() error {
 
 	fmt.Println("\n正在实时输出系统日志...")
 	fmt.Println("提示: 按 Ctrl+C 停止输出，然后可以继续输入命令")
-	fmt.Println("===============================================\n")
+	fmt.Println("===============================================")
 
 	// 创建信号通道用于检测Ctrl+C
 	sigChan := make(chan os.Signal, 1)
@@ -757,7 +757,7 @@ func (c *Console) getBotStatus() error {
 func (c *Console) getSystemInfo() error {
 	version := os.Getenv("LLBOT_VERSION")
 	if version == "" {
-		version = "v5.1"
+		version = "V5.2"
 	}
 
 	fmt.Println("\n系统信息:")
