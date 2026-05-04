@@ -11,7 +11,7 @@ import (
 )
 
 // RegisterMessageRoutes 注册消息相关路由
-func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *zap.Logger) {
+func RegisterMessageRoutes(r *gin.RouterGroup, ll *services.OneBotService, base *zap.Logger) {
 	logger := base.With(zap.String("module", "api.message")).Sugar()
 
 	// 发送私聊消息

@@ -117,7 +117,7 @@ func checkLLService(L *lua.LState, instance *LuaPluginInstance) error {
 	if instance.reverseWS != nil && instance.SelfID != "" {
 		return nil
 	}
-	// 兼容旧的LLOneBot服务
+	// 兼容旧的OneBot服务
 	if instance.llService != nil {
 		return nil
 	}
@@ -130,7 +130,7 @@ func checkLLServiceWithManager(L *lua.LState, m *Manager, instance *LuaPluginIns
 	if instance.reverseWS != nil && instance.SelfID != "" {
 		return nil
 	}
-	// 兼容旧的LLOneBot服务
+	// 兼容旧的OneBot服务
 	if instance.llService != nil {
 		return nil
 	}
@@ -152,20 +152,20 @@ func checkLLServiceManager(L *lua.LState, m *Manager) error {
 	if m.reverseWS != nil {
 		return nil
 	}
-	// 兼容旧的LLOneBot服务
+	// 兼容旧的OneBot服务
 	if m.llService != nil {
 		return nil
 	}
 	return fmt.Errorf("服务未初始化")
 }
 
-// callBotAPI 调用机器人API（使用新的ReverseWebSocketService或旧的LLOneBotService）
+// callBotAPI 调用机器人API（使用新的ReverseWebSocketService或旧的OneBotService）
 func callBotAPI(instance *LuaPluginInstance, action string, params map[string]interface{}) (map[string]interface{}, error) {
 	// 优先使用新的反向WebSocket服务
 	if instance.reverseWS != nil && instance.SelfID != "" {
 		return instance.reverseWS.CallBotAPI(instance.SelfID, action, params)
 	}
-	// 兼容旧的LLOneBot服务
+	// 兼容旧的OneBot服务
 	if instance.llService != nil {
 		return instance.llService.CallAPI(action, params, "POST")
 	}

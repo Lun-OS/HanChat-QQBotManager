@@ -1,4 +1,5 @@
 // lua插件可调用api，包括日志、配置、消息发送、用户信息、群组信息、存储、文件操作、网络请求等功能
+// 标准onebot
 package plugins
 
 import (
@@ -184,17 +185,6 @@ func convertToBase64(v interface{}) string {
 func (m *Manager) luaLogInfo(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		msg := m.formatLogValue(L, 1)
-		instance := m.GetPluginInstance(selfID, pluginName)
-		if instance != nil {
-			timestamp := time.Now().Format("15:04:05")
-			logEntry := fmt.Sprintf("[%s] [INFO] %s", timestamp, msg)
-			instance.logMu.Lock()
-			instance.Logs = append(instance.Logs, logEntry)
-			if len(instance.Logs) > 1000 {
-				instance.Logs = instance.Logs[len(instance.Logs)-1000:]
-			}
-			instance.logMu.Unlock()
-		}
 		m.logger.Infow("插件日志", "plugin", pluginName, "level", "info", "message", msg)
 		m.addPluginLog(selfID, pluginName, "INFO", msg)
 		return 0
@@ -1467,7 +1457,7 @@ func (m *Manager) luaSystemCallAPI(instance *LuaPluginInstance) func(*lua.LState
 
 // 系统/获取Cookies
 // 参数：domain (string)
-// 返回：table（与 LLOneBot /get_cookies 返回结构一致），错误时返回 nil, error
+// 返回：table（与 OneBot /get_cookies 返回结构一致），错误时返回 nil, error
 func (m *Manager) luaSystemCookies() func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		// 检查服务
@@ -1482,7 +1472,7 @@ func (m *Manager) luaSystemCookies() func(*lua.LState) int {
 		}
 		domain = strings.TrimSpace(domain)
 
-		// 调用 LLOneBot 获取 cookies
+		// 调用 OneBot 获取 cookies
 		var result map[string]interface{}
 		if m.reverseWS != nil {
 			// 使用第一个可用的账号
@@ -1526,7 +1516,7 @@ func (m *Manager) luaGetMsg(instance *LuaPluginInstance) func(*lua.LState) int {
 			if numValue, err := strconv.ParseInt(string(val.(lua.LString)), 10, 64); err == nil {
 				messageId = numValue
 			} else {
-				// 如果转换失败，仍然使用原始字符串（某些LLOneBot实现可能接受字符串ID）
+				// 如果转换失败，仍然使用原始字符串（某些OneBot实现可能接受字符串ID）
 				messageId = string(val.(lua.LString))
 			}
 		default:
@@ -1850,7 +1840,7 @@ func (m *Manager) luaOcrImage(instance *LuaPluginInstance) func(*lua.LState) int
 	return func(L *lua.LState) int {
 		image := L.CheckString(1)
 
-		// 调用LLOneBot的OCR接口
+		// 调用OneBot的OCR接口
 		result, err := callBotAPI(instance, "/ocr_image", map[string]interface{}{
 			"image": image,
 		})
@@ -2133,6 +2123,10 @@ func (m *Manager) luaGetGroupMemberInfo(instance *LuaPluginInstance) func(*lua.L
 // 设置群特殊头衔
 func (m *Manager) luaSetGroupSpecialTitle(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_special_title"); err != nil {
+			return luaAPIError(L, err, "设置群特殊头衔失败")
+		}
+
 		// 检查服务
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIError(L, err, "设置群特殊头衔失败")
@@ -2170,6 +2164,10 @@ func (m *Manager) luaSetGroupSpecialTitle(instance *LuaPluginInstance) func(*lua
 // 退出群
 func (m *Manager) luaSetGroupLeave(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_leave"); err != nil {
+			return luaAPIError(L, err, "退出群失败")
+		}
+
 		// 检查服务
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIError(L, err, "退出群失败")
@@ -2332,6 +2330,11 @@ func (m *Manager) luaHandleDoubtFriendsAddRequest(instance *LuaPluginInstance) f
 // 群禁言（秒）
 func (m *Manager) luaSetGroupBan(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_ban"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
 
 		groupId := L.CheckNumber(1)
 		userId := L.CheckNumber(2)
@@ -2464,8 +2467,12 @@ func (m *Manager) luaRejectGroupInvitation(instance *LuaPluginInstance) func(*lu
 
 // ========== 存储API ==========
 
-func (m *Manager) luaStorageSet(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaStorageSet(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermStorage, "storage.set"); err != nil {
+			return luaAPIBoolError(L, err, "存储数据失败")
+		}
+
 		key, err := validateStringParam(L, 1, "key", true)
 		if err != nil {
 			return luaAPIBoolError(L, err, "存储数据失败")
@@ -2477,7 +2484,7 @@ func (m *Manager) luaStorageSet(selfID string, pluginName string) func(*lua.LSta
 			value = luaValueToGo(L, val)
 		}
 
-		pluginDir := filepath.Join("plugins", selfID, pluginName)
+		pluginDir := filepath.Join("plugins", instance.SelfID, instance.Name)
 		dataFile := filepath.Join(pluginDir, "data.json")
 
 		if err := os.MkdirAll(pluginDir, 0755); err != nil {
@@ -2493,8 +2500,8 @@ func (m *Manager) luaStorageSet(selfID string, pluginName string) func(*lua.LSta
 		if content, err := os.ReadFile(dataFile); err == nil {
 			if err := json.Unmarshal(content, &data); err != nil {
 				m.logger.Warnw("解析存储文件失败，将创建新文件",
-					"self_id", selfID,
-					"plugin", pluginName,
+					"self_id", instance.SelfID,
+					"plugin", instance.Name,
 					"error", err)
 			}
 		}
@@ -2515,15 +2522,19 @@ func (m *Manager) luaStorageSet(selfID string, pluginName string) func(*lua.LSta
 	}
 }
 
-func (m *Manager) luaStorageGet(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaStorageGet(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermStorage, "storage.get"); err != nil {
+			return luaAPIBoolError(L, err, "读取存储数据失败")
+		}
+
 		key := L.CheckString(1)
 		var defaultVal interface{}
 		if L.GetTop() >= 2 {
 			defaultVal = luaValueToGo(L, L.Get(2))
 		}
 
-		pluginDir := filepath.Join("plugins", selfID, pluginName)
+		pluginDir := filepath.Join("plugins", instance.SelfID, instance.Name)
 		dataFile := filepath.Join(pluginDir, "data.json")
 
 		// 获取文件锁，保护并发访问（读锁）
@@ -2551,13 +2562,15 @@ func (m *Manager) luaStorageGet(selfID string, pluginName string) func(*lua.LSta
 	}
 }
 
-func (m *Manager) luaStorageDelete(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaStorageDelete(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermStorage, "storage.delete"); err != nil {
+			return luaAPIBoolError(L, err, "删除存储数据失败")
+		}
+
 		key := L.CheckString(1)
 
-		// 从账号隔离的插件目录下的data.json文件读取
-		// 路径: plugins/{selfID}/{pluginName}/data.json
-		pluginDir := filepath.Join("plugins", selfID, pluginName)
+		pluginDir := filepath.Join("plugins", instance.SelfID, instance.Name)
 		dataFile := filepath.Join(pluginDir, "data.json")
 
 		// 获取文件锁，保护并发访问
@@ -2665,11 +2678,17 @@ func (m *Manager) validatePluginPath(selfID string, pluginName string, filePath 
 }
 
 // 读取文件
-func (m *Manager) luaFileRead(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileRead(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileRead, "file.read"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		filePath := L.CheckString(1)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LNil)
 			L.Push(lua.LString(err.Error()))
@@ -2689,11 +2708,17 @@ func (m *Manager) luaFileRead(selfID string, pluginName string) func(*lua.LState
 }
 
 // 读取二进制文件并返回Base64
-func (m *Manager) luaFileReadBase64(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileReadBase64(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileRead, "file.read_base64"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		filePath := L.CheckString(1)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LNil)
 			L.Push(lua.LString(err.Error()))
@@ -2715,12 +2740,18 @@ func (m *Manager) luaFileReadBase64(selfID string, pluginName string) func(*lua.
 }
 
 // 写入Base64文件
-func (m *Manager) luaFileWriteBase64(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileWriteBase64(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileWrite, "file.write_base64"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		filePath := L.CheckString(1)
 		base64Content := L.CheckString(2)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -2755,12 +2786,18 @@ func (m *Manager) luaFileWriteBase64(selfID string, pluginName string) func(*lua
 }
 
 // 写入文件
-func (m *Manager) luaFileWrite(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileWrite(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileWrite, "file.write"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		filePath := L.CheckString(1)
 		content := L.CheckString(2)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -2787,11 +2824,17 @@ func (m *Manager) luaFileWrite(selfID string, pluginName string) func(*lua.LStat
 }
 
 // 删除文件
-func (m *Manager) luaFileDelete(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileDelete(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileDelete, "file.delete"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		filePath := L.CheckString(1)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -2810,11 +2853,17 @@ func (m *Manager) luaFileDelete(selfID string, pluginName string) func(*lua.LSta
 }
 
 // 列出目录文件
-func (m *Manager) luaFileList(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileList(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileRead, "file.list"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		dirPath := L.OptString(1, ".")
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, dirPath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, dirPath)
 		if err != nil {
 			L.Push(lua.LNil)
 			L.Push(lua.LString(err.Error()))
@@ -2850,11 +2899,16 @@ func (m *Manager) luaFileList(selfID string, pluginName string) func(*lua.LState
 }
 
 // 检查文件是否存在
-func (m *Manager) luaFileExists(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileExists(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileRead, "file.exists"); err != nil {
+			L.Push(lua.LFalse)
+			return 1
+		}
+
 		filePath := L.CheckString(1)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, filePath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, filePath)
 		if err != nil {
 			L.Push(lua.LFalse)
 			return 1
@@ -2867,11 +2921,17 @@ func (m *Manager) luaFileExists(selfID string, pluginName string) func(*lua.LSta
 }
 
 // 创建目录
-func (m *Manager) luaFileMkdir(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaFileMkdir(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermFileWrite, "file.mkdir"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		dirPath := L.CheckString(1)
 
-		validPath, err := m.validatePluginPath(selfID, pluginName, dirPath)
+		validPath, err := m.validatePluginPath(instance.SelfID, instance.Name, dirPath)
 		if err != nil {
 			L.Push(lua.LFalse)
 			L.Push(lua.LString(err.Error()))
@@ -2966,8 +3026,12 @@ func validateHTTPURL(urlStr string) error {
 
 // HTTP 请求
 // 安全增强：添加SSRF防护
-func (m *Manager) luaHttpRequest(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaHttpRequest(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkHTTP, "http.request"); err != nil {
+			return luaAPIError(L, err, "HTTP请求失败")
+		}
+
 		// 验证参数
 		method, err := validateStringParam(L, 1, "method", true)
 		if err != nil {
@@ -2983,6 +3047,13 @@ func (m *Manager) luaHttpRequest(selfID string, pluginName string) func(*lua.LSt
 		// 安全增强：验证URL，防止SSRF攻击
 		if err := validateHTTPURL(urlStr); err != nil {
 			return luaAPIError(L, err, "HTTP请求失败: 不安全的URL")
+		}
+
+		// 沙箱主机白名单/黑名单检查
+		if parsedURL, parseErr := url.Parse(urlStr); parseErr == nil {
+			if !instance.sandbox.CheckHTTPHost(parsedURL.Hostname()) {
+				return luaAPIError(L, fmt.Errorf("主机 %s 不在允许范围内", parsedURL.Hostname()), "HTTP请求失败")
+			}
 		}
 
 		headersTable := L.OptTable(3, nil)
@@ -3043,8 +3114,12 @@ func (m *Manager) luaHttpRequest(selfID string, pluginName string) func(*lua.LSt
 
 // HTTP GET 请求
 // 安全增强：添加SSRF防护
-func (m *Manager) luaHttpGet(pluginName string) func(*lua.LState) int {
+func (m *Manager) luaHttpGet(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkHTTP, "http.get"); err != nil {
+			return luaAPIError(L, err, "HTTP GET请求失败")
+		}
+
 		// 验证参数
 		urlStr, err := validateStringParam(L, 1, "url", true)
 		if err != nil {
@@ -3054,6 +3129,11 @@ func (m *Manager) luaHttpGet(pluginName string) func(*lua.LState) int {
 		// 安全增强：验证URL，防止SSRF攻击
 		if err := validateHTTPURL(urlStr); err != nil {
 			return luaAPIError(L, err, "HTTP GET请求失败: 不安全的URL")
+		}
+		if parsedURL, parseErr := url.Parse(urlStr); parseErr == nil {
+			if !instance.sandbox.CheckHTTPHost(parsedURL.Hostname()) {
+				return luaAPIError(L, fmt.Errorf("主机 %s 不在允许范围内", parsedURL.Hostname()), "HTTP GET请求失败")
+			}
 		}
 
 		headersTable := L.OptTable(2, nil)
@@ -3108,8 +3188,12 @@ func (m *Manager) luaHttpGet(pluginName string) func(*lua.LState) int {
 
 // HTTP POST 请求
 // 安全增强：添加SSRF防护
-func (m *Manager) luaHttpPost(pluginName string) func(*lua.LState) int {
+func (m *Manager) luaHttpPost(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkHTTP, "http.post"); err != nil {
+			return luaAPIError(L, err, "HTTP POST请求失败")
+		}
+
 		// 验证参数
 		urlStr, err := validateStringParam(L, 1, "url", true)
 		if err != nil {
@@ -3119,6 +3203,11 @@ func (m *Manager) luaHttpPost(pluginName string) func(*lua.LState) int {
 		// 安全增强：验证URL，防止SSRF攻击
 		if err := validateHTTPURL(urlStr); err != nil {
 			return luaAPIError(L, err, "HTTP POST请求失败: 不安全的URL")
+		}
+		if parsedURL, parseErr := url.Parse(urlStr); parseErr == nil {
+			if !instance.sandbox.CheckHTTPHost(parsedURL.Hostname()) {
+				return luaAPIError(L, fmt.Errorf("主机 %s 不在允许范围内", parsedURL.Hostname()), "HTTP POST请求失败")
+			}
 		}
 
 		body := L.OptString(2, "")
@@ -3184,8 +3273,13 @@ func (m *Manager) luaHttpPost(pluginName string) func(*lua.LState) int {
 
 // HTTP 下载文件并转为 Base64
 // 安全增强：添加SSRF防护
-func (m *Manager) luaHttpDownloadBase64(pluginName string) func(*lua.LState) int {
+func (m *Manager) luaHttpDownloadBase64(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkHTTP, "http.download_base64"); err != nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+
 		// 验证参数
 		urlStr, err := validateStringParam(L, 1, "url", true)
 		if err != nil {
@@ -3195,9 +3289,16 @@ func (m *Manager) luaHttpDownloadBase64(pluginName string) func(*lua.LState) int
 
 		// 安全增强：验证URL，防止SSRF攻击
 		if err := validateHTTPURL(urlStr); err != nil {
-			m.logger.Warnw("下载文件失败: 不安全的URL", "plugin", pluginName, "error", err)
+			m.logger.Warnw("下载文件失败: 不安全的URL", "plugin", instance.Name, "error", err)
 			L.Push(lua.LNil)
 			return 1
+		}
+		if parsedURL, parseErr := url.Parse(urlStr); parseErr == nil {
+			if !instance.sandbox.CheckHTTPHost(parsedURL.Hostname()) {
+				m.logger.Warnw("下载文件失败: 主机不在允许范围内", "plugin", instance.Name, "host", parsedURL.Hostname())
+				L.Push(lua.LNil)
+				return 1
+			}
 		}
 
 		// 发送 GET 请求下载文件
@@ -3206,7 +3307,7 @@ func (m *Manager) luaHttpDownloadBase64(pluginName string) func(*lua.LState) int
 		}
 		resp, err := client.Get(urlStr)
 		if err != nil {
-			m.logger.Warnw("下载文件失败", "plugin", pluginName, "url", urlStr, "error", err)
+			m.logger.Warnw("下载文件失败", "plugin", instance.Name, "url", urlStr, "error", err)
 			L.Push(lua.LNil)
 			return 1
 		}
@@ -3215,7 +3316,7 @@ func (m *Manager) luaHttpDownloadBase64(pluginName string) func(*lua.LState) int
 		// 读取响应体（限制大小为 10MB）
 		data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		if err != nil {
-			m.logger.Warnw("读取下载内容失败", "plugin", pluginName, "url", urlStr, "error", err)
+			m.logger.Warnw("读取下载内容失败", "plugin", instance.Name, "url", urlStr, "error", err)
 			L.Push(lua.LNil)
 			return 1
 		}
@@ -3494,8 +3595,14 @@ func (m *Manager) luaPluginsDeleteJson(selfID string, pluginName string) func(*l
 }
 
 // UDP 发送
-func (m *Manager) luaUdpSend(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaUdpSend(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkUDP, "network.udp_send"); err != nil {
+			L.Push(lua.LFalse)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		address := L.CheckString(1)
 		message := L.CheckString(2)
 
@@ -3567,8 +3674,14 @@ func (m *Manager) luaUdpSend(selfID string, pluginName string) func(*lua.LState)
 }
 
 // TCP 连接和发送
-func (m *Manager) luaTcpConnect(selfID string, pluginName string) func(*lua.LState) int {
+func (m *Manager) luaTcpConnect(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(PermNetworkTCP, "network.tcp_connect"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
 		address := L.CheckString(1)
 		message := L.CheckString(2)
 		timeout := L.OptNumber(3, 10) // 默认10秒超时
@@ -4249,6 +4362,10 @@ func (m *Manager) luaGetGroupFilesByFolder(instance *LuaPluginInstance) func(*lu
 // 群组全员禁言
 func (m *Manager) luaSetGroupWholeBan(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_whole_ban"); err != nil {
+			return luaAPIBoolError(L, err, "群组全员禁言失败")
+		}
+
 		// 检查服务
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIBoolError(L, err, "群组全员禁言失败")
@@ -4276,6 +4393,10 @@ func (m *Manager) luaSetGroupWholeBan(instance *LuaPluginInstance) func(*lua.LSt
 // 群组设置管理员
 func (m *Manager) luaSetGroupAdmin(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_admin"); err != nil {
+			return luaAPIBoolError(L, err, "群组设置管理员失败")
+		}
+
 		// 检查服务
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIBoolError(L, err, "群组设置管理员失败")
@@ -4345,6 +4466,10 @@ func (m *Manager) luaSetGroupCard(instance *LuaPluginInstance) func(*lua.LState)
 // 群组踢人
 func (m *Manager) luaSetGroupKick(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
+		if err := instance.sandbox.RequirePermission(BotAdminAPI, "group.set_kick"); err != nil {
+			return luaAPIBoolError(L, err, "群组踢人失败")
+		}
+
 		// 检查服务
 		if err := checkLLService(L, instance); err != nil {
 			return luaAPIBoolError(L, err, "群组踢人失败")
@@ -8203,4 +8328,854 @@ func (m *Manager) luaTableSet(L *lua.LState) int {
 
 	L.Push(lua.LTrue)
 	return 1
+}
+
+// ========== V7.12.3+ 新增 OneBot API 绑定 ==========
+
+// luaSetInputStatus 设置输入状态 (V7.12.3+)
+func (m *Manager) luaSetInputStatus(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置输入状态失败")
+		}
+
+		userId, err := validateNumberParam(L, 1, "user_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		groupId, _ := validateNumberParam(L, 2, "group_id", false)
+
+		params := map[string]interface{}{"user_id": int64(userId)}
+		if groupId != 0 {
+			params["group_id"] = int64(groupId)
+		}
+
+		result, err := callBotAPI(instance, "set_input_status", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置输入状态失败 [user_id=%d]", int64(userId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetGroupAlbumMediaList 获取群相册媒体列表 (V7.12.3+)
+func (m *Manager) luaGetGroupAlbumMediaList(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取群相册媒体列表失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		albumId, err := validateStringParam(L, 2, "album_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"album_id": albumId,
+		}
+
+		result, err := callBotAPI(instance, "get_group_album_media_list", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取群相册媒体列表失败 [group_id=%d, album_id=%s]", int64(groupId), albumId))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSendGroupNotice 发送群公告 (V7.12.5+ 增强版，支持弹窗、引导修改群昵称)
+func (m *Manager) luaSendGroupNotice(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "发送群公告失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		content, err := validateStringParam(L, 2, "content", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"content":  content,
+		}
+
+		// 可选参数：图片
+		if L.GetTop() >= 3 {
+			image, _ := validateStringParam(L, 3, "image", false)
+			if image != "" {
+				params["image"] = image
+			}
+		}
+
+		// 可选参数：是否弹窗展示
+		if L.GetTop() >= 4 {
+			params["popup"] = L.ToBool(4)
+		}
+
+		// 可选参数：是否引导修改群昵称
+		if L.GetTop() >= 5 {
+			params["tip"] = L.ToBool(5)
+		}
+
+		// 可选参数：是否发送给新成员
+		if L.GetTop() >= 6 {
+			params["new_member"] = L.ToBool(6)
+		}
+
+		result, err := callBotAPI(instance, "_send_group_notice", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("发送群公告失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetGroupNotice 获取群公告 (V7.12.5+ 增强版)
+func (m *Manager) luaGetGroupNotice(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取群公告失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"group_id": int64(groupId)}
+		result, err := callBotAPI(instance, "_get_group_notice", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取群公告失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaDeleteGroupNotice 删除群公告
+func (m *Manager) luaDeleteGroupNotice(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "删除群公告失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		noticeId, err := validateStringParam(L, 2, "notice_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id":  int64(groupId),
+			"notice_id": noticeId,
+		}
+
+		result, err := callBotAPI(instance, "_del_group_notice", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("删除群公告失败 [group_id=%d, notice_id=%s]", int64(groupId), noticeId))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSetGroupAvatar 设置群头像 (V7.12.3+)
+func (m *Manager) luaSetGroupAvatar(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置群头像失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		file, err := validateStringParam(L, 2, "file", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"file":     file,
+		}
+
+		result, err := callBotAPI(instance, "set_group_avatar", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置群头像失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetGroupShutList 获取被禁言群员列表
+func (m *Manager) luaGetGroupShutList(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取被禁言群员列表失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"group_id": int64(groupId)}
+		result, err := callBotAPI(instance, "get_group_shut_list", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取被禁言群员列表失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetGroupAtAllRemain 获取群 @全体成员 剩余次数
+func (m *Manager) luaGetGroupAtAllRemain(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取@全体成员剩余次数失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"group_id": int64(groupId)}
+		result, err := callBotAPI(instance, "get_group_at_all_remain", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取@全体成员剩余次数失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSetGroupRemark 设置群备注
+func (m *Manager) luaSetGroupRemark(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置群备注失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		remark, err := validateStringParam(L, 2, "remark", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"remark":   remark,
+		}
+
+		result, err := callBotAPI(instance, "set_group_remark", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置群备注失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSetGroupMsgRecv 设置群消息接收方式
+func (m *Manager) luaSetGroupMsgRecv(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置群消息接收方式失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		mode, err := validateStringParam(L, 2, "mode", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"mode":     mode,
+		}
+
+		result, err := callBotAPI(instance, "set_group_msg_recv", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置群消息接收方式失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGroupSignIn 群打卡
+func (m *Manager) luaGroupSignIn(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "群打卡失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"group_id": int64(groupId)}
+		result, err := callBotAPI(instance, "group_sign_in", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("群打卡失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetFilteredGroupRequests 获取已过滤的加群通知
+func (m *Manager) luaGetFilteredGroupRequests(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取已过滤加群通知失败")
+		}
+
+		groupId, _ := validateNumberParam(L, 1, "group_id", false)
+
+		params := map[string]interface{}{}
+		if groupId != 0 {
+			params["group_id"] = int64(groupId)
+		}
+
+		result, err := callBotAPI(instance, "get_filtered_group_requests", params)
+		if err != nil {
+			return luaAPIError(L, err, "获取已过滤加群通知失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaCreateGroupAlbum 创建群相册
+func (m *Manager) luaCreateGroupAlbum(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "创建群相册失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		name, err := validateStringParam(L, 2, "name", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"name":     name,
+		}
+
+		result, err := callBotAPI(instance, "create_group_album", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("创建群相册失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaDeleteGroupAlbum 删除群相册
+func (m *Manager) luaDeleteGroupAlbum(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "删除群相册失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		albumId, err := validateStringParam(L, 2, "album_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"album_id": albumId,
+		}
+
+		result, err := callBotAPI(instance, "delete_group_album", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("删除群相册失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetGroupAlbumList 获取群相册列表
+func (m *Manager) luaGetGroupAlbumList(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取群相册列表失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"group_id": int64(groupId)}
+		result, err := callBotAPI(instance, "get_group_album_list", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取群相册列表失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaMoveFriend 移动好友分组
+func (m *Manager) luaMoveFriend(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "移动好友分组失败")
+		}
+
+		userId, err := validateNumberParam(L, 1, "user_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		groupId, err := validateNumberParam(L, 2, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"user_id":  int64(userId),
+			"group_id": int64(groupId),
+		}
+
+		result, err := callBotAPI(instance, "move_friend", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("移动好友分组失败 [user_id=%d]", int64(userId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetWhoLikedMe 获取谁赞过我列表
+func (m *Manager) luaGetWhoLikedMe(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取谁赞过我列表失败")
+		}
+
+		result, err := callBotAPI(instance, "get_who_liked_me", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取谁赞过我列表失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetWhoILiked 获取我赞过谁列表
+func (m *Manager) luaGetWhoILiked(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取我赞过谁列表失败")
+		}
+
+		result, err := callBotAPI(instance, "get_who_i_liked", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取我赞过谁列表失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetFilteredFriendRequests 获取被过滤好友请求
+func (m *Manager) luaGetFilteredFriendRequests(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取被过滤好友请求失败")
+		}
+
+		result, err := callBotAPI(instance, "get_filtered_friend_requests", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取被过滤好友请求失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaHandleFilteredFriendRequest 处理被过滤好友请求
+func (m *Manager) luaHandleFilteredFriendRequest(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "处理被过滤好友请求失败")
+		}
+
+		userId, err := validateNumberParam(L, 1, "user_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		approve := true
+		if L.GetTop() >= 2 {
+			approve = L.ToBool(2)
+		}
+
+		remark := ""
+		if L.GetTop() >= 3 {
+			remark, _ = validateStringParam(L, 3, "remark", false)
+		}
+
+		params := map[string]interface{}{
+			"user_id": int64(userId),
+			"approve": approve,
+		}
+		if remark != "" {
+			params["remark"] = remark
+		}
+
+		result, err := callBotAPI(instance, "handle_filtered_friend_request", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("处理被过滤好友请求失败 [user_id=%d]", int64(userId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetQQAvatar 获取QQ或QQ群头像
+func (m *Manager) luaGetQQAvatar(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取头像失败")
+		}
+
+		id, err := validateNumberParam(L, 1, "id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		isGroup := false
+		if L.GetTop() >= 2 {
+			isGroup = L.ToBool(2)
+		}
+
+		params := map[string]interface{}{
+			"id":       int64(id),
+			"is_group": isGroup,
+		}
+
+		result, err := callBotAPI(instance, "get_qq_avatar", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取头像失败 [id=%d]", int64(id)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSetLoginInfo 设置登录号资料
+func (m *Manager) luaSetLoginInfo(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置登录号资料失败")
+		}
+
+		params := map[string]interface{}{}
+
+		if L.GetTop() >= 1 {
+			nickname, _ := validateStringParam(L, 1, "nickname", false)
+			if nickname != "" {
+				params["nickname"] = nickname
+			}
+		}
+		if L.GetTop() >= 2 {
+			sign, _ := validateStringParam(L, 2, "sign", false)
+			if sign != "" {
+				params["sign"] = sign
+			}
+		}
+		if L.GetTop() >= 3 {
+			sex, _ := validateStringParam(L, 3, "sex", false)
+			if sex != "" {
+				params["sex"] = sex
+			}
+		}
+		if L.GetTop() >= 4 {
+			age, _ := validateNumberParam(L, 4, "age", false)
+			if age != 0 {
+				params["age"] = int64(age)
+			}
+		}
+
+		result, err := callBotAPI(instance, "set_login_info", params)
+		if err != nil {
+			return luaAPIError(L, err, "设置登录号资料失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSetOnlineStatus 设置在线状态
+func (m *Manager) luaSetOnlineStatus(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "设置在线状态失败")
+		}
+
+		status, err := validateNumberParam(L, 1, "status", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"status": int64(status)}
+
+		if L.GetTop() >= 2 {
+			extStatus, _ := validateStringParam(L, 2, "ext_status", false)
+			if extStatus != "" {
+				params["ext_status"] = extStatus
+			}
+		}
+
+		result, err := callBotAPI(instance, "set_online_status", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("设置在线状态失败 [status=%d]", int64(status)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaSendProtobuf 发送Protobuf数据包
+func (m *Manager) luaSendProtobuf(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "发送Protobuf数据包失败")
+		}
+
+		cmd, err := validateStringParam(L, 1, "cmd", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		data, err := validateStringParam(L, 2, "data", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"cmd":  cmd,
+			"data": data,
+		}
+
+		result, err := callBotAPI(instance, "send_protobuf", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("发送Protobuf数据包失败 [cmd=%s]", cmd))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetRecommendedFaces 获取推荐表情
+func (m *Manager) luaGetRecommendedFaces(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取推荐表情失败")
+		}
+
+		result, err := callBotAPI(instance, "get_recommended_faces", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取推荐表情失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetFavoriteFaces 获取收藏表情
+func (m *Manager) luaGetFavoriteFaces(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取收藏表情失败")
+		}
+
+		result, err := callBotAPI(instance, "get_favorite_faces", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取收藏表情失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetRKey 获取图片rkey
+func (m *Manager) luaGetRKey(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取图片rkey失败")
+		}
+
+		result, err := callBotAPI(instance, "get_rkey", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取图片rkey失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaDownloadFileToCache 下载文件到缓存目录
+func (m *Manager) luaDownloadFileToCache(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "下载文件到缓存目录失败")
+		}
+
+		url, err := validateStringParam(L, 1, "url", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"url": url}
+
+		if L.GetTop() >= 2 {
+			base64Hash, _ := validateStringParam(L, 2, "base64_hash", false)
+			if base64Hash != "" {
+				params["base64_hash"] = base64Hash
+			}
+		}
+		if L.GetTop() >= 3 {
+			name, _ := validateStringParam(L, 3, "name", false)
+			if name != "" {
+				params["name"] = name
+			}
+		}
+
+		result, err := callBotAPI(instance, "download_file", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("下载文件到缓存目录失败 [url=%s]", url))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetOfficialBotQQRange 获取官方机器人QQ号范围
+func (m *Manager) luaGetOfficialBotQQRange(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取官方机器人QQ号范围失败")
+		}
+
+		result, err := callBotAPI(instance, "get_official_bot_qq_range", map[string]interface{}{})
+		if err != nil {
+			return luaAPIError(L, err, "获取官方机器人QQ号范围失败")
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetStrangerInfoEnhanced 获取陌生人信息增强版 (V7.12.9+ 支持VIP信息)
+func (m *Manager) luaGetStrangerInfoEnhanced(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取陌生人信息失败")
+		}
+
+		userId, err := validateNumberParam(L, 1, "user_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		noCache := false
+		if L.GetTop() >= 2 {
+			noCache = L.ToBool(2)
+		}
+
+		params := map[string]interface{}{
+			"user_id":  int64(userId),
+			"no_cache": noCache,
+		}
+
+		result, err := callBotAPI(instance, "get_stranger_info", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取陌生人信息失败 [user_id=%d]", int64(userId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaUploadGroupAlbumEnhanced 上传群相册增强版 (V7.12.5+ 支持视频)
+func (m *Manager) luaUploadGroupAlbumEnhanced(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "上传群相册失败")
+		}
+
+		groupId, err := validateNumberParam(L, 1, "group_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		albumId, err := validateStringParam(L, 2, "album_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		file, err := validateStringParam(L, 3, "file", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{
+			"group_id": int64(groupId),
+			"album_id": albumId,
+			"file":     file,
+		}
+
+		// 可选参数：是否为视频
+		if L.GetTop() >= 4 {
+			params["is_video"] = L.ToBool(4)
+		}
+
+		result, err := callBotAPI(instance, "upload_group_album", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("上传群相册失败 [group_id=%d]", int64(groupId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
+}
+
+// luaGetMsgEnhanced 获取消息详情增强版 (V7.12.3+ 返回status字段)
+func (m *Manager) luaGetMsgEnhanced(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if err := checkLLService(L, instance); err != nil {
+			return luaAPIError(L, err, "获取消息详情失败")
+		}
+
+		messageId, err := validateNumberParam(L, 1, "message_id", true)
+		if err != nil {
+			return luaAPIError(L, err, "参数验证失败")
+		}
+
+		params := map[string]interface{}{"message_id": int64(messageId)}
+		result, err := callBotAPI(instance, "get_msg", params)
+		if err != nil {
+			return luaAPIError(L, err, fmt.Sprintf("获取消息详情失败 [message_id=%d]", int64(messageId)))
+		}
+		return luaAPISuccessWithTable(L, m, result)
+	}
 }

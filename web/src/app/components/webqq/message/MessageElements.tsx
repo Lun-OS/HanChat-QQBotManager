@@ -47,8 +47,7 @@ function getImageUrl(element: PicElement): string {
 function getProxyImageUrl(url: string): string {
   if (!url) return ''
   if (url.includes('gchat.qpic.cn') || url.includes('http')) return url
-  const token = localStorage.getItem('token')
-  return `/api/proxy/image?url=${encodeURIComponent(url)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+  return `/api/proxy/image?url=${encodeURIComponent(url)}`
 }
 
 function copyText(text: string) {

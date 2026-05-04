@@ -4,3 +4,9 @@ web/dist/
 
 build/
 .env
+
+test/
+
+config.json
+
+plugins/

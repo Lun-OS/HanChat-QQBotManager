@@ -36,15 +36,17 @@ type WSDebugService struct {
 }
 
 // NewWSDebugService 创建WebSocket调试服务
+// 如果环境变量 WEBSOCKET_DEBUG_TOKEN 未设置，则返回 nil
 func NewWSDebugService(baseLogger *zap.Logger, reverseWS *ReverseWebSocketService) *WSDebugService {
 	logger := utils.NewModuleLogger(baseLogger, "service.ws_debug")
-	
+
 	// 从环境变量读取调试Token
 	debugToken := os.Getenv("WEBSOCKET_DEBUG_TOKEN")
 	if debugToken == "" {
-		debugToken = "debug_default_token"
+		logger.Info("WEBSOCKET_DEBUG_TOKEN 未设置，WebSocket调试服务未启用")
+		return nil
 	}
-	
+
 	service := &WSDebugService{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -58,16 +60,16 @@ func NewWSDebugService(baseLogger *zap.Logger, reverseWS *ReverseWebSocketServic
 		debugToken: debugToken,
 		clients:    make(map[string]*WSDebugClient),
 	}
-	
+
 	// 注册消息拦截器 - 直接透传原始消息
 	service.registerInterceptors()
-	
+
 	return service
 }
 
 // registerInterceptors 注册消息拦截器到ReverseWebSocketService
 func (s *WSDebugService) registerInterceptors() {
-	// 使用原始数据事件处理器 - 直接透传LLBot发来的原始数据，不做任何解析和修改
+	// 使用原始数据事件处理器 - 直接透传OneBot发来的原始数据，不做任何解析和修改
 	s.reverseWS.AddRawEventHandler(func(selfID string, rawData []byte) {
 		s.ForwardRawEvent(selfID, rawData)
 	})
@@ -181,12 +183,12 @@ func (c *WSDebugClient) readLoop(service *WSDebugService) {
 			continue
 		}
 		
-		// 直接透传原始数据到LLBot，不做任何解析和修改
+		// 直接透传原始数据到OneBot，不做任何解析和修改
 		service.forwardToBot(c, data)
 	}
 }
 
-// forwardToBot 直接转发原始数据到LLBot
+// forwardToBot 直接转发原始数据到OneBot
 func (s *WSDebugService) forwardToBot(client *WSDebugClient, rawData []byte) {
 	// 直接发送原始消息到机器人
 	err := s.reverseWS.SendRawMessageToAccount(client.selfID, rawData)

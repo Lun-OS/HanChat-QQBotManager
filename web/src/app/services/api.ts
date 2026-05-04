@@ -327,9 +327,9 @@ export const systemApi = {
     return response.data;
   },
 
-  // 重启
-  setRestart: async (selfId: string) => {
-    const response = await apiClient.post(`/api/bot/${selfId}/set_restart`, {});
+  // 断开连接
+  disconnect: async (selfId: string) => {
+    const response = await apiClient.post(`/api/disconnect/${selfId}`, {});
     return response.data;
   },
 

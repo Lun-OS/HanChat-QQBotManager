@@ -638,17 +638,11 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 	r.GET("/info", func(c *gin.Context) {
 		logger.Infow("获取系统信息", "requestId", c.GetString("requestId"))
 
-		// 从环境变量获取版本号
-		version := os.Getenv("LLBOT_VERSION")
-		if version == "" {
-			version = "V5.2"
-		}
-
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{
-				"version": version,
-				"name":    "LLBot",
+				"version": "V11",
+				"name":    "OneBot",
 			},
 		})
 	})

@@ -19,6 +19,7 @@ import {
   TrendingUp,
   Power,
   RotateCcw,
+  Unplug,
   X,
   Check,
   Search,
@@ -45,7 +46,7 @@ interface BotStats {
   uptime: string;
   msg_received: number;
   msg_sent: number;
-  llbot_version: string;
+  onebot_version: string;
   ws_name: string;
 }
 
@@ -68,7 +69,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
     uptime: '-',
     msg_received: 0,
     msg_sent: 0,
-    llbot_version: '-',
+    onebot_version: '-',
     ws_name: '-',
   });
   const [loading, setLoading] = useState(true);
@@ -120,7 +121,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
         uptime: formatUptime((stat as any).startup_time),
         msg_received: (stat as any).message_received || 0,
         msg_sent: (stat as any).message_sent || 0,
-        llbot_version: (versionData as any).app_version || (versionData as any).version || '-',
+        onebot_version: (versionData as any).app_version || (versionData as any).version || '-',
         ws_name: wsName,
       });
     } catch (error) {
@@ -169,7 +170,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
           { label: '运行时间', value: stats.uptime, color: 'text-blue-600', icon: Activity },
           { label: '收到消息', value: stats.msg_received, color: 'text-green-600', icon: TrendingUp },
           { label: '发送消息', value: stats.msg_sent, color: 'text-purple-600', icon: Send },
-          { label: 'LLBot版本', value: stats.llbot_version, color: 'text-cyan-600', icon: Settings },
+          { label: 'OneBot版本', value: stats.onebot_version, color: 'text-cyan-600', icon: Settings },
           { label: 'WS名称', value: stats.ws_name, color: 'text-pink-600', icon: Power }
         ].map((stat, idx) => (
           <motion.div 
@@ -1403,7 +1404,7 @@ export function BotDetail() {
   const navigate = useNavigate();
   const { bots, selectBot } = useBotStore();
   const [activeTab, setActiveTab] = useState('overview');
-  const [restarting, setRestarting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const bot = bots.find(b => b.self_id === selfId);
 
@@ -1411,16 +1412,16 @@ export function BotDetail() {
     if (selfId) selectBot(selfId);
   }, [selfId, selectBot]);
 
-  const handleRestart = async () => {
+  const handleDisconnect = async () => {
     if (!selfId) return;
-    setRestarting(true);
+    setDisconnecting(true);
     try {
-      await botApi.callApi(selfId, 'set_restart');
-      toast.success('重启指令已发送');
+      await systemApi.disconnect(selfId);
+      toast.success('已断开连接');
     } catch (error) {
-      toast.error('重启失败');
+      toast.error('断开连接失败');
     } finally {
-      setRestarting(false);
+      setDisconnecting(false);
     }
   };
 
@@ -1479,15 +1480,15 @@ export function BotDetail() {
         </div>
         
         <div className="flex space-x-3">
-          <motion.button 
-            onClick={handleRestart}
-            disabled={restarting}
-            className="px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-[#2A2E38] transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+          <motion.button
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="px-4 py-2 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            {restarting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-            重启服务
+            {disconnecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Unplug className="w-4 h-4" />}
+            断开连接
           </motion.button>
         </div>
       </motion.div>

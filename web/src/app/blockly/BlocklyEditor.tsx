@@ -35,7 +35,10 @@ import {
   Upload,
   Fullscreen,
   Copy,
-  Clipboard
+  Clipboard,
+  Search,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { defineCustomBlocks, getToolboxCategories } from './blocks';
 import { initLuaGenerator, generateLuaCode, getLuaGenerator } from './generator';
@@ -58,6 +61,7 @@ import Editor from '@monaco-editor/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { multilineEditorBridge } from './multilineEditorBridge';
+import { searchBlocks, BlockSearchItem } from './blockSearch';
 
 initChineseLocale();
 defineCustomBlocks();
@@ -109,6 +113,15 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
   const [multilineEditorValue, setMultilineEditorValue] = useState('');
   const [multilineEditorLanguage, setMultilineEditorLanguage] = useState('lua');
   const multilineEditorFieldRef = useRef<Blockly.Field | null>(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<BlockSearchItem[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [selectedSearchIndex, setSelectedSearchIndex] = useState(-1);
+  const [searchCollapsed, setSearchCollapsed] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+  const fullscreenRef = useRef<HTMLDivElement>(null);
 
   // 剪贴板大小限制（防止内存溢出）
   const CLIPBOARD_MAX_SIZE = 1024 * 1024; // 1MB
@@ -1576,6 +1589,28 @@ end)
   }, [workspaceRef.current]);
 
   useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (workspaceRef.current) {
+        setTimeout(() => {
+          Blockly.svgResize(workspaceRef.current!);
+        }, 100);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!workspaceRef.current) return;
     const ws = workspaceRef.current as Blockly.WorkspaceSvg;
     if (previewMode) {
@@ -2077,28 +2112,145 @@ end)
     performPaste();
   }, [performPaste]);
 
+  const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    if (query.trim()) {
+      const results = searchBlocks(query);
+      setSearchResults(results);
+      setShowSearchDropdown(true);
+      setSelectedSearchIndex(-1);
+    } else {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      setSelectedSearchIndex(-1);
+    }
+  }, []);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSearchDropdown || searchResults.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSearchIndex((prev) =>
+        prev < searchResults.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSearchIndex((prev) =>
+        prev > 0 ? prev - 1 : searchResults.length - 1
+      );
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (selectedSearchIndex >= 0 && selectedSearchIndex < searchResults.length) {
+        handleCreateBlockFromSearch(searchResults[selectedSearchIndex]);
+      } else if (searchResults.length > 0) {
+        handleCreateBlockFromSearch(searchResults[0]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowSearchDropdown(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      searchInputRef.current?.blur();
+    }
+  }, [showSearchDropdown, searchResults, selectedSearchIndex]);
+
+  const handleCreateBlockFromSearch = useCallback((item: BlockSearchItem) => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    try {
+      const block = workspace.newBlock(item.type);
+      block.initSvg();
+      block.render();
+
+      const metrics = workspace.getMetrics();
+      const centerX = metrics.viewLeft + metrics.viewWidth / 2;
+      const centerY = metrics.viewTop + metrics.viewHeight / 2;
+      block.moveBy(centerX - block.getRelativeToSurfaceXY().x, centerY - block.getRelativeToSurfaceXY().y);
+
+      setShowSearchDropdown(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      setHasUnsavedChanges(true);
+      toast.success(`已添加积木: ${item.displayName}`);
+    } catch (error) {
+      console.error('创建积木失败:', error);
+      toast.error('创建积木失败');
+    }
+  }, []);
+
+  const handleSearchResultClick = useCallback((item: BlockSearchItem) => {
+    handleCreateBlockFromSearch(item);
+  }, [handleCreateBlockFromSearch]);
+
+  const toggleSearch = useCallback(() => {
+    if (showSearchDropdown || searchQuery) {
+      setShowSearchDropdown(false);
+      setSearchQuery('');
+      setSearchResults([]);
+    } else {
+      searchInputRef.current?.focus();
+    }
+  }, [showSearchDropdown, searchQuery]);
+
+  const toggleSearchCollapse = useCallback(() => {
+    setSearchCollapsed((prev) => {
+      const newState = !prev;
+      if (!newState) {
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }
+      return newState;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchDropdownRef.current &&
+        !searchDropdownRef.current.contains(e.target as Node) &&
+        searchInputRef.current &&
+        !searchInputRef.current.contains(e.target as Node)
+      ) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   // 全屏切换功能
   const toggleFullscreen = useCallback(() => {
-    const doc = document as any;
-    const elem = document.documentElement as any;
+    const container = fullscreenRef.current;
+    if (!container) return;
 
+    const doc = document as any;
     const isFullscreen = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
 
     if (!isFullscreen) {
-      // 进入全屏
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch((err: Error) => {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch((err: Error) => {
           toast.error('进入全屏失败: ' + err.message);
         });
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen();
-      } else if (elem.mozRequestFullScreen) {
-        elem.mozRequestFullScreen();
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen();
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if ((container as any).mozRequestFullScreen) {
+        (container as any).mozRequestFullScreen();
+      } else if ((container as any).msRequestFullscreen) {
+        (container as any).msRequestFullscreen();
       }
     } else {
-      // 退出全屏
       if (doc.exitFullscreen) {
         doc.exitFullscreen();
       } else if (doc.webkitExitFullscreen) {
@@ -2505,7 +2657,7 @@ end)
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#1D2129]">
+    <div ref={fullscreenRef} className="flex flex-col h-full w-full bg-[#1D2129] blocklyFullscreenContainer">
       <motion.div
         className="relative flex-shrink-0 flex items-center justify-between bg-[#2A2E38] p-4 border-b border-gray-700 z-20"
         initial={{ opacity: 0, y: -20 }}
@@ -2689,6 +2841,14 @@ end)
                 </button>
               </div>
               <div className="w-px h-4 bg-gray-600 mx-1" />
+              <button
+                onClick={toggleSearch}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+                title="搜索积木 (Ctrl+K)"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              <div className="w-px h-4 bg-gray-600 mx-1" />
               <div className="flex items-center gap-0.5">
                 <button
                   onClick={handleZoomOut}
@@ -2805,6 +2965,91 @@ end)
               className={`w-full h-full ${previewMode ? 'preview-mode' : ''}`}
               style={{ overflow: 'visible', touchAction: 'none' }}
             />
+
+            {currentProject && (
+              <div className="absolute top-3 right-3 z-40 flex flex-col items-end">
+                {searchCollapsed ? (
+                  <button
+                    onClick={toggleSearchCollapse}
+                    className="flex items-center gap-2 px-3 py-2 bg-[#2A2E38] border border-gray-600 rounded-lg shadow-lg text-gray-400 hover:text-white hover:bg-[#165DFF] transition-colors"
+                    title="展开搜索积木"
+                  >
+                    <Search className="w-4 h-4" />
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <div className="relative" style={{ width: '320px' }}>
+                    <div className="flex items-center bg-[#2A2E38] border border-gray-600 rounded-lg shadow-lg overflow-hidden">
+                      <Search className="w-4 h-4 text-gray-400 ml-3 flex-shrink-0" />
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        value={searchQuery}
+                        onChange={handleSearchInputChange}
+                        onKeyDown={handleSearchKeyDown}
+                        onFocus={() => {
+                          if (searchQuery.trim()) {
+                            setShowSearchDropdown(true);
+                          }
+                        }}
+                        placeholder="搜索积木... (Ctrl+K)"
+                        className="flex-1 bg-transparent text-white text-sm px-3 py-2 outline-none placeholder-gray-500"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => {
+                            setSearchQuery('');
+                            setSearchResults([]);
+                            setShowSearchDropdown(false);
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={toggleSearchCollapse}
+                        className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 mr-1 rounded"
+                        title="收起搜索框"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {showSearchDropdown && searchResults.length > 0 && (
+                      <div
+                        ref={searchDropdownRef}
+                        className="absolute top-full mt-1 left-0 right-0 bg-[#2A2E38] border border-gray-600 rounded-lg shadow-xl max-h-64 overflow-y-auto z-50"
+                      >
+                        {searchResults.map((item, index) => (
+                          <button
+                            key={item.type}
+                            onClick={() => handleSearchResultClick(item)}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-[#165DFF] transition-colors flex items-center gap-2 ${
+                              index === selectedSearchIndex ? 'bg-[#165DFF] text-white' : 'text-gray-300'
+                            }`}
+                          >
+                            <span
+                              className="w-3 h-3 rounded-sm flex-shrink-0"
+                              style={{ backgroundColor: `hsl(${item.colour}, 60%, 55%)` }}
+                            />
+                            <span className="truncate">{item.displayName}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {showSearchDropdown && searchQuery.trim() && searchResults.length === 0 && (
+                      <div className="absolute top-full mt-1 left-0 right-0 bg-[#2A2E38] border border-gray-600 rounded-lg shadow-xl z-50">
+                        <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                          未找到匹配的积木
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             
             {!currentProject && (
               <div className="absolute inset-0 bg-[#1D2129] flex flex-col items-center justify-center text-center p-8 z-50">

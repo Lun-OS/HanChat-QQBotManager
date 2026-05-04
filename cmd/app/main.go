@@ -246,9 +246,13 @@ func main() {
 	// ========== WebSocket调试服务 ==========
 	// 创建WebSocket调试服务
 	wsDebugService := services.NewWSDebugService(baseLogger, reverseWS)
-	// 注册调试路由 /debug/{self_id}
-	r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
-	appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
+	if wsDebugService != nil {
+		// 注册调试路由 /debug/{self_id}
+		r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
+		appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
+	} else {
+		appLogger.Info("WebSocket调试服务未启用（WEBSOCKET_DEBUG_TOKEN 未设置）")
+	}
 
 	// 自动启动预配置的插件
 	pm.AutoStartPlugins()

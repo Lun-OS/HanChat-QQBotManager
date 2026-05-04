@@ -4,8 +4,8 @@ import { Save, Github, FileText, HelpCircle, Shield, Clock, Trash2, Globe, Info,
 import { toast } from 'sonner';
 import { settingsApi, systemApi } from '../services/api';
 
-// 前端版本号（从环境变量读取，默认为v5）
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V5.2';
+// HanChat版本号
+const FRONTEND_VERSION = 'V26.5.4';
 
 export function Settings() {
   const [websocketAuthorization, setWebsocketAuthorization] = useState('');
@@ -166,7 +166,7 @@ export function Settings() {
             <Shield className="w-5 h-5 text-[#165DFF] mr-2" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">连接设置</h2>
           </div>
-          <p className="text-sm text-gray-500 mt-1">设置 LLBot WebSocket 连接的 Token（可留空）</p>
+          <p className="text-sm text-gray-500 mt-1">设置 OneBot WebSocket 连接的 Token（可留空）</p>
         </div>
         <div className="p-6 space-y-6">
           <div className="space-y-2">
@@ -266,24 +266,24 @@ export function Settings() {
               <span className="text-lg font-bold">H</span>
             </div>
             <div>
-              <h3 className="font-bold text-gray-900 dark:text-white">HanChat-QQBotManager</h3>
-              <p className="text-sm text-gray-500">前端 {FRONTEND_VERSION} / 后端 {loading ? '加载中...' : backendVersion}</p>
+              <h3 className="font-bold text-gray-900 dark:text-white">HanChat</h3>
+              <p className="text-sm text-gray-500">HanChat {FRONTEND_VERSION} / OneBot {loading ? '加载中...' : backendVersion}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div className="bg-gray-50 dark:bg-[#2A2E38] p-3 rounded-lg">
-              <p className="text-xs text-gray-500 mb-1">前端版本</p>
+              <p className="text-xs text-gray-500 mb-1">HanChat版本</p>
               <p className="text-lg font-semibold text-gray-900 dark:text-white">{FRONTEND_VERSION}</p>
             </div>
             <div className="bg-gray-50 dark:bg-[#2A2E38] p-3 rounded-lg">
-              <p className="text-xs text-gray-500 mb-1">后端版本</p>
+              <p className="text-xs text-gray-500 mb-1">OneBot版本</p>
               <p className="text-lg font-semibold text-gray-900 dark:text-white">{loading ? '-' : backendVersion}</p>
             </div>
           </div>
 
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            OVO 偷懒的第N天
+            一个人好累啊TvT
           </p>
           <div className="flex flex-wrap gap-3">
             <motion.a
