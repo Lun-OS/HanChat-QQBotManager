@@ -757,7 +757,7 @@ func (c *Console) getBotStatus() error {
 func (c *Console) getSystemInfo() error {
 	version := os.Getenv("LLBOT_VERSION")
 	if version == "" {
-		version = "V5.2"
+		version = "V26.5.16"
 	}
 
 	fmt.Println("\n系统信息:")

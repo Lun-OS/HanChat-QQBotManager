@@ -720,7 +720,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 
 		version := os.Getenv("LLBOT_VERSION")
 		if version == "" {
-			version = "V5.2"
+			version = "V26.5.16"
 		}
 
 		c.JSON(http.StatusOK, gin.H{

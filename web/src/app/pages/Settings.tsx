@@ -9,7 +9,7 @@ import { useTheme } from 'next-themes';
 import { settingsApi, systemApi } from '../services/api';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V5.2';
+const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V26.5.16';
 
 function ConfigPageItem({ children }: { children: React.ReactNode }) {
   return (
