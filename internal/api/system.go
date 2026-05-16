@@ -2,11 +2,14 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"HanChat-QQBotManager/internal/services"
@@ -20,9 +23,103 @@ import (
 	"go.uber.org/zap"
 )
 
+type SystemStatusCache struct {
+	mu             sync.RWMutex
+	networkUpload  float64
+	networkDownload float64
+	cpuUsage       float64
+	memTotal       uint64
+	memUsed        uint64
+	memAvailable   uint64
+	memUsagePercent float64
+	prevNetIO      []net.IOCountersStat
+	prevTime       time.Time
+}
+
+var statusCache *SystemStatusCache
+var cacheOnce sync.Once
+
+func NewSystemStatusCache() *SystemStatusCache {
+	return &SystemStatusCache{}
+}
+
+func (s *SystemStatusCache) Start(interval time.Duration) {
+	s.update()
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			s.update()
+		}
+	}()
+}
+
+func (s *SystemStatusCache) update() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(s.prevTime).Seconds()
+
+	if elapsed <= 0 {
+		elapsed = 1
+	}
+
+	currIO, _ := net.IOCounters(false)
+	currUpload := uint64(0)
+	currDownload := uint64(0)
+	for _, io := range currIO {
+		currUpload += io.BytesSent
+		currDownload += io.BytesRecv
+	}
+
+	if len(s.prevNetIO) > 0 {
+		prevUpload := uint64(0)
+		prevDownload := uint64(0)
+		for _, io := range s.prevNetIO {
+			prevUpload += io.BytesSent
+			prevDownload += io.BytesRecv
+		}
+		s.networkUpload = float64(currUpload-prevUpload) / elapsed
+		s.networkDownload = float64(currDownload-prevDownload) / elapsed
+	}
+
+	s.prevNetIO = currIO
+	s.prevTime = now
+
+	cpuPercent, _ := cpu.Percent(0, false)
+	if len(cpuPercent) > 0 {
+		s.cpuUsage = cpuPercent[0]
+	}
+
+	memInfo, _ := mem.VirtualMemory()
+	if memInfo != nil {
+		s.memTotal = memInfo.Total
+		s.memUsed = memInfo.Used
+		s.memAvailable = memInfo.Available
+		s.memUsagePercent = memInfo.UsedPercent
+	}
+}
+
+func (s *SystemStatusCache) GetNetworkSpeed() (upload, download float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.networkUpload, s.networkDownload
+}
+
+func (s *SystemStatusCache) GetSystemStatus() (cpuUsage float64, memTotal, memUsed, memAvailable uint64, memUsagePercent float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cpuUsage, s.memTotal, s.memUsed, s.memAvailable, s.memUsagePercent
+}
+
 // RegisterSystemRoutes 注册系统信息相关路由
 func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSocketService, base *zap.Logger) {
 	logger := base.With(zap.String("module", "api.system")).Sugar()
+
+	cacheOnce.Do(func() {
+		statusCache = NewSystemStatusCache()
+		statusCache.Start(2 * time.Second)
+	})
 
 	// 获取版本信息 - 使用第一个在线账号
 	r.GET("/version", func(c *gin.Context) {
@@ -517,20 +614,8 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 			return
 		}
 
-		// 获取CPU使用率（需要短暂延迟才能获得准确值）
-		cpuPercent, err := cpu.Percent(1*time.Second, false)
-		if err != nil {
-			logger.Errorw("获取CPU使用率失败", "error", err)
-			cpuPercent = []float64{0}
-		}
-
-		// 获取内存信息
-		memInfo, err := mem.VirtualMemory()
-		if err != nil {
-			logger.Errorw("获取内存信息失败", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "获取内存信息失败: " + err.Error()})
-			return
-		}
+		// 从缓存获取CPU、内存、网络数据
+		cpuUsage, memTotal, memUsed, memAvailable, memUsagePercent := statusCache.GetSystemStatus()
 
 		// 获取网络IO统计
 		netIO, err := net.IOCounters(false)
@@ -543,11 +628,6 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 		cpuModel := "Unknown"
 		if len(cpuInfo) > 0 {
 			cpuModel = cpuInfo[0].ModelName
-		}
-
-		cpuUsage := 0.0
-		if len(cpuPercent) > 0 {
-			cpuUsage = cpuPercent[0]
 		}
 
 		netUpload := uint64(0)
@@ -574,10 +654,10 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 				"usagePercent": cpuUsage,
 			},
 			"memory": gin.H{
-				"total":        memInfo.Total,
-				"used":         memInfo.Used,
-				"available":    memInfo.Available,
-				"usagePercent": memInfo.UsedPercent,
+				"total":        memTotal,
+				"used":         memUsed,
+				"available":    memAvailable,
+				"usagePercent": memUsagePercent,
 			},
 			"network": gin.H{
 				"uploadBytes":   netUpload,
@@ -638,11 +718,106 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 	r.GET("/info", func(c *gin.Context) {
 		logger.Infow("获取系统信息", "requestId", c.GetString("requestId"))
 
+		version := os.Getenv("LLBOT_VERSION")
+		if version == "" {
+			version = "V5.2"
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{
-				"version": "V11",
-				"name":    "OneBot",
+				"version": version,
+				"name":    "LLBot",
+			},
+		})
+	})
+
+	r.GET("/status-stream", func(c *gin.Context) {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+
+		ctx := c.Request.Context()
+
+		cpuInfo, _ := cpu.Info()
+		cpuModel := "Unknown"
+		if len(cpuInfo) > 0 {
+			cpuModel = cpuInfo[0].ModelName
+		}
+
+		c.Stream(func(w io.Writer) bool {
+			cpuPercent, _ := cpu.Percent(0, false)
+			cpuUsage := 0.0
+			if len(cpuPercent) > 0 {
+				cpuUsage = cpuPercent[0]
+			}
+
+			memInfo, _ := mem.VirtualMemory()
+			var memData gin.H
+			if memInfo != nil {
+				memData = gin.H{
+					"total":        memInfo.Total,
+					"used":         memInfo.Used,
+					"available":    memInfo.Available,
+					"usagePercent": memInfo.UsedPercent,
+				}
+			} else {
+				memData = gin.H{
+					"total":        uint64(0),
+					"used":         uint64(0),
+					"available":    uint64(0),
+					"usagePercent": 0.0,
+				}
+			}
+
+			netIO, _ := net.IOCounters(false)
+			netUpload := uint64(0)
+			netDownload := uint64(0)
+			for _, io := range netIO {
+				netUpload += io.BytesSent
+				netDownload += io.BytesRecv
+			}
+
+			data := gin.H{
+				"cpu": gin.H{
+					"model":        cpuModel,
+					"cores":        runtime.NumCPU(),
+					"usagePercent": cpuUsage,
+				},
+				"memory": memData,
+				"network": gin.H{
+					"uploadBytes":   netUpload,
+					"downloadBytes": netDownload,
+				},
+			}
+
+			jsonData, err := json.Marshal(data)
+			if err != nil {
+				return false
+			}
+
+			c.SSEvent("status", string(jsonData))
+			c.Writer.Flush()
+
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(5 * time.Second):
+				return true
+			}
+		})
+	})
+
+	r.GET("/network-speed", func(c *gin.Context) {
+		logger.Infow("获取网络速度", "requestId", c.GetString("requestId"))
+
+		uploadSpeed, downloadSpeed := statusCache.GetNetworkSpeed()
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"uploadSpeed":   uploadSpeed,
+				"downloadSpeed": downloadSpeed,
 			},
 		})
 	})

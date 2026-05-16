@@ -18,6 +18,11 @@
       "notice_id": ""
     }
   },
+  "_events": {
+    "PS": "消息:长连接接收消息",
+    "PS_json": {},
+    "json": {}
+  },
   "_get_group_notice": {
     "PS": "群组:获取群公告",
     "PS_json": {
@@ -445,7 +450,7 @@
     "PS_json": {
       "message_id": [
         "string",
-        "OneBot中，message_id为长id，在上报的转发消息中可以拿到",
+        "llonebot中，message_id为长id，在上报的转发消息中可以拿到",
         "必须"
       ]
     },

@@ -13,7 +13,7 @@ import (
 )
 
 // RegisterUserRoutes 注册用户相关路由
-func RegisterUserRoutes(r *gin.RouterGroup, ll *services.OneBotService, base *zap.Logger) {
+func RegisterUserRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *zap.Logger) {
 	logger := base.With(zap.String("module", "api.user")).Sugar()
 
 	// 获取登录号信息

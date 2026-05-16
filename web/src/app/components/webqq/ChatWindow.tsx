@@ -68,10 +68,7 @@ const EmojiReactionTip: React.FC<{ tip: SystemTip; onScrollToMessage: (msgSeq: s
               img.dataset.fallback = '1'
               if (emojiId > 1000) {
                 img.style.display = 'none'
-                const span = document.createElement('span')
-                span.className = 'text-sm'
-                span.textContent = String.fromCodePoint(emojiId)
-                img.after(span)
+                img.insertAdjacentHTML('afterend', `<span class="text-sm">${String.fromCodePoint(emojiId)}</span>`)
               } else {
                 img.src = `https://gxh.vip.qq.com/club/item/parcel/item/${tip.emojiId.slice(0, 2)}/${tip.emojiId}/100x100.png`
               }

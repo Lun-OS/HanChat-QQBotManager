@@ -1,12 +1,14 @@
 
 web/node_modules/
 web/dist/
-
 build/
 .env
-
 test/
-
-config.json
-
-plugins/
+log/
+logs/
+cache/
+.claude/
+.trae/
+.kiro/
+.vs/
+.gitignore

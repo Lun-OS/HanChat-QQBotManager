@@ -14,10 +14,6 @@ type schedulerCallback struct {
 
 func (m *Manager) luaScheduleInterval(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.interval"); err != nil {
-			return luaAPIError(L, err, "注册间隔任务失败")
-		}
-
 		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.schedulerManager == nil {
@@ -75,10 +71,6 @@ func (m *Manager) luaScheduleInterval(instance *LuaPluginInstance) func(*lua.LSt
 
 func (m *Manager) luaScheduleWeekly(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.weekly"); err != nil {
-			return luaAPIError(L, err, "注册每周任务失败")
-		}
-
 		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.schedulerManager == nil {
@@ -171,10 +163,6 @@ func (m *Manager) luaScheduleWeekly(instance *LuaPluginInstance) func(*lua.LStat
 
 func (m *Manager) luaScheduleMonthly(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.monthly"); err != nil {
-			return luaAPIError(L, err, "注册每月任务失败")
-		}
-
 		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.schedulerManager == nil {
@@ -250,10 +238,6 @@ func (m *Manager) luaScheduleMonthly(instance *LuaPluginInstance) func(*lua.LSta
 
 func (m *Manager) luaScheduleDaily(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.daily"); err != nil {
-			return luaAPIError(L, err, "注册每天任务失败")
-		}
-
 		pluginName := fmt.Sprintf("%s/%s", instance.SelfID, instance.Name)
 
 		if m.schedulerManager == nil {
@@ -367,10 +351,6 @@ func (m *Manager) createSchedulerExecutor(instance *LuaPluginInstance, callbackI
 
 func (m *Manager) luaCancelSchedulerTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.cancel"); err != nil {
-			return luaAPIError(L, err, "取消任务失败")
-		}
-
 		if m.schedulerManager == nil {
 			return luaAPIError(L, fmt.Errorf("调度器未初始化"), "取消任务失败")
 		}
@@ -389,10 +369,6 @@ func (m *Manager) luaCancelSchedulerTask(instance *LuaPluginInstance) func(*lua.
 
 func (m *Manager) luaPauseSchedulerTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.pause"); err != nil {
-			return luaAPIError(L, err, "暂停任务失败")
-		}
-
 		if m.schedulerManager == nil {
 			return luaAPIError(L, fmt.Errorf("调度器未初始化"), "暂停任务失败")
 		}
@@ -411,10 +387,6 @@ func (m *Manager) luaPauseSchedulerTask(instance *LuaPluginInstance) func(*lua.L
 
 func (m *Manager) luaResumeSchedulerTask(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.resume"); err != nil {
-			return luaAPIError(L, err, "恢复任务失败")
-		}
-
 		if m.schedulerManager == nil {
 			return luaAPIError(L, fmt.Errorf("调度器未初始化"), "恢复任务失败")
 		}
@@ -433,10 +405,6 @@ func (m *Manager) luaResumeSchedulerTask(instance *LuaPluginInstance) func(*lua.
 
 func (m *Manager) luaGetSchedulerTaskStatus(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.get_status"); err != nil {
-			return luaAPIError(L, err, "获取任务状态失败")
-		}
-
 		if m.schedulerManager == nil {
 			return luaAPIError(L, fmt.Errorf("调度器未初始化"), "获取任务状态失败")
 		}
@@ -470,10 +438,6 @@ func (m *Manager) luaGetSchedulerTaskStatus(instance *LuaPluginInstance) func(*l
 
 func (m *Manager) luaListSchedulerTasks(instance *LuaPluginInstance) func(*lua.LState) int {
 	return func(L *lua.LState) int {
-		if err := instance.sandbox.RequirePermission(PermScheduler, "scheduler.list"); err != nil {
-			return luaAPIError(L, err, "列出任务失败")
-		}
-
 		if m.schedulerManager == nil {
 			return luaAPIError(L, fmt.Errorf("调度器未初始化"), "列出任务失败")
 		}

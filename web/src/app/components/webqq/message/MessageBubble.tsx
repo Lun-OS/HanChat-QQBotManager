@@ -388,10 +388,7 @@ const EmojiReactionList = memo<{ message: RawMessage; isSelf: boolean }>(({ mess
                   const target = e.target as HTMLImageElement
                   const char = String.fromCodePoint(parseInt(emoji.emojiId))
                   target.style.display = 'none'
-                  const span = document.createElement('span')
-                  span.className = 'text-sm'
-                  span.textContent = char
-                  target.after(span)
+                  target.insertAdjacentHTML('afterend', `<span class="text-sm">${char}</span>`)
                 }
               }}
             />

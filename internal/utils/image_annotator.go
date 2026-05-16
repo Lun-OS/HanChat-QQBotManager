@@ -8,11 +8,13 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
+	xdraw "golang.org/x/image/draw"
 )
 
 // SimpleImageProcessor 简单的图像处理器，提供基础的图像操作功能
@@ -323,4 +325,269 @@ func (p *SimpleImageProcessor) GetImageData() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// GetImage 获取图像
+func (p *SimpleImageProcessor) GetImage() image.Image {
+	return p.Canvas
+}
+
+// GetBounds 获取图像边界
+func (p *SimpleImageProcessor) GetBounds() image.Rectangle {
+	return p.Canvas.Bounds()
+}
+
+// Crop 裁剪图像
+func (p *SimpleImageProcessor) Crop(x, y, width, height int) error {
+	bounds := p.Canvas.Bounds()
+	newBounds := image.Rect(x, y, x+width, y+height)
+
+	if newBounds.Min.X < bounds.Min.X || newBounds.Min.Y < bounds.Min.Y ||
+		newBounds.Max.X > bounds.Max.X || newBounds.Max.Y > bounds.Max.Y {
+		return fmt.Errorf("裁剪区域超出图像边界")
+	}
+
+	subImg := p.Canvas.SubImage(newBounds).(*image.RGBA)
+	p.Canvas = subImg
+	return nil
+}
+
+// Resize 缩放图像
+func (p *SimpleImageProcessor) Resize(newWidth, newHeight int) error {
+	if newWidth <= 0 || newHeight <= 0 {
+		return fmt.Errorf("无效的尺寸")
+	}
+
+	newImg := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
+	xdraw.NearestNeighbor.Scale(newImg, newImg.Bounds(), p.Canvas, p.Canvas.Bounds(), xdraw.Over, nil)
+	p.Canvas = newImg
+	return nil
+}
+
+// Rotate 旋转图像
+func (p *SimpleImageProcessor) Rotate(degrees float64) error {
+	return fmt.Errorf("旋转功能需要额外的图像库支持")
+}
+
+// Grayscale 灰度化
+func (p *SimpleImageProcessor) Grayscale() {
+	bounds := p.Canvas.Bounds()
+	newImg := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := p.Canvas.At(x, y).RGBA()
+			grayVal := uint8((0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8)))
+			newImg.SetRGBA(x, y, color.RGBA{grayVal, grayVal, grayVal, uint8(a >> 8)})
+		}
+	}
+
+	p.Canvas = newImg
+}
+
+// AddWatermark 添加水印
+func (p *SimpleImageProcessor) AddWatermark(text string, x, y, fontSize int) {
+	if p.Font == nil {
+		return
+	}
+
+	c := freetype.NewContext()
+	c.SetDPI(72)
+	c.SetFont(p.Font)
+	c.SetFontSize(float64(fontSize))
+	c.SetClip(p.Canvas.Bounds())
+	c.SetDst(p.Canvas)
+	c.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 200}))
+
+	pt := freetype.Pt(x, y+fontSize*2)
+	c.DrawString(text, pt)
+}
+
+// Blur 模糊效果
+func (p *SimpleImageProcessor) Blur(radius int) error {
+	if radius <= 0 {
+		return fmt.Errorf("模糊半径必须大于0")
+	}
+
+	bounds := p.Canvas.Bounds()
+	newImg := image.NewRGBA(bounds)
+
+	for py := bounds.Min.Y; py < bounds.Max.Y; py++ {
+		for px := bounds.Min.X; px < bounds.Max.X; px++ {
+			var r, g, b, a int
+			var count int
+
+			for dy := -radius; dy <= radius; dy++ {
+				for dx := -radius; dx <= radius; dx++ {
+					nx := px + dx
+					ny := py + dy
+					if nx >= bounds.Min.X && nx < bounds.Max.X && ny >= bounds.Min.Y && ny < bounds.Max.Y {
+						pr, pg, pb, pa := p.Canvas.At(nx, ny).RGBA()
+						r += int(pr)
+						g += int(pg)
+						b += int(pb)
+						a += int(pa)
+						count++
+					}
+				}
+			}
+
+			if count > 0 {
+				newImg.SetRGBA(px, py, color.RGBA{
+					uint8(r / count >> 8),
+					uint8(g / count >> 8),
+					uint8(b / count >> 8),
+					uint8(a / count >> 8),
+				})
+			}
+		}
+	}
+
+	p.Canvas = newImg
+	return nil
+}
+
+// AdjustBrightness 调整亮度
+func (p *SimpleImageProcessor) AdjustBrightness(factor float64) {
+	bounds := p.Canvas.Bounds()
+	newImg := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := p.Canvas.At(x, y).RGBA()
+			r = uint32(float64(r) * factor)
+			g = uint32(float64(g) * factor)
+			b = uint32(float64(b) * factor)
+			if r > 65535 {
+				r = 65535
+			}
+			if g > 65535 {
+				g = 65535
+			}
+			if b > 65535 {
+				b = 65535
+			}
+			newImg.SetRGBA(x, y, color.RGBA{
+				uint8(r >> 8),
+				uint8(g >> 8),
+				uint8(b >> 8),
+				uint8(a >> 8),
+			})
+		}
+	}
+
+	p.Canvas = newImg
+}
+
+// AdjustContrast 调整对比度
+func (p *SimpleImageProcessor) AdjustContrast(factor float64) {
+	bounds := p.Canvas.Bounds()
+	newImg := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := p.Canvas.At(x, y).RGBA()
+			r = uint32((float64(r)/65535.0-0.5)*factor*65535.0 + 0.5*65535.0)
+			g = uint32((float64(g)/65535.0-0.5)*factor*65535.0 + 0.5*65535.0)
+			b = uint32((float64(b)/65535.0-0.5)*factor*65535.0 + 0.5*65535.0)
+			if r > 65535 {
+				r = 65535
+			}
+			if g > 65535 {
+				g = 65535
+			}
+			if b > 65535 {
+				b = 65535
+			}
+			if r < 0 {
+				r = 0
+			}
+			if g < 0 {
+				g = 0
+			}
+			if b < 0 {
+				b = 0
+			}
+			newImg.SetRGBA(x, y, color.RGBA{
+				uint8(r >> 8),
+				uint8(g >> 8),
+				uint8(b >> 8),
+				uint8(a >> 8),
+			})
+		}
+	}
+
+	p.Canvas = newImg
+}
+
+// AdjustSaturation 调整饱和度
+func (p *SimpleImageProcessor) AdjustSaturation(factor float64) {
+	bounds := p.Canvas.Bounds()
+	newImg := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := p.Canvas.At(x, y).RGBA()
+
+			r8 := uint8(r >> 8)
+			g8 := uint8(g >> 8)
+			b8 := uint8(b >> 8)
+
+			grayVal := 0.299*float64(r8) + 0.587*float64(g8) + 0.114*float64(b8)
+
+			r8 = uint8(grayVal + factor*(float64(r8)-grayVal))
+			g8 = uint8(grayVal + factor*(float64(g8)-grayVal))
+			b8 = uint8(grayVal + factor*(float64(b8)-grayVal))
+
+			newImg.SetRGBA(x, y, color.RGBA{r8, g8, b8, uint8(a >> 8)})
+		}
+	}
+
+	p.Canvas = newImg
+}
+
+// DrawCircle 绘制圆形
+func (p *SimpleImageProcessor) DrawCircle(x, y, radius int, r, g, b, a uint8, filled bool) {
+	bounds := p.Canvas.Bounds()
+	color := color.RGBA{r, g, b, a}
+
+	for dy := -radius; dy <= radius; dy++ {
+		for dx := -radius; dx <= radius; dx++ {
+			if dx*dx+dy*dy <= radius*radius {
+				nx, ny := x+dx, y+dy
+				if nx >= bounds.Min.X && nx < bounds.Max.X && ny >= bounds.Min.Y && ny < bounds.Max.Y {
+					if filled || dx*dx+dy*dy >= (radius-1)*(radius-1) {
+						p.Canvas.SetRGBA(nx, ny, color)
+					}
+				}
+			}
+		}
+	}
+}
+
+// DrawLine 绘制线条
+func (p *SimpleImageProcessor) DrawLine(x1, y1, x2, y2 int, r, g, b, a uint8, thickness int) {
+	bounds := p.Canvas.Bounds()
+	color := color.RGBA{r, g, b, a}
+
+	dx := x2 - x1
+	dy := y2 - y1
+	length := int(math.Sqrt(float64(dx*dx + dy*dy)))
+	if length == 0 {
+		return
+	}
+
+	for t := 0; t <= length; t++ {
+		x := x1 + dx*t/length
+		y := y1 + dy*t/length
+
+		for dt := -thickness / 2; dt <= thickness/2; dt++ {
+			for et := -thickness / 2; et <= thickness/2; et++ {
+				nx, ny := x+dt, y+et
+				if nx >= bounds.Min.X && nx < bounds.Max.X && ny >= bounds.Min.Y && ny < bounds.Max.Y {
+					p.Canvas.SetRGBA(nx, ny, color)
+				}
+			}
+		}
+	}
 }

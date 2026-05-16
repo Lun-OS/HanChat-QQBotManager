@@ -11,7 +11,7 @@ export function Layout() {
   return (
     <div className="flex h-screen bg-[#F2F3F5] overflow-hidden font-sans">
         {/* Sidebar */}
-        <Sidebar isOpen={isSidebarOpen} />
+        <Sidebar open={isSidebarOpen} />
 
         {/* Main Content Area */}
         <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarOpen ? 'ml-[240px]' : 'ml-0'}`}>

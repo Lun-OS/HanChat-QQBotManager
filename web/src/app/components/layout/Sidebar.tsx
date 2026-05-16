@@ -1,94 +1,125 @@
-import React from 'react';
 import { NavLink } from 'react-router';
-import { 
-  Home, 
-  Settings, 
+import {
+  Home,
+  Settings,
   Bot,
   Puzzle,
-  MessageSquare
+  MessageSquare,
+  Sun,
+  Moon,
+  LogOut,
+  Users,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { useTheme } from 'next-themes';
+import { AnimatePresence, motion } from 'motion/react';
+import { useAuthStore } from '../../stores/authStore';
+import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 
-export function Sidebar({ isOpen }: { isOpen: boolean }) {
+interface SidebarProps {
+  open: boolean;
+  onClose?: () => void;
+}
 
-  const menuItems = [
-    { icon: Home, label: '首页', path: '/' },
-    { icon: MessageSquare, label: 'WebQQ', path: '/webqq' },
-    { icon: Puzzle, label: '插件管理', path: '/plugins' },
-    { icon: Settings, label: '系统设置', path: '/settings' },
-  ];
+const menuItems = [
+  { icon: Home, label: '首页', path: '/' },
+  { icon: Users, label: '机器人列表', path: '/bots' },
+  { icon: MessageSquare, label: 'WebQQ', path: '/webqq' },
+  { icon: Puzzle, label: '插件管理', path: '/plugins' },
+  { icon: Settings, label: '系统设置', path: '/settings' },
+];
+
+export function Sidebar({ open, onClose }: SidebarProps) {
+  const { theme, setTheme } = useTheme();
+  const logout = useAuthStore((s) => s.logout);
+  const navigate = useNavigate();
+  const isDark = theme === 'dark';
+
+  const toggleTheme = () => setTheme(isDark ? 'light' : 'dark');
+
+  const handleLogout = () => {
+    logout();
+    toast.success('退出登录成功');
+    navigate('/login');
+  };
 
   return (
-    <aside 
-      className={`fixed left-0 top-0 h-full bg-[#1D2129] text-white flex flex-col z-20 shadow-xl transition-all duration-300 ${
-        isOpen ? 'w-[240px]' : 'w-0 -translate-x-full'
-      }`}
-    >
-      <div className="h-[60px] flex items-center px-6 border-b border-gray-700/50">
-        <motion.div 
-          className="flex items-center"
-          whileHover={{ scale: 1.05 }}
-          transition={{ duration: 0.2 }}
-        >
-          <div className="w-10 h-10 bg-[#165DFF] rounded-full flex items-center justify-center mr-3 shadow-lg shadow-blue-500/30">
-            <Bot className="w-6 h-6 text-white" />
+    <>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            className='fixed inset-y-0 left-64 right-0 bg-black/20 backdrop-blur-[1px] z-40 md:hidden'
+            aria-hidden='true'
+            onClick={onClose}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.15 } }}
+            transition={{ duration: 0.2, delay: 0.15 }}
+          />
+        )}
+      </AnimatePresence>
+      <motion.div
+        className='overflow-hidden fixed top-0 left-0 h-full z-50 md:static md:shadow-none rounded-r-2xl md:rounded-none bg-white/70 backdrop-blur-xl backdrop-saturate-150 shadow-xl dark:bg-[#1D2129]/70 md:bg-transparent md:backdrop-blur-none md:backdrop-saturate-100 md:shadow-none'
+        initial={{ width: 0 }}
+        animate={{ width: open ? '16rem' : 0 }}
+        transition={{
+          type: open ? 'spring' : 'tween',
+          stiffness: 150,
+          damping: open ? 15 : 10,
+        }}
+        style={{ overflow: 'hidden' }}
+      >
+        <motion.div className='w-64 flex flex-col items-stretch h-full transition-transform duration-300 ease-in-out z-30 relative float-right p-4'>
+          <div className='flex items-center justify-start gap-3 px-2 my-8 ml-2'>
+            <div className='h-5 w-1 bg-[#165DFF] rounded-full shadow-sm' />
+            <div className='text-xl font-bold tracking-wide select-none text-gray-900 dark:text-white'>
+              HanChat
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight">HanChat</h1>
-            <p className="text-xs text-gray-400">Bot Admin</p>
+          <div className='overflow-y-auto flex flex-col flex-1 px-2'>
+            <nav className='flex flex-col gap-2'>
+              {menuItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === '/'}
+                  children={({ isActive }) => (
+                    <div className={`flex items-center w-full text-left justify-start transition-all duration-300 rounded-lg px-3 py-2.5 text-sm ${
+                      isActive
+                        ? 'bg-[#165DFF]/10 text-[#165DFF] dark:bg-[#165DFF]/20 dark:text-[#165DFF] font-semibold translate-x-1'
+                        : 'text-gray-600 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/5 hover:translate-x-1'
+                    }`}>
+                      <item.icon className='w-5 h-5 mr-3 shrink-0' />
+                      <span className='flex-1'>{item.label}</span>
+                      <div className={`w-3 h-1.5 rounded-full ml-auto transition-all ${
+                        isActive
+                          ? 'bg-[#165DFF]'
+                          : 'bg-[#165DFF]/20 dark:bg-white/30'
+                      }`} />
+                    </div>
+                  )}
+                />
+              ))}
+            </nav>
+            <div className='mt-auto mb-10 md:mb-0 space-y-3 px-2'>
+              <button
+                className='w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium bg-[#165DFF]/10 hover:bg-[#165DFF]/20 text-[#165DFF] shadow-sm hover:shadow-md transition-all duration-300 backdrop-blur-sm'
+                onClick={toggleTheme}
+              >
+                {isDark ? <Sun className='w-4 h-4' /> : <Moon className='w-4 h-4' />}
+                切换主题
+              </button>
+              <button
+                className='w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium bg-red-50/50 hover:bg-red-100/80 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-500 shadow-sm hover:shadow-md transition-all duration-300 backdrop-blur-sm'
+                onClick={handleLogout}
+              >
+                <LogOut className='w-4 h-4' />
+                退出登录
+              </button>
+            </div>
           </div>
         </motion.div>
-      </div>
-
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-        {menuItems.map((item, index) => (
-          <motion.div
-            key={item.label}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.1 }}
-          >
-            <NavLink
-              to={item.path}
-              className={({ isActive }) => 
-                `flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 group relative overflow-hidden ${
-                  isActive 
-                    ? 'bg-[#165DFF] text-white shadow-lg shadow-blue-500/20' 
-                    : 'text-gray-400 hover:bg-[#2D323B] hover:text-white'
-                }`
-              }
-            >
-              <item.icon className="w-5 h-5 mr-3 shrink-0" />
-              <span className="relative z-10">{item.label}</span>
-              {/* Hover effect background */}
-              <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
-            </NavLink>
-          </motion.div>
-        ))}
-      </nav>
-
-      {/* 作者信息 */}
-      <motion.div
-        className="p-4 m-4 rounded-xl bg-[#2D323B] border border-gray-700/50 cursor-pointer hover:border-[#165DFF]/50 transition-all"
-        onClick={() => window.open('https://github.com/Lun-OS', '_blank')}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <img
-              src="http://q1.qlogo.cn/g?b=qq&nk=1596534228&s=100"
-              alt="Lun."
-              className="w-10 h-10 rounded-full object-cover border-2 border-[#165DFF]"
-            />
-            <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#2D323B] bg-green-500" />
-          </div>
-          <div className="flex flex-col overflow-hidden">
-            <span className="text-sm font-semibold text-white truncate">By:Lun.</span>
-            <span className="text-xs text-gray-400 truncate">跳转GitHub</span>
-          </div>
-        </div>
       </motion.div>
-    </aside>
+    </>
   );
 }

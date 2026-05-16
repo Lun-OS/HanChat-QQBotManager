@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router';
+import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { BotDetail } from './pages/BotDetail';
+import { BotList } from './pages/BotList';
 import { Settings } from './pages/Settings';
 import { PluginManager } from './pages/PluginManager';
 import { WebQQ } from './pages/WebQQ';
@@ -13,60 +15,6 @@ import { useAuthStore } from './stores/authStore';
 import { authApi } from './services/api';
 import { Loader2 } from 'lucide-react';
 
-// Background animation component
-function AnimatedBackground() {
-  return (
-    <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-      {/* Gradient background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-white to-cyan-50 dark:from-[#0B0D12] dark:via-[#0F1117] dark:to-[#0B0D12]" />
-      
-      {/* Animated orbs */}
-      <motion.div
-        className="absolute top-1/4 -left-20 w-96 h-96 bg-blue-400/10 dark:bg-blue-500/5 rounded-full blur-3xl"
-        animate={{
-          x: [0, 100, 0],
-          y: [0, -50, 0],
-          scale: [1, 1.2, 1],
-        }}
-        transition={{
-          duration: 20,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
-      />
-      <motion.div
-        className="absolute bottom-1/4 -right-20 w-96 h-96 bg-cyan-400/10 dark:bg-cyan-500/5 rounded-full blur-3xl"
-        animate={{
-          x: [0, -100, 0],
-          y: [0, 50, 0],
-          scale: [1, 1.3, 1],
-        }}
-        transition={{
-          duration: 25,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
-      />
-      <motion.div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-400/5 dark:bg-purple-500/3 rounded-full blur-3xl"
-        animate={{
-          scale: [1, 1.1, 1],
-          rotate: [0, 180, 360],
-        }}
-        transition={{
-          duration: 30,
-          repeat: Infinity,
-          ease: "linear"
-        }}
-      />
-
-      {/* Grid pattern */}
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwMCIgc3Ryb2tlLW9wYWNpdHk9IjAuMDIiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-40 dark:opacity-20" />
-    </div>
-  );
-}
-
-// Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
   const token = useAuthStore(state => state.token);
@@ -77,7 +25,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const verifyToken = async () => {
-      // 先从 localStorage 恢复 token（页面刷新后）
       let currentToken = token;
       if (!currentToken) {
         const hasToken = restoreFromStorage();
@@ -86,7 +33,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 如果没有 token，直接返回未认证
       if (!currentToken) {
         setIsVerifying(false);
         setIsValid(false);
@@ -94,17 +40,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        // 服务端验证 token
         const response = await authApi.verifyToken();
         if (response.success) {
           setIsValid(true);
         } else {
-          // Token 无效，清除登录状态
           logout();
           setIsValid(false);
         }
       } catch (error) {
-        // 验证失败，清除登录状态
         logout();
         setIsValid(false);
       } finally {
@@ -115,7 +58,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     verifyToken();
   }, [token, logout, restoreFromStorage]);
 
-  // 正在验证时显示加载状态
   if (isVerifying) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -127,7 +69,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // 未认证或验证失败，跳转到登录页
   if (!isAuthenticated || !isValid) {
     return <Navigate to="/login" replace />;
   }
@@ -135,10 +76,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Route animation wrapper
 function AnimatedRoutes() {
   const location = useLocation();
-  
+
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
@@ -149,6 +89,7 @@ function AnimatedRoutes() {
           </ProtectedRoute>
         }>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/bots" element={<BotList />} />
           <Route path="/bot/:selfId" element={<BotDetail />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/plugins" element={<PluginManager />} />
@@ -161,12 +102,18 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <HashRouter>
-      <div className="size-full relative">
-        <AnimatedBackground />
-        <AnimatedRoutes />
-        <Toaster position="top-center" richColors />
-      </div>
-    </HashRouter>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      <HashRouter>
+        <div className="size-full relative">
+          <div className='fixed inset-0 -z-10 overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-pink-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900'>
+            <div className='absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-200/40 blur-[100px]' />
+            <div className='absolute top-[20%] right-[-10%] w-[400px] h-[400px] rounded-full bg-purple-200/40 blur-[90px]' />
+            <div className='absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] rounded-full bg-pink-200/30 blur-[110px]' />
+          </div>
+          <AnimatedRoutes />
+          <Toaster position="top-center" richColors />
+        </div>
+      </HashRouter>
+    </ThemeProvider>
   );
 }

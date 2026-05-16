@@ -12,7 +12,7 @@ import (
 )
 
 // RegisterAdminRoutes 注册管理员相关路由（简化版，使用新的Web登录系统）
-func RegisterAdminRoutes(r *gin.RouterGroup, loginSvc *services.WebLoginService, llSvc *services.OneBotService, base *zap.Logger, cfg *utils.Config) {
+func RegisterAdminRoutes(r *gin.RouterGroup, loginSvc *services.WebLoginService, llSvc *services.LLOneBotService, base *zap.Logger, cfg *utils.Config) {
 	logger := base.With(zap.String("module", "api.admin")).Sugar()
 
 	// 验证令牌（用于登录页面）

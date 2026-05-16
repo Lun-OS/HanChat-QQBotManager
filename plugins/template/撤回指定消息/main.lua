@@ -147,7 +147,7 @@ on_message(function(event)
             if numId and numId < 0 then
                 -- 负数ID可能需要特殊处理，先记录下来
                 log.info("发现负数消息ID，原始值: " .. targetMessageId)
-                -- 对于OneBot，负数ID通常是有效的，不需要转换
+                -- 对于LLOneBot，负数ID通常是有效的，不需要转换
             end
         end
     else

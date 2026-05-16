@@ -24,7 +24,22 @@ type ConfigFile struct {
 	Logger       LoggerConfig             `json:"logger"`
 	Websocket    WebsocketConfig          `json:"websocket"`
 	Memory       MemoryConfig             `json:"memory"`
+	Appearance   AppearanceConfig         `json:"appearance"`
+	Advanced     AdvancedConfig           `json:"advanced"`
 	Accounts     map[string]*models.BotAccount `json:"accounts"` // key: self_id
+}
+
+type AppearanceConfig struct {
+	Theme     string            `json:"theme"`
+	FontSize  int               `json:"fontSize"`
+	CustomCSS map[string]string `json:"customCSS"`
+}
+
+type AdvancedConfig struct {
+	WSPort           int      `json:"wsPort"`
+	LogLevel         string   `json:"logLevel"`
+	CorsOrigins      []string `json:"corsOrigins"`
+	LogRetentionDays int      `json:"logRetentionDays"`
 }
 
 // MemoryConfig 内存管理器配置
@@ -92,6 +107,17 @@ func (ac *AccountConfig) LoadConfig() (*ConfigFile, error) {
 				MonitorInterval:  10000, // 10秒
 				GCCheckInterval:  50000,
 			},
+			Appearance: AppearanceConfig{
+				Theme:     "light",
+				FontSize:  16,
+				CustomCSS: make(map[string]string),
+			},
+			Advanced: AdvancedConfig{
+				WSPort:           59178,
+				LogLevel:         "info",
+				CorsOrigins:      []string{"*"},
+				LogRetentionDays: 7,
+			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil
 	}
@@ -107,9 +133,14 @@ func (ac *AccountConfig) LoadConfig() (*ConfigFile, error) {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
-	// 确保Accounts不为nil
 	if cfg.Accounts == nil {
 		cfg.Accounts = make(map[string]*models.BotAccount)
+	}
+	if cfg.Appearance.CustomCSS == nil {
+		cfg.Appearance.CustomCSS = make(map[string]string)
+	}
+	if cfg.Advanced.CorsOrigins == nil {
+		cfg.Advanced.CorsOrigins = []string{"*"}
 	}
 
 	return &cfg, nil
@@ -210,6 +241,17 @@ func (ac *AccountConfig) loadConfigUnsafe() (*ConfigFile, error) {
 				MonitorInterval:  10000, // 10秒
 				GCCheckInterval:  50000,
 			},
+			Appearance: AppearanceConfig{
+				Theme:     "light",
+				FontSize:  16,
+				CustomCSS: make(map[string]string),
+			},
+			Advanced: AdvancedConfig{
+				WSPort:           59178,
+				LogLevel:         "info",
+				CorsOrigins:      []string{"*"},
+				LogRetentionDays: 7,
+			},
 			Accounts: make(map[string]*models.BotAccount),
 		}, nil
 	}
@@ -226,6 +268,12 @@ func (ac *AccountConfig) loadConfigUnsafe() (*ConfigFile, error) {
 
 	if cfg.Accounts == nil {
 		cfg.Accounts = make(map[string]*models.BotAccount)
+	}
+	if cfg.Appearance.CustomCSS == nil {
+		cfg.Appearance.CustomCSS = make(map[string]string)
+	}
+	if cfg.Advanced.CorsOrigins == nil {
+		cfg.Advanced.CorsOrigins = []string{"*"}
 	}
 
 	return &cfg, nil
@@ -286,4 +334,32 @@ func (ac *AccountConfig) AccountExists(selfID string) bool {
 
 	_, exists := cfg.Accounts[selfID]
 	return exists
+}
+
+func (ac *AccountConfig) SaveAppearanceConfig(appearance AppearanceConfig) error {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	cfg, err := ac.loadConfigUnsafe()
+	if err != nil {
+		return err
+	}
+
+	cfg.Appearance = appearance
+
+	return ac.saveConfigUnsafe(cfg)
+}
+
+func (ac *AccountConfig) SaveAdvancedConfig(advanced AdvancedConfig) error {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	cfg, err := ac.loadConfigUnsafe()
+	if err != nil {
+		return err
+	}
+
+	cfg.Advanced = advanced
+
+	return ac.saveConfigUnsafe(cfg)
 }

@@ -50,7 +50,7 @@ type LuaPluginInstance struct {
 	StartTime     time.Time
 	mu            sync.Mutex           // 保护实例状态（配置、卸载等）
 	execMu        sync.Mutex           // ⭐ 执行锁：保护Lua状态机的并发访问（必须串行化）
-	llService     *services.OneBotService
+	llService     *services.LLOneBotService
 	reverseWS     *services.ReverseWebSocketService // 新的反向WebSocket服务
 	SelfID        string                              // 绑定的账号ID（固定）
 	Logs          []string                            // 插件日志
@@ -353,7 +353,7 @@ type Manager struct {
 	infosMu     sync.RWMutex                       // 保护pluginInfos的锁
 	pluginsDir  string
 	logger      *zap.SugaredLogger
-	llService   *services.OneBotService
+	llService   *services.LLOneBotService
 	reverseWS   *services.ReverseWebSocketService // 新的反向WebSocket服务
 	// 定时任务系统
 	timerSystem *TimerSystem
@@ -398,7 +398,7 @@ type Manager struct {
 }
 
 // NewManager 创建插件管理器
-func NewManager(cfg *utils.Config, llService *services.OneBotService) *Manager {
+func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager {
 	pluginsDir := "plugins"
 	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
 		// 如果创建失败，使用默认目录
@@ -1253,76 +1253,6 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 	// 设置沙箱的instance引用
 	instance.sandbox.instance = instance
 
-	// 初始化增强型沙箱配置（V7.12.x+）
-	// 从插件配置中读取沙箱配置，若无则使用默认配置
-	sandboxConfig := DefaultSandboxConfig()
-	if sandboxCfg, exists := pluginInfo.Config["sandbox"]; exists {
-		if sandboxMap, ok := sandboxCfg.(map[string]interface{}); ok {
-			// 解析权限列表
-			if perms, ok := sandboxMap["permissions"].([]interface{}); ok && len(perms) > 0 {
-				var permMask SandboxPermission
-				permMap := map[string]SandboxPermission{
-					"file_read": PermFileRead, "file_write": PermFileWrite, "file_delete": PermFileDelete,
-					"network_http": PermNetworkHTTP, "network_tcp": PermNetworkTCP, "network_udp": PermNetworkUDP,
-					"bot_api": PermBotAPI, "bot_admin": BotAdminAPI,
-					"scheduler": PermScheduler, "plugin_comm": PermPluginComm,
-					"image_process": PermImageProcess, "storage": PermStorage,
-				}
-				for _, p := range perms {
-					if ps, ok := p.(string); ok {
-						if perm, exists := permMap[ps]; exists {
-							permMask |= perm
-						}
-					}
-				}
-				if permMask != 0 {
-					sandboxConfig.Permissions = permMask
-				}
-			}
-			// 解析HTTP白名单
-			if hosts, ok := sandboxMap["allowed_http_hosts"].([]interface{}); ok {
-				sandboxConfig.AllowedHTTPHosts = make([]string, 0, len(hosts))
-				for _, h := range hosts {
-					if hs, ok := h.(string); ok {
-						sandboxConfig.AllowedHTTPHosts = append(sandboxConfig.AllowedHTTPHosts, hs)
-					}
-				}
-			}
-			// 解析HTTP黑名单
-			if hosts, ok := sandboxMap["blocked_http_hosts"].([]interface{}); ok {
-				sandboxConfig.BlockedHTTPHosts = make([]string, 0, len(hosts))
-				for _, h := range hosts {
-					if hs, ok := h.(string); ok {
-						sandboxConfig.BlockedHTTPHosts = append(sandboxConfig.BlockedHTTPHosts, hs)
-					}
-				}
-			}
-			// 解析其他数值配置
-			if v, ok := sandboxMap["max_stack_depth"].(float64); ok {
-				sandboxConfig.MaxStackDepth = int64(v)
-			}
-			if v, ok := sandboxMap["max_instructions"].(float64); ok {
-				sandboxConfig.MaxInstructions = int64(v)
-			}
-			if v, ok := sandboxMap["max_memory_mb"].(float64); ok {
-				sandboxConfig.MaxMemoryUsage = uint64(v) * 1024 * 1024
-			}
-			if v, ok := sandboxMap["max_execution_time_sec"].(float64); ok {
-				sandboxConfig.MaxExecutionTime = time.Duration(v) * time.Second
-			}
-			if v, ok := sandboxMap["max_file_size_mb"].(float64); ok {
-				sandboxConfig.MaxFileSize = int64(v) * 1024 * 1024
-			}
-			if v, ok := sandboxMap["max_storage_size_mb"].(float64); ok {
-				sandboxConfig.MaxStorageSize = int64(v) * 1024 * 1024
-			}
-			if v, ok := sandboxMap["enable_audit_log"].(bool); ok {
-				sandboxConfig.EnableAuditLog = v
-			}
-		}
-	}
-	instance.sandbox.SetSandboxConfig(sandboxConfig)
-
 	// 注意：gopher-lua v1.1.1 不支持SetHook API
 	// 我们通过超时机制和指令计数（在每次事件处理前重置）来提供安全保障
 	// 指令计数将在事件处理器执行期间监控
@@ -1480,6 +1410,14 @@ func (m *Manager) LoadLuaPlugin(selfID string, name string) error {
 		debug.FreeOSMemory()
 
 		return fmt.Errorf("插件加载后内存增量超限(%.1fMB)，请优化插件代码减少内存占用", float64(memDelta)/1024/1024)
+	}
+
+	// 保存真实的内存变化量作为插件的内存占用
+	if memDelta > 0 {
+		atomic.StoreInt64(&instance.memoryUsage, memDelta)
+	} else {
+		// 如果内存变化为负，就用估算值（已禁用）
+		// atomic.StoreInt64(&instance.memoryUsage, estimateLuaMemory(instance.L))
 	}
 
 	// 重新获取锁来注册插件
@@ -2669,7 +2607,7 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(messageTable, "send_private_image", L.NewFunction(m.luaSendPrivateImage(instance)))
 	L.SetField(messageTable, "send_group_forward", L.NewFunction(m.luaSendGroupForwardMessage(instance)))
 	L.SetField(messageTable, "send_private_forward", L.NewFunction(m.luaSendPrivateForwardMessage(instance)))
-	L.SetField(messageTable, "get_msg", L.NewFunction(m.luaGetMsgEnhanced(instance))) // V7.12.3+ 增强版，返回status字段
+	L.SetField(messageTable, "get_msg", L.NewFunction(m.luaGetMsg(instance)))
 	L.SetField(messageTable, "get_forward_msg", L.NewFunction(m.luaGetForwardMsg(instance)))
 	L.SetField(messageTable, "voice_to_text", L.NewFunction(m.luaVoiceMsgToText(instance)))
 	L.SetField(messageTable, "get_image", L.NewFunction(m.luaGetImage(instance)))
@@ -2713,15 +2651,9 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(userTable, "send_like", L.NewFunction(m.luaSendLike(instance)))
 	L.SetField(userTable, "delete_friend", L.NewFunction(m.luaDeleteFriend(instance)))
 	L.SetField(userTable, "get_friend_info", L.NewFunction(m.luaGetFriendInfo(instance)))
-	L.SetField(userTable, "get_stranger_info", L.NewFunction(m.luaGetStrangerInfoEnhanced(instance))) // 增强版，支持VIP信息
+	L.SetField(userTable, "get_stranger_info", L.NewFunction(m.luaGetStrangerInfo(instance)))
 	L.SetField(userTable, "upload_file", L.NewFunction(m.luaUploadPrivateFile(instance)))
 	L.SetField(userTable, "set_qq_profile", L.NewFunction(m.luaSetQQProfile(instance)))
-	L.SetField(userTable, "move_friend", L.NewFunction(m.luaMoveFriend(instance)))                 // V7.12.3+
-	L.SetField(userTable, "get_who_liked_me", L.NewFunction(m.luaGetWhoLikedMe(instance)))         // V7.12.3+
-	L.SetField(userTable, "get_who_i_liked", L.NewFunction(m.luaGetWhoILiked(instance)))           // V7.12.3+
-	L.SetField(userTable, "get_filtered_requests", L.NewFunction(m.luaGetFilteredFriendRequests(instance))) // V7.12.3+
-	L.SetField(userTable, "handle_filtered_request", L.NewFunction(m.luaHandleFilteredFriendRequest(instance))) // V7.12.3+
-	L.SetField(userTable, "get_qq_avatar", L.NewFunction(m.luaGetQQAvatar(instance)))              // V7.12.3+
 	L.SetGlobal("user", userTable)
 
 	// 群组API
@@ -2745,40 +2677,25 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetField(groupTable, "get_files_by_folder", L.NewFunction(m.luaGetGroupFilesByFolder(instance)))
 	L.SetField(groupTable, "upload_file", L.NewFunction(m.luaUploadGroupFile(instance)))
 	L.SetField(groupTable, "get_honor_info", L.NewFunction(m.luaGetGroupHonorInfo(instance)))
-	L.SetField(groupTable, "get_shut_list", L.NewFunction(m.luaGetGroupShutList(instance)))               // V7.12.3+
-	L.SetField(groupTable, "get_at_all_remain", L.NewFunction(m.luaGetGroupAtAllRemain(instance)))       // V7.12.3+
-	L.SetField(groupTable, "set_remark", L.NewFunction(m.luaSetGroupRemark(instance)))                   // V7.12.3+
-	L.SetField(groupTable, "set_msg_recv", L.NewFunction(m.luaSetGroupMsgRecv(instance)))                // V7.12.3+
-	L.SetField(groupTable, "sign_in", L.NewFunction(m.luaGroupSignIn(instance)))                         // V7.12.3+
-	L.SetField(groupTable, "get_filtered_requests", L.NewFunction(m.luaGetFilteredGroupRequests(instance))) // V7.12.3+
-	L.SetField(groupTable, "create_album", L.NewFunction(m.luaCreateGroupAlbum(instance)))               // V7.12.3+
-	L.SetField(groupTable, "delete_album", L.NewFunction(m.luaDeleteGroupAlbum(instance)))               // V7.12.3+
-	L.SetField(groupTable, "get_album_list", L.NewFunction(m.luaGetGroupAlbumList(instance)))            // V7.12.3+
-	L.SetField(groupTable, "get_album_media_list", L.NewFunction(m.luaGetGroupAlbumMediaList(instance))) // V7.12.3+
-	L.SetField(groupTable, "upload_album", L.NewFunction(m.luaUploadGroupAlbumEnhanced(instance)))       // V7.12.5+ 支持视频
-	L.SetField(groupTable, "send_notice", L.NewFunction(m.luaSendGroupNotice(instance)))                 // V7.12.5+ 增强版
-	L.SetField(groupTable, "get_notice", L.NewFunction(m.luaGetGroupNotice(instance)))                   // V7.12.5+ 增强版
-	L.SetField(groupTable, "delete_notice", L.NewFunction(m.luaDeleteGroupNotice(instance)))             // V7.12.5+
-	L.SetField(groupTable, "set_avatar", L.NewFunction(m.luaSetGroupAvatar(instance)))                   // V7.12.3+
 	L.SetGlobal("group", groupTable)
 
 	// 存储API
 	storageTable := L.NewTable()
-	L.SetField(storageTable, "set", L.NewFunction(m.luaStorageSet(instance)))
-	L.SetField(storageTable, "get", L.NewFunction(m.luaStorageGet(instance)))
-	L.SetField(storageTable, "delete", L.NewFunction(m.luaStorageDelete(instance)))
+	L.SetField(storageTable, "set", L.NewFunction(m.luaStorageSet(selfID, pluginName)))
+	L.SetField(storageTable, "get", L.NewFunction(m.luaStorageGet(selfID, pluginName)))
+	L.SetField(storageTable, "delete", L.NewFunction(m.luaStorageDelete(selfID, pluginName)))
 	L.SetGlobal("storage", storageTable)
 
 	// 文件操作API
 	fileTable := L.NewTable()
-	L.SetField(fileTable, "read", L.NewFunction(m.luaFileRead(instance)))
-	L.SetField(fileTable, "write", L.NewFunction(m.luaFileWrite(instance)))
-	L.SetField(fileTable, "delete", L.NewFunction(m.luaFileDelete(instance)))
-	L.SetField(fileTable, "list", L.NewFunction(m.luaFileList(instance)))
-	L.SetField(fileTable, "exists", L.NewFunction(m.luaFileExists(instance)))
-	L.SetField(fileTable, "mkdir", L.NewFunction(m.luaFileMkdir(instance)))
-	L.SetField(fileTable, "read_base64", L.NewFunction(m.luaFileReadBase64(instance)))
-	L.SetField(fileTable, "write_base64", L.NewFunction(m.luaFileWriteBase64(instance)))
+	L.SetField(fileTable, "read", L.NewFunction(m.luaFileRead(selfID, pluginName)))
+	L.SetField(fileTable, "write", L.NewFunction(m.luaFileWrite(selfID, pluginName)))
+	L.SetField(fileTable, "delete", L.NewFunction(m.luaFileDelete(selfID, pluginName)))
+	L.SetField(fileTable, "list", L.NewFunction(m.luaFileList(selfID, pluginName)))
+	L.SetField(fileTable, "exists", L.NewFunction(m.luaFileExists(selfID, pluginName)))
+	L.SetField(fileTable, "mkdir", L.NewFunction(m.luaFileMkdir(selfID, pluginName)))
+	L.SetField(fileTable, "read_base64", L.NewFunction(m.luaFileReadBase64(selfID, pluginName)))
+	L.SetField(fileTable, "write_base64", L.NewFunction(m.luaFileWriteBase64(selfID, pluginName)))
 	// 群文件API
 	L.SetField(fileTable, "delete_group_file", L.NewFunction(m.luaDeleteGroupFile(instance)))
 	L.SetField(fileTable, "get_group_file_system_info", L.NewFunction(m.luaGetGroupFileSystemInfo(instance)))
@@ -2794,10 +2711,10 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 
 	// 网络请求API
 	httpTable := L.NewTable()
-	L.SetField(httpTable, "request", L.NewFunction(m.luaHttpRequest(instance)))
-	L.SetField(httpTable, "download_base64", L.NewFunction(m.luaHttpDownloadBase64(instance)))
-	L.SetField(httpTable, "get", L.NewFunction(m.luaHttpGet(instance)))
-	L.SetField(httpTable, "post", L.NewFunction(m.luaHttpPost(instance)))
+	L.SetField(httpTable, "request", L.NewFunction(m.luaHttpRequest(selfID, pluginName)))
+	L.SetField(httpTable, "download_base64", L.NewFunction(m.luaHttpDownloadBase64(pluginName)))
+	L.SetField(httpTable, "get", L.NewFunction(m.luaHttpGet(pluginName)))
+	L.SetField(httpTable, "post", L.NewFunction(m.luaHttpPost(pluginName)))
 	L.SetGlobal("http", httpTable)
 
 	requestTable := L.NewTable()
@@ -2810,29 +2727,25 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetGlobal("request", requestTable)
 
 	networkTable := L.NewTable()
-	L.SetField(networkTable, "udp_send", L.NewFunction(m.luaUdpSend(instance)))
-	L.SetField(networkTable, "tcp_connect", L.NewFunction(m.luaTcpConnect(instance)))
+	L.SetField(networkTable, "udp_send", L.NewFunction(m.luaUdpSend(selfID, pluginName)))
+	L.SetField(networkTable, "tcp_connect", L.NewFunction(m.luaTcpConnect(selfID, pluginName)))
 	L.SetGlobal("network", networkTable)
+
+	m.registerNetworkAPI(L, selfID, pluginName)
+	m.registerImageAPI(L, instance)
+	m.registerExtendedAPI(L)
 
 	// 系统/时间API
 	systemTable := L.NewTable()
 	L.SetField(systemTable, "now", L.NewFunction(m.luaSystemNow()))
 	L.SetField(systemTable, "status", L.NewFunction(m.luaSystemStatus(selfID)))
-	L.SetField(systemTable, "get_cookies", L.NewFunction(m.luaSystemCookies()))
+	L.SetField(systemTable, "get_cookies", L.NewFunction(m.luaSystemCookies(instance)))
 	L.SetField(systemTable, "call_api", L.NewFunction(m.luaSystemCallAPI(instance)))
 	L.SetField(systemTable, "get_timestamp_seconds", L.NewFunction(m.luaGetTimestampSeconds()))
 	L.SetField(systemTable, "get_timestamp_milliseconds", L.NewFunction(m.luaGetTimestampMilliseconds()))
 	L.SetField(systemTable, "get_login_info", L.NewFunction(m.luaGetLoginInfo(instance)))
-	L.SetField(systemTable, "set_login_info", L.NewFunction(m.luaSetLoginInfo(instance)))             // V7.12.3+
-	L.SetField(systemTable, "set_online_status", L.NewFunction(m.luaSetOnlineStatus(instance)))       // V7.12.3+
-	L.SetField(systemTable, "send_protobuf", L.NewFunction(m.luaSendProtobuf(instance)))               // V7.12.3+
-	L.SetField(systemTable, "get_recommended_faces", L.NewFunction(m.luaGetRecommendedFaces(instance))) // V7.12.3+
-	L.SetField(systemTable, "get_favorite_faces", L.NewFunction(m.luaGetFavoriteFaces(instance)))     // V7.12.3+
-	L.SetField(systemTable, "get_rkey", L.NewFunction(m.luaGetRKey(instance)))                         // V7.12.3+
-	L.SetField(systemTable, "download_file", L.NewFunction(m.luaDownloadFileToCache(instance)))       // V7.12.3+
-	L.SetField(systemTable, "get_official_bot_range", L.NewFunction(m.luaGetOfficialBotQQRange(instance))) // V7.12.3+
-	L.SetField(systemTable, "set_input_status", L.NewFunction(m.luaSetInputStatus(instance)))          // V7.12.3+
 	L.SetField(systemTable, "get_version_info", L.NewFunction(m.luaGetVersionInfo(instance)))
+	L.SetField(systemTable, "get_memory", L.NewFunction(m.luaSystemGetMemory(selfID)))
 	L.SetGlobal("system", systemTable)
 
 	// 工具/编码API
@@ -3645,6 +3558,12 @@ func (m *Manager) GetLuaPluginStatus(selfID string, name string) (map[string]int
 		stackDepth = instance.sandbox.GetCurrentStackDepth()
 	}
 
+	// 获取内存占用（已禁用 Lua 内存估算）
+	memUsage := atomic.LoadInt64(&instance.memoryUsage)
+	if memUsage == 0 {
+		// memUsage = estimateLuaMemory(instance.L)
+	}
+
 	return map[string]interface{}{
 		"running":       true,
 		"self_id":       selfID,
@@ -3658,6 +3577,9 @@ func (m *Manager) GetLuaPluginStatus(selfID string, name string) (map[string]int
 		// 性能数据
 		"cpuTime":       cpuTime,
 		"cpuTimeMs":     cpuTime / 1000000, // 转换为毫秒
+		// 内存数据
+		"memory":        memUsage,
+		"memoryMb":      fmt.Sprintf("%.2f", float64(memUsage)/1024/1024),
 		// 安全状态
 		"sandboxHalted": sandboxHalted,
 		"stackDepth":    stackDepth,
@@ -3671,6 +3593,58 @@ func calculateErrorRate(eventCount, errorCount int64) float64 {
 	}
 	return float64(errorCount) / float64(eventCount) * 100
 }
+
+// estimateLuaMemory 真实计算 Lua 状态机的内存占用（已禁用）
+// 使用反射获取 registry 实际分配的内存大小
+/*
+func estimateLuaMemory(L *lua.LState) int64 {
+	if L == nil {
+		return 0
+	}
+
+	var total int64
+
+	// 1. LState 结构体本身
+	total += int64(unsafe.Sizeof(*L))
+
+	// 2. 使用反射获取 registry 的实际分配大小
+	lValue := reflect.ValueOf(L).Elem()
+	regField := lValue.FieldByName("reg")
+	if regField.IsValid() {
+		// registry 结构体
+		regValue := regField.Elem()
+		arrayField := regValue.FieldByName("array")
+		if arrayField.IsValid() && arrayField.Kind() == reflect.Slice {
+			// 获取 registry 实际分配的容量
+			capacity := arrayField.Cap()
+			// 每个 LValue 接口占 16 字节 (itab + data)
+			total += int64(capacity) * 16
+		}
+	}
+
+	// 3. 获取调用栈大小
+	stackField := lValue.FieldByName("stack")
+	if stackField.IsValid() {
+		// 调用栈的实际大小
+		total += int64(stackField.Cap()) * 64 // 每个 callFrame 约 64 字节
+	}
+
+	// 4. 全局表
+	globalField := lValue.FieldByName("Env")
+	if globalField.IsValid() {
+		if tbl, ok := globalField.Interface().(*lua.LTable); ok {
+			// 估算全局表大小
+			count := 0
+			tbl.ForEach(func(key, value lua.LValue) {
+				count++
+			})
+			total += int64(count) * 128
+		}
+	}
+
+	return total
+}
+*/
 
 // GetLuaPluginLogs 获取Lua插件日志
 func (m *Manager) GetLuaPluginLogs(selfID string, name string, limit int) ([]string, error) {
@@ -4372,6 +4346,38 @@ func (m *Manager) GetAccountContainers() []map[string]interface{} {
 			"ws_name":       account.CustomName,
 		})
 	}
+	return result
+}
+
+// GetAllPluginsWithMemory 获取所有插件信息（包含内存）
+func (m *Manager) GetAllPluginsWithMemory() []map[string]interface{} {
+	result := make([]map[string]interface{}, 0)
+	
+	// 直接通过 containers 获取，这样可以拿到离线账号的插件
+	m.containersMu.RLock()
+	for selfID, container := range m.containers {
+		container.mu.RLock()
+		for name, instance := range container.LuaPlugins {
+			// 获取内存（已禁用 Lua 内存估算）
+			memUsage := atomic.LoadInt64(&instance.memoryUsage)
+			if memUsage == 0 {
+				// memUsage = estimateLuaMemory(instance.L)
+			}
+			
+			result = append(result, map[string]interface{}{
+				"self_id":       selfID,
+				"name":          name,
+				"running":       true,
+				"memory":        memUsage,
+				"memory_mb":     fmt.Sprintf("%.2f", float64(memUsage)/1024/1024),
+				"event_count":   atomic.LoadInt64(&instance.eventCount),
+				"error_count":   atomic.LoadInt64(&instance.errorCount),
+			})
+		}
+		container.mu.RUnlock()
+	}
+	m.containersMu.RUnlock()
+	
 	return result
 }
 

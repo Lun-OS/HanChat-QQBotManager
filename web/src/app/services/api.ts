@@ -327,9 +327,9 @@ export const systemApi = {
     return response.data;
   },
 
-  // 断开连接
-  disconnect: async (selfId: string) => {
-    const response = await apiClient.post(`/api/disconnect/${selfId}`, {});
+  // 重启
+  setRestart: async (selfId: string) => {
+    const response = await apiClient.post(`/api/bot/${selfId}/set_restart`, {});
     return response.data;
   },
 
@@ -380,6 +380,8 @@ export interface PluginStatus {
   eventCount?: number;
   errorCount?: number;
   lastEventTime?: string;
+  memory?: number;
+  memoryMb?: string;
 }
 
 export const pluginApi = {
@@ -441,8 +443,14 @@ export const pluginApi = {
   },
 
   // 获取所有账号容器信息
-  getAccountContainers: async (): Promise<{ success: boolean; data: Array<{ self_id: string; plugin_count: number }> }> => {
+  getAccountContainers: async (): Promise<{ success: boolean; data: Array<{ self_id: string; plugin_count: number; ws_name?: string }> }> => {
     const response = await apiClient.get('/api/plugins/containers');
+    return response.data;
+  },
+  
+  // 获取所有插件信息（包含内存）
+  getAllPluginsWithMemory: async (): Promise<{ success: boolean; data: Array<{ self_id: string; name: string; running: boolean; memory: number; memory_mb: string; event_count: number; error_count: number }> }> => {
+    const response = await apiClient.get('/api/plugins/all-plugins');
     return response.data;
   },
 
@@ -511,6 +519,31 @@ export const settingsApi = {
   // 保存系统设置
   saveSettings: async (settings: { ws_token?: string; websocket_authorization?: string }): Promise<{ success: boolean; message?: string }> => {
     const response = await apiClient.post('/api/settings', settings);
+    return response.data;
+  },
+
+  getAppearance: async (): Promise<{ success: boolean; data: { theme: string; fontSize: number; customCSS: Record<string, string> } }> => {
+    const response = await apiClient.get('/api/settings/appearance');
+    return response.data;
+  },
+
+  saveAppearance: async (appearance: { theme?: string; fontSize?: number; customCSS?: Record<string, string> }): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post('/api/settings/appearance', appearance);
+    return response.data;
+  },
+
+  getAdvanced: async (): Promise<{ success: boolean; data: { wsPort: number; logLevel: string; corsOrigins: string[]; logRetentionDays: number } }> => {
+    const response = await apiClient.get('/api/settings/advanced');
+    return response.data;
+  },
+
+  saveAdvanced: async (advanced: { ws_port?: number; log_level?: string; cors_origins?: string; log_retention_days?: number }): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post('/api/settings', advanced);
+    return response.data;
+  },
+
+  getNetworkSpeed: async (): Promise<{ success: boolean; data: { uploadSpeed: number; downloadSpeed: number } }> => {
+    const response = await apiClient.get('/api/system/network-speed');
     return response.data;
   },
 };
@@ -1455,6 +1488,18 @@ export const pluginManagerApi = {
   // 重命名文件或文件夹
   renameFile: async (path: string, newName: string): Promise<{ success: boolean; message?: string }> => {
     const response = await apiClient.post('/api/plugin-manager/rename', { path, newName });
+    return response.data;
+  },
+};
+
+export const appearanceApi = {
+  getAppearance: async (): Promise<{ success: boolean; data: { theme: string; fontSize: number; customCSS: Record<string, string> } }> => {
+    const response = await apiClient.get('/api/settings/appearance');
+    return response.data;
+  },
+
+  saveAppearance: async (data: { theme: string; fontSize: number; customCSS: Record<string, string> }) => {
+    const response = await apiClient.post('/api/settings/appearance', data);
     return response.data;
   },
 };

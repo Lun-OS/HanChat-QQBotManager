@@ -1391,7 +1391,7 @@ export function PluginManager() {
 
   // 简易模式视图
   const SimpleModeView = () => (
-    <div className="flex-1 min-h-0 overflow-visible">
+    <div className="flex-1 min-h-0 overflow-hidden">
       <BlocklyEditor 
         onExport={() => {
           loadRightFiles(rightSelfId);

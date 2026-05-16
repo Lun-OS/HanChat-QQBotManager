@@ -77,22 +77,23 @@ cp .env.example .env
 
 # 运行
 go run cmd/app/main.go
-
-#或者运行二进制文件
-./HanChat-QQBotManager-windows-amd64.exe
-./HanChat-QQBotManager-windows-amd64
-#注意加载配置文件.env
 ```
 
 ### 配置 OneBot 客户端
 
 在 LuckyLilliaBot 或 NapCatQQ 的配置中，设置反向 WebSocket 连接：
 
-[llbot配置](./docs/llbot-config.md)
-[napcat配置](./docs/napcat-config.md)
+```json
+{
+  "ws": {
+    "enable": true,
+    "url": "ws://localhost:8080/ws/bot1",
+    "authorization": "your-token-here"
+  }
+}
+```
 
-
-确保 `X-Self-ID` 头部包含正确的 QQ 号（OneBot自带）。
+确保 `X-Self-ID` 头部包含正确的 QQ 号（LuckyLilliaBot自带）。
 
 ***
 
@@ -151,12 +152,16 @@ go run cmd/app/main.go
 ## 项目结构
 
 ```
-HanChat-QQBotManager/
+QQbot-LLbot/
 ├── cmd/
 │   └── app/
 │       └── main.go          # 程序入口点
 ├── config/                  # 配置文件目录
 ├── docs/                    # 项目文档
+│   ├── BLOCKLY_DOCUMENTATION.md
+│   ├── CLI_COMMANDS.md
+│   ├── PLUGIN_LUA.md
+│   └── 性能压力测试工具.py
 ├── internal/                # 内部业务逻辑
 │   ├── api/                 # HTTP API 接口定义
 │   ├── config/              # 配置管理
@@ -170,9 +175,9 @@ HanChat-QQBotManager/
 │   └── template/            # 插件模板
 ├── web/                     # Web 前端项目
 │   └── src/                 # React 源代码
-├── .gitignore               
-├── go.mod                   # 项目依赖管理
-├── go.sum                   # 项目依赖校验
+├── .gitignore
+├── go.mod
+├── go.sum
 └── README.md
 ```
 
@@ -206,18 +211,19 @@ HanChat-QQBotManager/
 
 **无论能力大小，都欢迎为项目贡献代码和意见！**
 
-- 🐞 **提交 Bug**：发现问题请提交 Issue，描述复现步骤
+- 🐛 **提交 Bug**：发现问题请提交 Issue，描述复现步骤
 - 💡 **功能建议**：有新想法？欢迎开启 Discussion 讨论
 - 🔧 **代码贡献**：Fork 仓库，提交 PR，我会尽快 review
 - 📖 **完善文档**：帮助改进 README 或编写使用教程
 - ⭐ **Star 支持**：给项目点个 Star，让更多人看到
 
+
 ## 协议兼容性
 
 | 框架                                              | 支持状态    | 说明               |
 | ----------------------------------------------- | ------- | ---------------- |
-| [LuckyLilliaBot](https://github.com/OneBot)   | ✅ 完美支持  | 推荐，功能完整（基于此环境开发） |
-| [NapCatQQ](https://github.com/NapNeko/NapCatQQ) | ✅ 完美兼容  | 推荐，轻量级，资源占用低，稳定性高        |
+| [LuckyLilliaBot](https://github.com/LLOneBot)   | ✅ 完美支持  | 推荐，功能完整（基于此环境开发） |
+| [NapCatQQ](https://github.com/NapNeko/NapCatQQ) | ✅ 完美兼容  | 轻量级，资源占用低        |
 | [go-cqhttp](https://github.com/Mrs4s/go-cqhttp) | ⚠️ 部分支持 | 需开启反向 WS         |
 | 其他 OneBot v11                                   | ✅ 理论支持  | 符合标准即可           |
 
@@ -232,7 +238,7 @@ HanChat-QQBotManager/
 ***
 
 <p align="center">
-  Made with ❤️ by Lun.
+  Made with ❤️ by HanChat Team
 </p>
 
 ***

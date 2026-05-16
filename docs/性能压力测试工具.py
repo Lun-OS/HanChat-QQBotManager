@@ -105,8 +105,8 @@ class TestResult:
         return self.total_sent - self.total_replied
 
 
-class OneBotConnection:
-    """OneBot WebSocket 连接管理器"""
+class LLBotConnection:
+    """LLBot WebSocket 连接管理器"""
 
     def __init__(self, config: ConnectionConfig, message_handler: Optional[Callable] = None, 
                  reply_callback: Optional[Callable] = None):

@@ -11,9 +11,9 @@ import (
 	"HanChat-QQBotManager/internal/utils"
 )
 
-// OneBotService 多账号OneBot服务
-// 每个账号对应一个OneBotService实例，通过反向WebSocket与机器人通信
-type OneBotService struct {
+// LLOneBotService 多账号LLOneBot服务
+// 每个账号对应一个LLOneBotService实例，通过反向WebSocket与机器人通信
+type LLOneBotService struct {
 	selfID        string
 	logger        *zap.SugaredLogger
 	reverseWS     *ReverseWebSocketService
@@ -23,13 +23,13 @@ type OneBotService struct {
 	pendingReqs   map[string]chan *WSResponse // echo -> response channel
 }
 
-// NewOneBotService 创建OneBotService实例
+// NewLLOneBotService 创建LLOneBotService实例
 // selfID: 机器人QQ号
 // reverseWS: 反向WebSocket服务
-func NewOneBotService(selfID string, base *zap.Logger, reverseWS *ReverseWebSocketService) *OneBotService {
-	logger := utils.NewModuleLogger(base, "service.OneBot")
+func NewLLOneBotService(selfID string, base *zap.Logger, reverseWS *ReverseWebSocketService) *LLOneBotService {
+	logger := utils.NewModuleLogger(base, "service.llonebot")
 
-	svc := &OneBotService{
+	svc := &LLOneBotService{
 		selfID:      selfID,
 		logger:      logger.With("self_id", selfID),
 		reverseWS:   reverseWS,
@@ -41,9 +41,9 @@ func NewOneBotService(selfID string, base *zap.Logger, reverseWS *ReverseWebSock
 	return svc
 }
 
-// CallAPI 调用 OneBot 通用接口，返回解析后的map
+// CallAPI 调用 LLOneBot 通用接口，返回解析后的map
 // 修复问题20：添加安全的类型断言和响应验证
-func (s *OneBotService) CallAPI(endpoint string, params interface{}, method string) (map[string]interface{}, error) {
+func (s *LLOneBotService) CallAPI(endpoint string, params interface{}, method string) (map[string]interface{}, error) {
 	rawResp, err := s.CallAPIRaw(endpoint, params, method)
 	if err != nil {
 		return nil, err
@@ -81,9 +81,9 @@ func (s *OneBotService) CallAPI(endpoint string, params interface{}, method stri
 	return result, nil
 }
 
-// CallAPIRaw 调用 OneBot 通用接口，返回原始JSON字节
+// CallAPIRaw 调用 LLOneBot 通用接口，返回原始JSON字节
 // 通过反向WebSocket发送请求，并等待响应
-func (s *OneBotService) CallAPIRaw(endpoint string, params interface{}, method string) ([]byte, error) {
+func (s *LLOneBotService) CallAPIRaw(endpoint string, params interface{}, method string) ([]byte, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("endpoint不能为空")
 	}
@@ -133,7 +133,7 @@ func (s *OneBotService) CallAPIRaw(endpoint string, params interface{}, method s
 
 // HandleResponse 处理API响应
 // 由ReverseWebSocketService调用
-func (s *OneBotService) HandleResponse(response map[string]interface{}) {
+func (s *LLOneBotService) HandleResponse(response map[string]interface{}) {
 	echo, ok := response["echo"].(string)
 	if !ok {
 		return
@@ -155,51 +155,51 @@ func (s *OneBotService) HandleResponse(response map[string]interface{}) {
 }
 
 // GetSelfID 获取self_id
-func (s *OneBotService) GetSelfID() string {
+func (s *LLOneBotService) GetSelfID() string {
 	return s.selfID
 }
 
 // ========== 用户相关 ==========
 
 // GetLoginInfo 获取登录信息
-func (s *OneBotService) GetLoginInfo() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetLoginInfo() (map[string]interface{}, error) {
 	return s.CallAPI("/get_login_info", nil, "POST")
 }
 
 // GetFriendList 获取好友列表
-func (s *OneBotService) GetFriendList() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetFriendList() (map[string]interface{}, error) {
 	return s.CallAPI("/get_friend_list", nil, "POST")
 }
 
 // GetStrangerInfo 获取陌生人信息
-func (s *OneBotService) GetStrangerInfo(userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetStrangerInfo(userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_stranger_info", map[string]interface{}{"user_id": userId}, "POST")
 }
 
 // DeleteFriend 删除好友
-func (s *OneBotService) DeleteFriend(userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) DeleteFriend(userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/delete_friend", map[string]interface{}{"user_id": userId}, "POST")
 }
 
 // ========== 群组相关 ==========
 
 // GetGroupList 获取群列表
-func (s *OneBotService) GetGroupList() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupList() (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_list", nil, "POST")
 }
 
 // GetGroupInfo 获取群信息
-func (s *OneBotService) GetGroupInfo(groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupInfo(groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_info", map[string]interface{}{"group_id": groupId}, "POST")
 }
 
 // GetGroupMemberList 获取群成员列表
-func (s *OneBotService) GetGroupMemberList(groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupMemberList(groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_member_list", map[string]interface{}{"group_id": groupId}, "POST")
 }
 
 // GetGroupMemberInfo 获取群成员信息
-func (s *OneBotService) GetGroupMemberInfo(groupId, userId interface{}, noCache bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupMemberInfo(groupId, userId interface{}, noCache bool) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_member_info", map[string]interface{}{
 		"group_id": groupId,
 		"user_id":  userId,
@@ -208,7 +208,7 @@ func (s *OneBotService) GetGroupMemberInfo(groupId, userId interface{}, noCache 
 }
 
 // SetGroupCard 设置群名片
-func (s *OneBotService) SetGroupCard(groupId, userId interface{}, card string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupCard(groupId, userId interface{}, card string) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_card", map[string]interface{}{
 		"group_id": groupId,
 		"user_id":  userId,
@@ -217,7 +217,7 @@ func (s *OneBotService) SetGroupCard(groupId, userId interface{}, card string) (
 }
 
 // SetGroupLeave 退出群组
-func (s *OneBotService) SetGroupLeave(groupId interface{}, isDismiss bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupLeave(groupId interface{}, isDismiss bool) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_leave", map[string]interface{}{
 		"group_id":   groupId,
 		"is_dismiss": isDismiss,
@@ -225,7 +225,7 @@ func (s *OneBotService) SetGroupLeave(groupId interface{}, isDismiss bool) (map[
 }
 
 // SetGroupName 设置群名
-func (s *OneBotService) SetGroupName(groupId interface{}, groupName string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupName(groupId interface{}, groupName string) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_name", map[string]interface{}{
 		"group_id":   groupId,
 		"group_name": groupName,
@@ -235,7 +235,7 @@ func (s *OneBotService) SetGroupName(groupId interface{}, groupName string) (map
 // ========== 消息相关 ==========
 
 // SendPrivateMsg 发送私聊消息
-func (s *OneBotService) SendPrivateMsg(userId interface{}, message interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendPrivateMsg(userId interface{}, message interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/send_private_msg", map[string]interface{}{
 		"user_id": userId,
 		"message": message,
@@ -243,7 +243,7 @@ func (s *OneBotService) SendPrivateMsg(userId interface{}, message interface{}) 
 }
 
 // SendGroupMsg 发送群消息
-func (s *OneBotService) SendGroupMsg(groupId interface{}, message interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendGroupMsg(groupId interface{}, message interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/send_group_msg", map[string]interface{}{
 		"group_id": groupId,
 		"message":  message,
@@ -251,19 +251,19 @@ func (s *OneBotService) SendGroupMsg(groupId interface{}, message interface{}) (
 }
 
 // GetMsg 获取消息
-func (s *OneBotService) GetMsg(messageId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetMsg(messageId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_msg", map[string]interface{}{"message_id": messageId}, "POST")
 }
 
 // DeleteMsg 撤回消息
-func (s *OneBotService) DeleteMsg(messageId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) DeleteMsg(messageId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/delete_msg", map[string]interface{}{"message_id": messageId}, "POST")
 }
 
 // ========== 群管理相关 ==========
 
 // SetGroupBan 群组禁言
-func (s *OneBotService) SetGroupBan(groupId, userId interface{}, duration interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupBan(groupId, userId interface{}, duration interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_ban", map[string]interface{}{
 		"group_id": groupId,
 		"user_id":  userId,
@@ -272,7 +272,7 @@ func (s *OneBotService) SetGroupBan(groupId, userId interface{}, duration interf
 }
 
 // SetGroupWholeBan 群组全员禁言
-func (s *OneBotService) SetGroupWholeBan(groupId interface{}, enable bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupWholeBan(groupId interface{}, enable bool) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_whole_ban", map[string]interface{}{
 		"group_id": groupId,
 		"enable":   enable,
@@ -280,7 +280,7 @@ func (s *OneBotService) SetGroupWholeBan(groupId interface{}, enable bool) (map[
 }
 
 // SetGroupAdmin 设置群管理员
-func (s *OneBotService) SetGroupAdmin(groupId, userId interface{}, enable bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupAdmin(groupId, userId interface{}, enable bool) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_admin", map[string]interface{}{
 		"group_id": groupId,
 		"user_id":  userId,
@@ -289,7 +289,7 @@ func (s *OneBotService) SetGroupAdmin(groupId, userId interface{}, enable bool) 
 }
 
 // SetGroupKick 群组踢人
-func (s *OneBotService) SetGroupKick(groupId interface{}, userId interface{}, rejectAddRequest bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupKick(groupId interface{}, userId interface{}, rejectAddRequest bool) (map[string]interface{}, error) {
 	return s.CallAPI("/set_group_kick", map[string]interface{}{
 		"group_id":           groupId,
 		"user_id":            userId,
@@ -300,7 +300,7 @@ func (s *OneBotService) SetGroupKick(groupId interface{}, userId interface{}, re
 // ========== 请求处理相关 ==========
 
 // SetFriendAddRequest 处理好友添加请求
-func (s *OneBotService) SetFriendAddRequest(flag interface{}, approve bool, remark string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetFriendAddRequest(flag interface{}, approve bool, remark string) (map[string]interface{}, error) {
 	params := map[string]interface{}{
 		"flag":    flag,
 		"approve": approve,
@@ -312,7 +312,7 @@ func (s *OneBotService) SetFriendAddRequest(flag interface{}, approve bool, rema
 }
 
 // SetGroupAddRequest 处理群添加请求
-func (s *OneBotService) SetGroupAddRequest(flag interface{}, subType string, approve bool, reason string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupAddRequest(flag interface{}, subType string, approve bool, reason string) (map[string]interface{}, error) {
 	params := map[string]interface{}{
 		"flag":     flag,
 		"sub_type": subType,
@@ -327,17 +327,17 @@ func (s *OneBotService) SetGroupAddRequest(flag interface{}, subType string, app
 // ========== 其他功能 ==========
 
 // GetStatus 获取机器人状态
-func (s *OneBotService) GetStatus() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetStatus() (map[string]interface{}, error) {
 	return s.CallAPI("/get_status", nil, "POST")
 }
 
 // GetVersionInfo 获取版本信息
-func (s *OneBotService) GetVersionInfo() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetVersionInfo() (map[string]interface{}, error) {
 	return s.CallAPI("/get_version_info", nil, "POST")
 }
 
 // SendLike 发送好友赞
-func (s *OneBotService) SendLike(userId interface{}, times int) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendLike(userId interface{}, times int) (map[string]interface{}, error) {
 	return s.CallAPI("/send_like", map[string]interface{}{
 		"user_id": userId,
 		"times":   times,
@@ -345,12 +345,12 @@ func (s *OneBotService) SendLike(userId interface{}, times int) (map[string]inte
 }
 
 // GetImage 获取图片
-func (s *OneBotService) GetImage(file string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetImage(file string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_image", map[string]interface{}{"file": file}, "POST")
 }
 
 // GetRecord 获取语音
-func (s *OneBotService) GetRecord(file string, outFormat string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetRecord(file string, outFormat string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_record", map[string]interface{}{
 		"file":       file,
 		"out_format": outFormat,
@@ -358,7 +358,7 @@ func (s *OneBotService) GetRecord(file string, outFormat string) (map[string]int
 }
 
 // UploadGroupFile 上传群文件
-func (s *OneBotService) UploadGroupFile(groupId interface{}, file, name string) (map[string]interface{}, error) {
+func (s *LLOneBotService) UploadGroupFile(groupId interface{}, file, name string) (map[string]interface{}, error) {
 	return s.CallAPI("/upload_group_file", map[string]interface{}{
 		"group_id": groupId,
 		"file":     file,
@@ -367,7 +367,7 @@ func (s *OneBotService) UploadGroupFile(groupId interface{}, file, name string) 
 }
 
 // UploadPrivateFile 上传私聊文件
-func (s *OneBotService) UploadPrivateFile(userId interface{}, file, name string) (map[string]interface{}, error) {
+func (s *LLOneBotService) UploadPrivateFile(userId interface{}, file, name string) (map[string]interface{}, error) {
 	return s.CallAPI("/upload_private_file", map[string]interface{}{
 		"user_id": userId,
 		"file":    file,
@@ -376,12 +376,12 @@ func (s *OneBotService) UploadPrivateFile(userId interface{}, file, name string)
 }
 
 // GetFile 获取文件
-func (s *OneBotService) GetFile(fileId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetFile(fileId string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_file", map[string]interface{}{"file_id": fileId}, "POST")
 }
 
 // GetMsgFile 获取消息文件（新增API）
-func (s *OneBotService) GetMsgFile(fileId string, download bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetMsgFile(fileId string, download bool) (map[string]interface{}, error) {
 	return s.CallAPI("/get_file", map[string]interface{}{
 		"file_id":  fileId,
 		"download": download,
@@ -389,12 +389,12 @@ func (s *OneBotService) GetMsgFile(fileId string, download bool) (map[string]int
 }
 
 // ScanQRCode 扫码接口（新增API）
-func (s *OneBotService) ScanQRCode(params map[string]interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) ScanQRCode(params map[string]interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/scan_qrcode", params, "POST")
 }
 
 // SendPoke 发送戳一戳
-func (s *OneBotService) SendPoke(groupId, userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendPoke(groupId, userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/send_poke", map[string]interface{}{
 		"group_id": groupId,
 		"user_id":  userId,
@@ -402,7 +402,7 @@ func (s *OneBotService) SendPoke(groupId, userId interface{}) (map[string]interf
 }
 
 // FriendPoke 好友戳一戳（支持 target_id）
-func (s *OneBotService) FriendPoke(userId, targetId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) FriendPoke(userId, targetId interface{}) (map[string]interface{}, error) {
 	params := map[string]interface{}{"user_id": userId}
 	if targetId != nil {
 		params["target_id"] = targetId
@@ -411,7 +411,7 @@ func (s *OneBotService) FriendPoke(userId, targetId interface{}) (map[string]int
 }
 
 // SetMsgEmojiLike 设置消息表情赞（支持取消）
-func (s *OneBotService) SetMsgEmojiLike(messageId, emojiId interface{}, set bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetMsgEmojiLike(messageId, emojiId interface{}, set bool) (map[string]interface{}, error) {
 	return s.CallAPI("/set_msg_emoji_like", map[string]interface{}{
 		"message_id": messageId,
 		"emoji_id":   emojiId,
@@ -420,7 +420,7 @@ func (s *OneBotService) SetMsgEmojiLike(messageId, emojiId interface{}, set bool
 }
 
 // ReshareFlashFile 重新分享闪传文件
-func (s *OneBotService) ReshareFlashFile(shareLink, fileSetId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) ReshareFlashFile(shareLink, fileSetId interface{}) (map[string]interface{}, error) {
 	params := map[string]interface{}{}
 	if shareLink != nil {
 		params["share_link"] = shareLink
@@ -432,7 +432,7 @@ func (s *OneBotService) ReshareFlashFile(shareLink, fileSetId interface{}) (map[
 }
 
 // RenameGroupFile 重命名群文件
-func (s *OneBotService) RenameGroupFile(groupId, fileId, newFileName interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) RenameGroupFile(groupId, fileId, newFileName interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/rename_group_file", map[string]interface{}{
 		"group_id":       groupId,
 		"file_id":        fileId,
@@ -443,14 +443,14 @@ func (s *OneBotService) RenameGroupFile(groupId, fileId, newFileName interface{}
 // ========== 插件需要的额外方法 ==========
 
 // VoiceMsgToText 语音转文字
-func (s *OneBotService) VoiceMsgToText(messageId int64) (map[string]interface{}, error) {
+func (s *LLOneBotService) VoiceMsgToText(messageId int64) (map[string]interface{}, error) {
 	return s.CallAPI("/voice_msg_to_text", map[string]interface{}{
 		"message_id": messageId,
 	}, "POST")
 }
 
 // CreateGroupFileFolder 创建群文件文件夹
-func (s *OneBotService) CreateGroupFileFolder(groupId int64, name, parentId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) CreateGroupFileFolder(groupId int64, name, parentId string) (map[string]interface{}, error) {
 	params := map[string]interface{}{
 		"group_id": groupId,
 		"name":     name,
@@ -462,7 +462,7 @@ func (s *OneBotService) CreateGroupFileFolder(groupId int64, name, parentId stri
 }
 
 // DeleteGroupFolder 删除群文件夹
-func (s *OneBotService) DeleteGroupFolder(groupId int64, folderId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) DeleteGroupFolder(groupId int64, folderId string) (map[string]interface{}, error) {
 	return s.CallAPI("/delete_group_folder", map[string]interface{}{
 		"group_id":  groupId,
 		"folder_id": folderId,
@@ -470,21 +470,21 @@ func (s *OneBotService) DeleteGroupFolder(groupId int64, folderId string) (map[s
 }
 
 // DeleteEssenceMsg 删除精华消息
-func (s *OneBotService) DeleteEssenceMsg(messageId int64) (map[string]interface{}, error) {
+func (s *LLOneBotService) DeleteEssenceMsg(messageId int64) (map[string]interface{}, error) {
 	return s.CallAPI("/delete_essence_msg", map[string]interface{}{
 		"message_id": messageId,
 	}, "POST")
 }
 
 // GetModelShow 获取模型展示
-func (s *OneBotService) GetModelShow(model string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetModelShow(model string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_model_show", map[string]interface{}{
 		"model": model,
 	}, "POST")
 }
 
 // SetModelShow 设置模型展示
-func (s *OneBotService) SetModelShow(model, modelShow string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetModelShow(model, modelShow string) (map[string]interface{}, error) {
 	return s.CallAPI("/set_model_show", map[string]interface{}{
 		"model":      model,
 		"model_show": modelShow,
@@ -492,7 +492,7 @@ func (s *OneBotService) SetModelShow(model, modelShow string) (map[string]interf
 }
 
 // SetQQProfile 设置QQ资料
-func (s *OneBotService) SetQQProfile(nickname, company, email, college, personalNote string) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetQQProfile(nickname, company, email, college, personalNote string) (map[string]interface{}, error) {
 	params := map[string]interface{}{}
 	if nickname != "" {
 		params["nickname"] = nickname
@@ -513,21 +513,21 @@ func (s *OneBotService) SetQQProfile(nickname, company, email, college, personal
 }
 
 // GetOnlineClients 获取在线客户端
-func (s *OneBotService) GetOnlineClients(noCache bool) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetOnlineClients(noCache bool) (map[string]interface{}, error) {
 	return s.CallAPI("/get_online_clients", map[string]interface{}{
 		"no_cache": noCache,
 	}, "POST")
 }
 
 // MarkMsgAsRead 标记消息为已读
-func (s *OneBotService) MarkMsgAsRead(userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) MarkMsgAsRead(userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/mark_msg_as_read", map[string]interface{}{
 		"user_id": userId,
 	}, "POST")
 }
 
 // ForwardFriendSingleMsg 转发好友单条消息
-func (s *OneBotService) ForwardFriendSingleMsg(messageId interface{}, userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) ForwardFriendSingleMsg(messageId interface{}, userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/forward_friend_single_msg", map[string]interface{}{
 		"message_id": messageId,
 		"user_id":    userId,
@@ -535,7 +535,7 @@ func (s *OneBotService) ForwardFriendSingleMsg(messageId interface{}, userId int
 }
 
 // ForwardGroupSingleMsg 转发群组单条消息
-func (s *OneBotService) ForwardGroupSingleMsg(messageId interface{}, groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) ForwardGroupSingleMsg(messageId interface{}, groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/forward_group_single_msg", map[string]interface{}{
 		"message_id": messageId,
 		"group_id":   groupId,
@@ -543,40 +543,40 @@ func (s *OneBotService) ForwardGroupSingleMsg(messageId interface{}, groupId int
 }
 
 // GetMsgRecord 获取消息记录
-func (s *OneBotService) GetMsgRecord(messageId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetMsgRecord(messageId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_msg_record", map[string]interface{}{
 		"message_id": messageId,
 	}, "POST")
 }
 
 // GetBotStatus 获取机器人状态
-func (s *OneBotService) GetBotStatus() (map[string]interface{}, error) {
+func (s *LLOneBotService) GetBotStatus() (map[string]interface{}, error) {
 	return s.CallAPI("/get_status", nil, "POST")
 }
 
 // GetForwardMsg 获取合并转发消息
-func (s *OneBotService) GetForwardMsg(messageId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetForwardMsg(messageId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_forward_msg", map[string]interface{}{
 		"message_id": messageId,
 	}, "POST")
 }
 
 // GetMsgImage 获取消息图片
-func (s *OneBotService) GetMsgImage(fileId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetMsgImage(fileId string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_image", map[string]interface{}{
 		"file": fileId,
 	}, "POST")
 }
 
 // GetFriendInfo 获取好友信息
-func (s *OneBotService) GetFriendInfo(userId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetFriendInfo(userId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_stranger_info", map[string]interface{}{
 		"user_id": userId,
 	}, "POST")
 }
 
 // SetGroupSpecialTitle 设置群专属头衔
-func (s *OneBotService) SetGroupSpecialTitle(groupId, userId interface{}, specialTitle string, duration int) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetGroupSpecialTitle(groupId, userId interface{}, specialTitle string, duration int) (map[string]interface{}, error) {
 	params := map[string]interface{}{
 		"group_id":      groupId,
 		"user_id":       userId,
@@ -589,7 +589,7 @@ func (s *OneBotService) SetGroupSpecialTitle(groupId, userId interface{}, specia
 }
 
 // GetGroupFileUrl 获取群文件URL
-func (s *OneBotService) GetGroupFileUrl(groupId interface{}, fileId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupFileUrl(groupId interface{}, fileId string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_file_url", map[string]interface{}{
 		"group_id": groupId,
 		"file_id":  fileId,
@@ -597,7 +597,7 @@ func (s *OneBotService) GetGroupFileUrl(groupId interface{}, fileId string) (map
 }
 
 // SendGroupForwardMsg 发送群合并转发消息
-func (s *OneBotService) SendGroupForwardMsg(groupId interface{}, messages interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendGroupForwardMsg(groupId interface{}, messages interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/send_group_forward_msg", map[string]interface{}{
 		"group_id": groupId,
 		"messages": messages,
@@ -605,7 +605,7 @@ func (s *OneBotService) SendGroupForwardMsg(groupId interface{}, messages interf
 }
 
 // SendPrivateForwardMsg 发送私聊合并转发消息
-func (s *OneBotService) SendPrivateForwardMsg(userId interface{}, messages interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SendPrivateForwardMsg(userId interface{}, messages interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/send_private_forward_msg", map[string]interface{}{
 		"user_id":  userId,
 		"messages": messages,
@@ -613,14 +613,14 @@ func (s *OneBotService) SendPrivateForwardMsg(userId interface{}, messages inter
 }
 
 // GetVideo 获取视频
-func (s *OneBotService) GetVideo(fileId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetVideo(fileId string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_video", map[string]interface{}{
 		"file": fileId,
 	}, "POST")
 }
 
 // DeleteGroupFile 删除群文件
-func (s *OneBotService) DeleteGroupFile(groupId interface{}, fileId string, busid int) (map[string]interface{}, error) {
+func (s *LLOneBotService) DeleteGroupFile(groupId interface{}, fileId string, busid int) (map[string]interface{}, error) {
 	return s.CallAPI("/delete_group_file", map[string]interface{}{
 		"group_id": groupId,
 		"file_id":  fileId,
@@ -629,21 +629,21 @@ func (s *OneBotService) DeleteGroupFile(groupId interface{}, fileId string, busi
 }
 
 // GetGroupFileSystemInfo 获取群文件系统信息
-func (s *OneBotService) GetGroupFileSystemInfo(groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupFileSystemInfo(groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_file_system_info", map[string]interface{}{
 		"group_id": groupId,
 	}, "POST")
 }
 
 // GetGroupRootFiles 获取群根目录文件列表
-func (s *OneBotService) GetGroupRootFiles(groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupRootFiles(groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_root_files", map[string]interface{}{
 		"group_id": groupId,
 	}, "POST")
 }
 
 // GetGroupFilesByFolder 获取群文件夹中的文件列表
-func (s *OneBotService) GetGroupFilesByFolder(groupId interface{}, folderId string) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetGroupFilesByFolder(groupId interface{}, folderId string) (map[string]interface{}, error) {
 	return s.CallAPI("/get_group_files_by_folder", map[string]interface{}{
 		"group_id":  groupId,
 		"folder_id": folderId,
@@ -651,21 +651,21 @@ func (s *OneBotService) GetGroupFilesByFolder(groupId interface{}, folderId stri
 }
 
 // SetEssenceMsg 设置精华消息
-func (s *OneBotService) SetEssenceMsg(messageId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) SetEssenceMsg(messageId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/set_essence_msg", map[string]interface{}{
 		"message_id": messageId,
 	}, "POST")
 }
 
 // GetEssenceMsgList 获取精华消息列表
-func (s *OneBotService) GetEssenceMsgList(groupId interface{}) (map[string]interface{}, error) {
+func (s *LLOneBotService) GetEssenceMsgList(groupId interface{}) (map[string]interface{}, error) {
 	return s.CallAPI("/get_essence_msg_list", map[string]interface{}{
 		"group_id": groupId,
 	}, "POST")
 }
 
 // CheckUrlSafely 检查URL安全性
-func (s *OneBotService) CheckUrlSafely(url string) (map[string]interface{}, error) {
+func (s *LLOneBotService) CheckUrlSafely(url string) (map[string]interface{}, error) {
 	return s.CallAPI("/check_url_safely", map[string]interface{}{
 		"url": url,
 	}, "POST")

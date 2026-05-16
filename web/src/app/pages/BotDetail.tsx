@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { useBotStore } from '../stores/botStore';
 import { BotStatus } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
+import Editor from '@monaco-editor/react';
 import { 
   ArrowLeft, 
   Activity, 
@@ -11,34 +12,30 @@ import {
   FileText, 
   Settings,
   Send,
-  Trash2,
   RefreshCw,
   Play,
   Pause,
-  Upload,
   TrendingUp,
-  Power,
+  Users,
   RotateCcw,
-  Unplug,
   X,
-  Check,
   Search,
   Download,
-  Edit3,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  Copy,
+  Code,
+  ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiTemplatesData from '../resources/ApiDebugTMPL.json';
 import { 
+  accountApi,
   botApi, 
   pluginApi, 
-  settingsApi, 
   systemApi,
   logApi,
-  PluginInfo,
-  SystemLog,
-  LogEntry 
+  PluginInfo
 } from '../services/api';
 
 // --- Types ---
@@ -46,7 +43,7 @@ interface BotStats {
   uptime: string;
   msg_received: number;
   msg_sent: number;
-  onebot_version: string;
+  llbot_version: string;
   ws_name: string;
 }
 
@@ -69,41 +66,32 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
     uptime: '-',
     msg_received: 0,
     msg_sent: 0,
-    onebot_version: '-',
+    llbot_version: '-',
     ws_name: '-',
   });
   const [loading, setLoading] = useState(true);
+  const [friendCount, setFriendCount] = useState<number>(0);
+  const [groupCount, setGroupCount] = useState<number>(0);
 
   const fetchStats = useCallback(async () => {
     try {
       setLoading(true);
 
-      // 获取状态信息
       const statusRes = await systemApi.getStatus(selfId);
       const versionRes = await systemApi.getVersionInfo(selfId);
 
-      // 调试日志
-      console.log('statusRes:', statusRes);
-      console.log('versionRes:', versionRes);
-
-      // 处理状态响应 - 后端包装格式: {status, retcode, data: {status, retcode, data: {stat}}}}
       let stat = {};
       const statusData = statusRes.data?.data || statusRes.data;
       if (statusData) {
         stat = statusData.stat || {};
       }
 
-      // 处理版本响应
       let versionData = {};
       const verData = versionRes.data?.data || versionRes.data;
       if (verData) {
         versionData = verData;
       }
 
-      console.log('提取的stat:', stat);
-      console.log('提取的versionData:', versionData);
-
-      // 获取WS名称
       let wsName = '-';
       try {
         const containerRes = await pluginApi.getAccountContainers();
@@ -121,9 +109,21 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
         uptime: formatUptime((stat as any).startup_time),
         msg_received: (stat as any).message_received || 0,
         msg_sent: (stat as any).message_sent || 0,
-        onebot_version: (versionData as any).app_version || (versionData as any).version || '-',
+        llbot_version: (versionData as any).app_version || (versionData as any).version || '-',
         ws_name: wsName,
       });
+
+      try {
+        const friendRes = await botApi.getFriendList(selfId);
+        const friendData = friendRes?.data?.data || friendRes?.data;
+        setFriendCount(Array.isArray(friendData) ? friendData.length : 0);
+      } catch { setFriendCount(0); }
+
+      try {
+        const groupRes = await botApi.getGroupList(selfId);
+        const groupData = groupRes?.data?.data || groupRes?.data;
+        setGroupCount(Array.isArray(groupData) ? groupData.length : 0);
+      } catch { setGroupCount(0); }
     } catch (error) {
       console.error('获取统计数据失败:', error);
       toast.error('获取统计数据失败');
@@ -132,7 +132,6 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
     }
   }, [selfId, bot]);
 
-  // 格式化运行时间
   const formatUptime = (startupTime: number): string => {
     if (!startupTime) return '-';
     const now = Math.floor(Date.now() / 1000);
@@ -147,7 +146,6 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
 
   useEffect(() => {
     fetchStats();
-    // 取消自动刷新，只在页面加载时获取一次数据
   }, [fetchStats]);
 
   if (loading) {
@@ -158,51 +156,138 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
     );
   }
 
+  const statCards = [
+    { label: '运行时间', value: stats.uptime, icon: Activity, gradient: 'from-blue-500 to-cyan-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+    { label: '收到消息', value: stats.msg_received.toLocaleString(), icon: TrendingUp, gradient: 'from-green-500 to-emerald-400', bg: 'bg-green-50 dark:bg-green-900/20' },
+    { label: '发送消息', value: stats.msg_sent.toLocaleString(), icon: Send, gradient: 'from-purple-500 to-violet-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+    { label: '好友数', value: friendCount.toLocaleString(), icon: Users, gradient: 'from-amber-500 to-orange-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
+    { label: '群组数', value: groupCount.toLocaleString(), icon: Package, gradient: 'from-pink-500 to-rose-400', bg: 'bg-pink-50 dark:bg-pink-900/20' },
+  ];
+
   return (
-    <motion.div 
+    <motion.div
       className="space-y-6"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {[
-          { label: '运行时间', value: stats.uptime, color: 'text-blue-600', icon: Activity },
-          { label: '收到消息', value: stats.msg_received, color: 'text-green-600', icon: TrendingUp },
-          { label: '发送消息', value: stats.msg_sent, color: 'text-purple-600', icon: Send },
-          { label: 'OneBot版本', value: stats.onebot_version, color: 'text-cyan-600', icon: Settings },
-          { label: 'WS名称', value: stats.ws_name, color: 'text-pink-600', icon: Power }
-        ].map((stat, idx) => (
-          <motion.div 
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {statCards.map((stat, idx) => (
+          <motion.div
             key={idx}
-            className="bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 hover:shadow-lg transition-shadow"
+            className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-md transition-shadow"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.1 }}
-            whileHover={{ y: -4 }}
+            transition={{ delay: idx * 0.08 }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-gray-500 dark:text-gray-400 text-sm">{stat.label}</h3>
-              <stat.icon className="w-4 h-4 text-gray-400" />
+            <div className={`h-1 bg-gradient-to-r ${stat.gradient}`} />
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{stat.label}</span>
+                <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center`}>
+                  <stat.icon className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
             </div>
-            <p className={`text-3xl font-bold ${stat.color}`}>{stat.value}</p>
           </motion.div>
         ))}
       </div>
 
-      <motion.div 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <motion.div
+          className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 p-5"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <Settings className="w-4 h-4 text-[#165DFF]" />
+            系统信息
+          </h3>
+          <div className="space-y-3">
+            {[
+              { label: 'LLBot 版本', value: stats.llbot_version },
+              { label: 'WS 名称', value: stats.ws_name },
+              { label: 'QQ 号', value: selfId },
+              { label: '状态', value: bot?.status === BotStatus.ONLINE ? '在线' : '离线' },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+                <span className="text-sm text-gray-500 dark:text-gray-400">{item.label}</span>
+                <span className={`text-sm font-medium ${
+                  item.label === '状态'
+                    ? (item.value === '在线' ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400')
+                    : 'text-gray-900 dark:text-white'
+                }`}>
+                  {item.label === '状态' && (
+                    <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${item.value === '在线' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                  )}
+                  {item.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 p-5"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-[#165DFF]" />
+            消息统计
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-500 dark:text-gray-400">收到消息</span>
+                <span className="text-xs font-medium text-gray-900 dark:text-white">{stats.msg_received.toLocaleString()}</span>
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (stats.msg_received / Math.max(stats.msg_received + stats.msg_sent, 1)) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-500 dark:text-gray-400">发送消息</span>
+                <span className="text-xs font-medium text-gray-900 dark:text-white">{stats.msg_sent.toLocaleString()}</span>
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (stats.msg_sent / Math.max(stats.msg_received + stats.msg_sent, 1)) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div className="pt-2 border-t border-gray-50 dark:border-gray-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500 dark:text-gray-400">消息总量</span>
+                <span className="text-sm font-bold text-gray-900 dark:text-white">{(stats.msg_received + stats.msg_sent).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+
+      <motion.div
         className="flex justify-end"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
+        transition={{ delay: 0.5 }}
       >
         <motion.button
           onClick={fetchStats}
-          className="p-2 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 rounded-lg transition-colors"
-          whileHover={{ rotate: 180 }}
-          transition={{ duration: 0.3 }}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
         >
           <RefreshCw className="w-4 h-4" />
+          刷新数据
         </motion.button>
       </motion.div>
     </motion.div>
@@ -211,274 +296,394 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
 
 // --- ApiDebug Component ---
 const ApiDebug = ({ botId }: { botId: string }) => {
-  const [mode, setMode] = useState<'simple' | 'advanced'>('simple');
   const templates = apiTemplatesData as unknown as ApiTemplates;
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-  const [endpoint, setEndpoint] = useState('');
-  const [params, setParams] = useState('{}');
-  const [response, setResponse] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState<Record<string, any>>({});
+  const [openApis, setOpenApis] = useState<string[]>([]);
+  const [activeApi, setActiveApi] = useState<string | null>(null);
+  const [requestBody, setRequestBody] = useState('{}');
+  const [response, setResponse] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteSearch, setPaletteSearch] = useState('');
+  const [activeEditorTab, setActiveEditorTab] = useState<'request' | 'docs'>('request');
+  const [responseExpanded, setResponseExpanded] = useState(true);
+  const [responseStatus, setResponseStatus] = useState<number | null>(null);
+  const [requestPath, setRequestPath] = useState('');
+  const paletteInputRef = useRef<HTMLInputElement>(null);
 
-  // 提取实际的接口名称（去掉冒号及后面内容）
   const extractEndpoint = (templateKey: string): string => {
     const colonIndex = templateKey.indexOf(':');
     return colonIndex > 0 ? templateKey.substring(0, colonIndex) : templateKey;
   };
 
-  const handleTemplateChange = (templateKey: string) => {
-    setSelectedTemplate(templateKey);
-    const template = templates[templateKey];
-    if (!template) return;
-    
-    // 使用提取后的接口名称
-    setEndpoint(extractEndpoint(templateKey));
-    setParams(JSON.stringify(template.json, null, 2));
-    
-    const initialFormData: Record<string, any> = {};
-    Object.entries(template.PS_json).forEach(([fieldName, fieldConfig]) => {
-      const [, , defaultValue] = fieldConfig;
-      initialFormData[fieldName] = defaultValue === '必须' ? '' : defaultValue;
-    });
-    setFormData(initialFormData);
-  };
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(prev => !prev);
+        setPaletteSearch('');
+      }
+      if (e.key === 'Escape' && paletteOpen) {
+        setPaletteOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [paletteOpen]);
 
-  const handleFormChange = (fieldName: string, value: any, type: string) => {
-    let newValue: any;
-    if (type === 'integer' || type === 'number') {
-      newValue = value === '' ? '' : Number(value);
-    } else if (type === 'boolean') {
-      newValue = Boolean(value);
-    } else {
-      newValue = value;
+  useEffect(() => {
+    if (paletteOpen && paletteInputRef.current) {
+      setTimeout(() => paletteInputRef.current?.focus(), 50);
     }
-    
-    setFormData(prev => ({ ...prev, [fieldName]: newValue }));
-    
-    const newParams = { ...formData, [fieldName]: newValue };
-    setParams(JSON.stringify(newParams, null, 2));
+  }, [paletteOpen]);
+
+  const openApi = (templateKey: string) => {
+    if (!openApis.includes(templateKey)) {
+      setOpenApis(prev => [...prev, templateKey]);
+    }
+    setActiveApi(templateKey);
+    const template = templates[templateKey];
+    if (template) {
+      setRequestBody(JSON.stringify(template.json, null, 2));
+    }
+    setRequestPath(extractEndpoint(templateKey));
+    setActiveEditorTab('request');
+    setResponse('');
+    setResponseStatus(null);
+    setPaletteOpen(false);
+    setPaletteSearch('');
   };
 
-  const handleParamsChange = (value: string) => {
-    setParams(value);
-    try {
-      const parsed = JSON.parse(value);
-      setFormData(parsed);
-    } catch {
-      // JSON 解析失败时不更新表单
+  const closeApi = (templateKey: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newOpenApis = openApis.filter(k => k !== templateKey);
+    setOpenApis(newOpenApis);
+    if (activeApi === templateKey) {
+      setActiveApi(newOpenApis.length > 0 ? newOpenApis[newOpenApis.length - 1] : null);
     }
   };
 
   const handleSend = async () => {
-    if (!endpoint) {
-      toast.error('请输入接口地址');
+    if (!activeApi) {
+      toast.error('请先选择一个接口');
       return;
     }
-
-    setLoading(true);
-    setResponse(null);
-
+    setIsFetching(true);
+    setResponse('');
+    setResponseStatus(null);
     try {
-      let requestParams;
-      try {
-        requestParams = JSON.parse(params);
-      } catch {
-        toast.error('请求参数 JSON 格式错误');
-        setLoading(false);
-        return;
-      }
-
-      const result = await botApi.callApi(botId, endpoint, requestParams);
+      const body = JSON.parse(requestBody);
+      const endpoint = requestPath || extractEndpoint(activeApi);
+      const result = await botApi.callApi(botId, endpoint, body);
       setResponse(JSON.stringify(result, null, 2));
-      
+      setResponseStatus(200);
       if (result.retcode === 0) {
-        toast.success('请求发送成功');
+        toast.success('请求成功');
       } else {
         toast.error(result.message || '请求失败');
       }
     } catch (error: any) {
       setResponse(JSON.stringify({ error: error.message }, null, 2));
+      setResponseStatus(500);
       toast.error('请求失败: ' + error.message);
     } finally {
-      setLoading(false);
+      setIsFetching(false);
     }
   };
 
-  const currentTemplate = selectedTemplate ? templates[selectedTemplate] : null;
+  const handleCopyResponse = () => {
+    if (response) {
+      navigator.clipboard.writeText(response);
+      toast.success('已复制响应');
+    }
+  };
+
+  const filteredTemplates = Object.entries(templates).filter(([key, template]) =>
+    key.toLowerCase().includes(paletteSearch.toLowerCase()) ||
+    template.PS.toLowerCase().includes(paletteSearch.toLowerCase())
+  );
+
+  const currentTemplate = activeApi ? templates[activeApi] : null;
 
   return (
-    <motion.div 
-      className="space-y-6"
+    <motion.div
+      className="backdrop-blur-sm bg-white/60 dark:bg-black/40 border border-white/40 dark:border-white/10 rounded-xl overflow-hidden flex flex-col"
+      style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">调试模式：</span>
-            <div className="flex bg-gray-100 dark:bg-[#2A2E38] rounded-lg p-1">
+      <div className="flex items-center gap-1 px-3 py-2 bg-white/30 dark:bg-white/5 rounded-t-xl border-b border-black/5 dark:border-white/10">
+        <div className="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
+          {openApis.map(apiKey => (
+            <div
+              key={apiKey}
+              onClick={() => { setActiveApi(apiKey); setRequestBody(JSON.stringify(templates[apiKey]?.json ?? {}, null, 2)); setRequestPath(extractEndpoint(apiKey)); setResponse(''); setResponseStatus(null); }}
+              className={`flex items-center gap-2 px-3 h-8 rounded-md cursor-pointer shrink-0 transition-colors ${
+                activeApi === apiKey
+                  ? 'bg-white/80 dark:bg-white/15 shadow-sm font-medium text-gray-900 dark:text-white'
+                  : 'text-gray-600 dark:text-white/70 hover:bg-white/10'
+              }`}
+            >
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600">POST</span>
+              <span className="text-xs truncate max-w-[120px]">{templates[apiKey]?.PS ?? extractEndpoint(apiKey)}</span>
               <button
-                onClick={() => setMode('simple')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  mode === 'simple'
-                    ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
+                onClick={(e) => closeApi(apiKey, e)}
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
               >
-                简易模式
-              </button>
-              <button
-                onClick={() => setMode('advanced')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  mode === 'advanced'
-                    ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                高级模式
+                <X className="w-3 h-3" />
               </button>
             </div>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500 dark:text-gray-400">选择模板：</span>
-            <select
-              value={selectedTemplate}
-              onChange={e => handleTemplateChange(e.target.value)}
-              className="px-3 py-1.5 bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg text-sm outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white min-w-[200px]"
-            >
-              <option value="">-- 请选择接口模板 --</option>
-              {Object.entries(templates).map(([key, template]) => (
-                <option key={key} value={key}>
-                  {extractEndpoint(key)} - {template.PS}
-                </option>
-              ))}
-            </select>
-          </div>
+          ))}
         </div>
+        <button
+          onClick={() => { setPaletteOpen(true); setPaletteSearch(''); }}
+          className="flex items-center gap-1.5 px-3 h-8 rounded-md text-gray-500 dark:text-white/50 hover:bg-white/10 transition-colors shrink-0"
+          title="Ctrl+K 搜索接口"
+        >
+          <Search className="w-3.5 h-3.5" />
+          <span className="text-xs">搜索</span>
+          <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono">⌘K</kbd>
+        </button>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
-          <div className="md:col-span-2">
-            <select 
-              className="w-full p-2.5 bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
-              disabled
-            >
-              <option>默认</option>
-            </select>
-          </div>
-          <div className="md:col-span-10 flex gap-2">
-            <div className="flex-1 flex items-center bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg px-3 text-gray-500 font-mono text-sm">
-              <span>/api/{botId}/</span>
-              <input 
-                type="text" 
-                value={endpoint} 
-                onChange={e => setEndpoint(e.target.value)}
-                className="flex-1 bg-transparent border-none outline-none text-gray-900 dark:text-white ml-1"
-                placeholder="请输入接口地址" 
-                readOnly={mode === 'simple'}
+      {activeApi && currentTemplate ? (
+        <>
+          <div className="flex items-center gap-4 px-4 py-2 border-b border-black/5 dark:border-white/10 bg-white/40 dark:bg-black/20">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600 shrink-0">POST</span>
+              <span className="text-gray-400 dark:text-gray-500 shrink-0">/</span>
+              <input
+                type="text"
+                value={requestPath}
+                onChange={e => setRequestPath(e.target.value)}
+                className="flex-1 min-w-0 bg-transparent font-mono text-sm text-gray-800 dark:text-white/90 outline-none border-none placeholder-gray-400"
+                placeholder="请求路径"
               />
             </div>
-            <motion.button 
+            <button
               onClick={handleSend}
-              disabled={loading || !endpoint}
-              className="px-6 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors flex items-center justify-center min-w-[100px] disabled:opacity-50"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              disabled={isFetching}
+              className="bg-[#165DFF] text-white rounded-md px-4 h-8 font-bold shadow-sm hover:bg-[#4080FF] transition-colors flex items-center gap-2 disabled:opacity-50 shrink-0"
             >
-              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : '发送'}
-            </motion.button>
+              {isFetching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              发送
+            </button>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[400px]">
-          <div className="flex flex-col">
-            {mode === 'simple' ? (
-              <>
-                <label className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
-                  请求参数
-                  {currentTemplate && (
-                    <span className="ml-2 text-xs text-gray-500 font-normal">({currentTemplate.PS})</span>
-                  )}
-                </label>
-                <div className="flex-1 overflow-auto p-4 bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg">
-                  {selectedTemplate && currentTemplate ? (
-                    <div className="space-y-4">
-                      {Object.entries(currentTemplate.PS_json).map(([fieldName, fieldConfig], idx) => {
+          <div className="flex items-center gap-4 px-4 pt-2 border-b border-black/5 dark:border-white/10">
+            <button
+              onClick={() => setActiveEditorTab('request')}
+              className={`text-xs font-medium pb-2 border-b-2 transition-colors ${
+                activeEditorTab === 'request'
+                  ? 'border-[#165DFF] text-[#165DFF]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              请求体
+            </button>
+            <button
+              onClick={() => setActiveEditorTab('docs')}
+              className={`text-xs font-medium pb-2 border-b-2 transition-colors ${
+                activeEditorTab === 'docs'
+                  ? 'border-[#165DFF] text-[#165DFF]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              接口文档
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {activeEditorTab === 'request' ? (
+              <Editor
+                height="100%"
+                language="json"
+                value={requestBody}
+                onChange={val => setRequestBody(val ?? '{}')}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  lineNumbers: 'on',
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  tabSize: 2,
+                  padding: { top: 8 },
+                  wordWrap: 'on',
+                }}
+              />
+            ) : (
+              <div className="p-4 overflow-auto h-full">
+                <div className="mb-4">
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">
+                    {currentTemplate.PS}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                    {extractEndpoint(activeApi)}
+                  </p>
+                </div>
+                {Object.keys(currentTemplate.PS_json).length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">参数说明</h4>
+                    <div className="space-y-2">
+                      {Object.entries(currentTemplate.PS_json).map(([fieldName, fieldConfig]) => {
                         const [type, description, defaultValue] = fieldConfig;
                         const isRequired = defaultValue === '必须';
-                        const fieldValue = formData[fieldName] ?? '';
-                        
                         return (
-                          <div key={idx} className="space-y-1">
-                            <label className="flex items-center text-sm text-gray-700 dark:text-gray-300">
-                              <span className="font-medium">{fieldName}</span>
-                              <span className="ml-2 text-xs text-gray-500">({type})</span>
-                              {isRequired && (
-                                <span className="ml-1 text-xs text-red-500">*</span>
+                          <div key={fieldName} className="flex items-start gap-3 p-2 rounded-lg bg-gray-50/50 dark:bg-white/5">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <code className="text-xs font-mono font-bold text-[#165DFF]">{fieldName}</code>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200/50 dark:bg-white/10 text-gray-500 dark:text-gray-400">{type}</span>
+                                {isRequired && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">必填</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>
+                              {!isRequired && defaultValue && (
+                                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">默认: {defaultValue}</p>
                               )}
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
-                            {type === 'boolean' ? (
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={fieldValue === true || fieldValue === 'true'}
-                                  onChange={e => handleFormChange(fieldName, e.target.checked, type)}
-                                  className="w-4 h-4 text-[#165DFF] rounded border-gray-300 focus:ring-[#165DFF]"
-                                />
-                                <span className="text-sm text-gray-600 dark:text-gray-400">
-                                  {fieldValue === true || fieldValue === 'true' ? '是' : '否'}
-                                </span>
-                              </label>
-                            ) : type === 'array' ? (
-                              <textarea
-                                value={fieldValue}
-                                onChange={e => handleFormChange(fieldName, e.target.value, type)}
-                                placeholder={isRequired ? '必填' : `默认值: ${defaultValue}`}
-                                rows={3}
-                                className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white resize-none"
-                              />
-                            ) : (
-                              <input
-                                type={type === 'integer' || type === 'number' ? 'number' : 'text'}
-                                value={fieldValue}
-                                onChange={e => handleFormChange(fieldName, e.target.value, type)}
-                                placeholder={isRequired ? '必填' : `默认值: ${defaultValue}`}
-                                className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
-                              />
-                            )}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      请先选择一个模板
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <label className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">请求参数 (JSON)</label>
-                <textarea
-                  value={params}
-                  onChange={e => handleParamsChange(e.target.value)}
-                  className="flex-1 w-full p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
-                  spellCheck={false}
-                />
-              </>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-          
-          <div className="flex flex-col h-full overflow-hidden">
-            <label className="text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">响应结果</label>
-            <div className="flex-1 w-full p-4 font-mono text-sm bg-gray-900 text-green-400 rounded-lg overflow-auto">
-              {response ? <pre className="whitespace-pre-wrap break-all">{response}</pre> : <span className="text-gray-500 select-none">等待请求...</span>}
+
+          <div className="border-t border-black/5 dark:border-white/10">
+            <div
+              onClick={() => setResponseExpanded(!responseExpanded)}
+              className="flex items-center gap-2 px-4 py-2 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            >
+              <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${responseExpanded ? '' : '-rotate-90'}`} />
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Response</span>
+              {responseStatus !== null && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  responseStatus >= 200 && responseStatus < 300
+                    ? 'bg-green-500/20 text-green-600'
+                    : 'bg-red-500/20 text-red-600'
+                }`}>
+                  {responseStatus} {responseStatus < 300 ? 'OK' : 'Error'}
+                </span>
+              )}
+              <div className="flex-1" />
+              {response && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleCopyResponse(); }}
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  复制
+                </button>
+              )}
             </div>
+            <AnimatePresence>
+              {responseExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 200, opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="h-[200px] bg-gray-950 overflow-auto">
+                    {response ? (
+                      <Editor
+                        height="100%"
+                        language="json"
+                        value={response}
+                        theme="vs-dark"
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: false },
+                          fontSize: 12,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          padding: { top: 8 },
+                          wordWrap: 'on',
+                        }}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-600 text-sm select-none">
+                        等待请求...
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 gap-4">
+          <Code className="w-12 h-12 opacity-30" />
+          <p className="text-sm">按 <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono text-xs">Ctrl+K</kbd> 搜索并打开接口</p>
         </div>
-      </div>
+      )}
+
+      <AnimatePresence>
+        {paletteOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[20vh]"
+            onClick={() => setPaletteOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: -10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: -10 }}
+              transition={{ duration: 0.15 }}
+              className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 w-full max-w-lg overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center border-b border-gray-200/50 dark:border-white/10">
+                <Search className="w-4 h-4 text-gray-400 ml-4 shrink-0" />
+                <input
+                  ref={paletteInputRef}
+                  type="text"
+                  value={paletteSearch}
+                  onChange={e => setPaletteSearch(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') {
+                      setPaletteOpen(false);
+                    }
+                    if (e.key === 'Enter' && filteredTemplates.length > 0) {
+                      openApi(filteredTemplates[0][0]);
+                    }
+                  }}
+                  placeholder="搜索接口..."
+                  className="w-full p-4 bg-transparent text-lg outline-none text-gray-900 dark:text-white placeholder-gray-400"
+                />
+              </div>
+              <div className="max-h-[300px] overflow-y-auto">
+                {filteredTemplates.length === 0 ? (
+                  <div className="p-4 text-center text-gray-400 text-sm">未找到匹配的接口</div>
+                ) : (
+                  filteredTemplates.map(([key, template]) => (
+                    <button
+                      key={key}
+                      onClick={() => openApi(key)}
+                      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-left"
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600 shrink-0">POST</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{template.PS}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{extractEndpoint(key)}</div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
@@ -1039,31 +1244,113 @@ const Plugins = ({ selfId }: { selfId: string }) => {
   );
 };
 
+const JsonHighlight = ({ json }: { json: string }) => {
+  const highlightJson = (str: string): React.ReactNode[] => {
+    const parts: React.ReactNode[] = [];
+    let keyIndex = 0;
+    const regex = /("(?:[^"\\]|\\.)*")\s*:|("(?:[^"\\]|\\.)*")|(\b-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|(\btrue\b|\bfalse\b)|(\bnull\b)/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(str)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(str.slice(lastIndex, match.index));
+      }
+      if (match[1] !== undefined) {
+        parts.push(<span key={keyIndex++} className="text-cyan-500">{match[1]}</span>);
+        parts.push(<span key={keyIndex++}>:</span>);
+      } else if (match[2] !== undefined) {
+        parts.push(<span key={keyIndex++} className="text-green-500">{match[2]}</span>);
+      } else if (match[3] !== undefined) {
+        parts.push(<span key={keyIndex++} className="text-orange-500">{match[3]}</span>);
+      } else if (match[4] !== undefined) {
+        parts.push(<span key={keyIndex++} className="text-purple-500">{match[4]}</span>);
+      } else if (match[5] !== undefined) {
+        parts.push(<span key={keyIndex++} className="text-yellow-500">{match[5]}</span>);
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < str.length) {
+      parts.push(str.slice(lastIndex));
+    }
+    return parts;
+  };
+
+  try {
+    const obj = JSON.parse(json);
+    const formatted = JSON.stringify(obj, null, 2);
+    return <>{highlightJson(formatted)}</>;
+  } catch {
+    return <>{json}</>;
+  }
+};
+
+interface ParsedLogEntry {
+  timestamp: string | null;
+  direction: 'send' | 'recv' | null;
+  jsonContent: string | null;
+  raw: string;
+}
+
+const formatLogEntry = (log: string): ParsedLogEntry => {
+  const timestampMatch = log.match(/\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\]/);
+  const timestamp = timestampMatch ? timestampMatch[1] : null;
+  const directionMatch = log.match(/\[(send|recv)\]/);
+  const direction = directionMatch ? (directionMatch[1] as 'send' | 'recv') : null;
+  const jsonStart = log.indexOf('{');
+  let jsonContent: string | null = null;
+  if (jsonStart !== -1) {
+    jsonContent = log.substring(jsonStart);
+  }
+  return { timestamp, direction, jsonContent, raw: log };
+};
+
+const FormattedLogContent = ({ log, expanded }: { log: string; expanded: boolean }) => {
+  const parsed = formatLogEntry(log);
+
+  if (!expanded) {
+    return <div className="truncate" title="点击展开">{log}</div>;
+  }
+
+  return (
+    <pre className="whitespace-pre-wrap break-all font-mono text-xs">
+      {parsed.timestamp && (
+        <span className="text-blue-500 dark:text-blue-400 font-medium">[{parsed.timestamp}]</span>
+      )}
+      {' '}
+      {parsed.direction && (
+        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+          parsed.direction === 'send'
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+        }`}>
+          {parsed.direction}
+        </span>
+      )}
+      {parsed.jsonContent ? (
+        <div className="mt-1">
+          <JsonHighlight json={parsed.jsonContent} />
+        </div>
+      ) : (
+        <span className="font-mono">{log.replace(/\[.*?\]/g, '').trim()}</span>
+      )}
+    </pre>
+  );
+};
+
 // --- Logs Component ---
 const Logs = ({ selfId }: { selfId: string }) => {
   const [logs, setLogs] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [logType, setLogType] = useState<'ws' | 'plugin'>('ws');
-  const [directionFilter, setDirectionFilter] = useState<'all' | 'recv' | 'send'>('all');
-  const [expandedLog, setExpandedLog] = useState<number | null>(null);
-  const MAX_LOGS = 100; // 单个账号只缓存 100 条
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'send' | 'recv' | 'info'>('all');
+  const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动到底部
-  const scrollToBottom = () => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [logs]);
-
-  // 获取日志
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await logApi.getWSLogs(selfId, MAX_LOGS);
+      const res = await logApi.getWSLogs(selfId, 500);
       if (res.retcode === 0 && res.data) {
         setLogs(res.data.logs);
       }
@@ -1074,325 +1361,178 @@ const Logs = ({ selfId }: { selfId: string }) => {
     }
   }, [selfId]);
 
-  // 初始加载和定时刷新
   useEffect(() => {
     fetchLogs();
+  }, [fetchLogs]);
 
-    if (!autoRefresh) return;
-
-    // 每 3 秒刷新一次
-    const interval = setInterval(fetchLogs, 3000);
-    return () => clearInterval(interval);
-  }, [fetchLogs, autoRefresh]);
-
-  // 提取 echo 值用于配对
-  const extractEcho = (log: string): string | null => {
-    try {
-      // 找到 JSON 部分（在 [send] 或 [recv] 之后）
-      const jsonStart = log.indexOf('{');
-      if (jsonStart === -1) return null;
-      const jsonStr = log.substring(jsonStart);
-      const data = JSON.parse(jsonStr);
-      return data.echo || null;
-    } catch {
-      return null;
-    }
+  const getLogType = (log: string): 'send' | 'recv' | 'info' => {
+    if (log.includes('[send]')) return 'send';
+    if (log.includes('[recv]')) return 'recv';
+    return 'info';
   };
 
-  // 配对日志：将发送和对应的返回消息组合
-  const pairLogs = (logList: string[]) => {
-    const pairs: { send?: string; recv?: string; echo: string | null }[] = [];
-    const sendMap = new Map<string, string>();
-    const unpaired: string[] = [];
-
-    // 先收集所有发送消息
-    logList.forEach(log => {
-      if (log.includes('[send]')) {
-        const echo = extractEcho(log);
-        if (echo) {
-          sendMap.set(echo, log);
-        } else {
-          unpaired.push(log);
-        }
-      }
-    });
-
-    // 然后匹配接收消息
-    logList.forEach(log => {
-      if (log.includes('[recv]')) {
-        const echo = extractEcho(log);
-        if (echo && sendMap.has(echo)) {
-          pairs.push({
-            send: sendMap.get(echo),
-            recv: log,
-            echo
-          });
-          sendMap.delete(echo);
-        } else {
-          unpaired.push(log);
-        }
-      }
-    });
-
-    // 剩余未匹配的发送消息
-    sendMap.forEach((sendLog) => {
-      unpaired.push(sendLog);
-    });
-
-    return { pairs, unpaired };
+  const getLogTimestamp = (log: string): string => {
+    const match = log.match(/\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+    return match ? match[1] : '';
   };
 
-  // 过滤日志
   const filteredLogs = logs.filter(log => {
-    if (directionFilter === 'all') return true;
-    if (directionFilter === 'recv') return log.includes('[recv]');
-    if (directionFilter === 'send') return log.includes('[send]');
+    if (typeFilter !== 'all' && getLogType(log) !== typeFilter) return false;
+    if (searchKeyword) {
+      return log.toLowerCase().includes(searchKeyword.toLowerCase());
+    }
     return true;
   });
 
-  // 全部模式下使用配对视图
-  const { pairs, unpaired } = directionFilter === 'all' ? pairLogs(logs) : { pairs: [], unpaired: [] };
-
-  const getDirectionColor = (log: string) => {
-    if (log.includes('[recv]')) return 'text-green-600 bg-green-50 dark:bg-green-900/20';
-    if (log.includes('[send]')) return 'text-blue-600 bg-blue-50 dark:bg-blue-900/20';
-    return 'text-gray-500 bg-gray-50';
+  const toggleLogExpand = (index: number) => {
+    setExpandedLogs(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
   };
 
-  const getDirectionText = (log: string) => {
-    if (log.includes('[recv]')) return '接收';
-    if (log.includes('[send]')) return '发送';
-    return '未知';
+  const handleDownload = () => {
+    const content = filteredLogs.join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bot-${selfId}-logs.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('日志已下载');
   };
 
-  const clearLogs = () => {
-    setLogs([]);
-    toast.success('日志已清空');
-  };
+  const typeOptions = [
+    { key: 'all' as const, label: '全部', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+    { key: 'send' as const, label: '发送', color: 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' },
+    { key: 'recv' as const, label: '接收', color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400' },
+    { key: 'info' as const, label: '信息', color: 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400' },
+  ];
 
-  const toggleExpand = (index: number) => {
-    setExpandedLog(expandedLog === index ? null : index);
+  const getTypeBadge = (type: 'send' | 'recv' | 'info') => {
+    const config = {
+      send: { label: 'SEND', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+      recv: { label: 'RECV', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+      info: { label: 'INFO', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+    };
+    const c = config[type];
+    return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${c.cls}`}>{c.label}</span>;
   };
 
   return (
-    <motion.div 
-      className="bg-white dark:bg-[#1D2129] rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 overflow-hidden flex flex-col h-[600px]"
+    <motion.div
+      className="flex flex-col h-[calc(100vh-16rem)]"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-wrap justify-between items-center gap-4">
-        <div className="flex items-center gap-3">
-          <h3 className="font-bold text-gray-900 dark:text-white flex items-center">
-            <FileText className="w-5 h-5 mr-2 text-[#165DFF]" />
-            实时日志
-          </h3>
-          <span className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-          <span className="text-xs text-gray-500">
-            {autoRefresh ? '自动刷新' : '手动刷新'}
-          </span>
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="搜索日志关键词..."
+            value={searchKeyword}
+            onChange={e => setSearchKeyword(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#165DFF] backdrop-blur-sm transition-all"
+          />
         </div>
-        <div className="flex gap-2 items-center">
-          <span className="text-xs text-gray-500">
-            {filteredLogs.length} / {logs.length} 条
-          </span>
-          <select
-            value={logType}
-            onChange={e => setLogType(e.target.value as 'ws' | 'plugin')}
-            className="px-3 py-1.5 bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg text-sm outline-none text-gray-900 dark:text-white"
-          >
-            <option value="ws">默认</option>
-          </select>
-          <select
-            value={directionFilter}
-            onChange={e => setDirectionFilter(e.target.value as 'all' | 'recv' | 'send')}
-            className="px-3 py-1.5 bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg text-sm outline-none text-gray-900 dark:text-white"
-          >
-            <option value="all">全部</option>
-            <option value="recv">接收</option>
-            <option value="send">发送</option>
-          </select>
-          <motion.button 
-            onClick={fetchLogs}
-            disabled={isLoading}
-            className="p-2 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 rounded-lg transition-colors"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            title="刷新日志"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </motion.button>
-          <motion.button 
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`p-2 rounded-lg transition-colors ${autoRefresh ? 'text-green-600 bg-green-50' : 'text-gray-500 hover:text-gray-700'}`}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            title={autoRefresh ? '自动刷新开启' : '自动刷新关闭'}
-          >
-            {autoRefresh ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-          </motion.button>
-          <motion.button 
-            onClick={clearLogs}
-            className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            title="清空日志"
-          >
-            <Trash2 className="w-4 h-4" />
-          </motion.button>
+        <div className="flex items-center gap-2">
+          {typeOptions.map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setTypeFilter(opt.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${opt.color} ${
+                typeFilter === opt.key ? 'ring-2 ring-offset-1 ring-current shadow-sm' : 'opacity-60 hover:opacity-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
-      
-      <div className="flex-1 overflow-auto">
-        {directionFilter === 'all' ? (
-          // 全部模式：配对视图
-          <div className="space-y-2 p-2">
-            {pairs.length === 0 && unpaired.length === 0 ? (
-              <div className="text-center py-12 text-gray-500">
-                {isLoading ? '加载中...' : '暂无日志'}
-              </div>
-            ) : (
-              <>
-                {/* 配对的消息 */}
-                {pairs.map((pair, i) => (
-                  <motion.div
-                    key={`pair-${i}`}
-                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden cursor-pointer"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.01 }}
-                    onClick={() => toggleExpand(i)}
-                  >
-                    {/* 发送消息 */}
-                    {pair.send && (
-                      <div className="bg-blue-50 dark:bg-blue-900/10 p-3 border-b border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold text-blue-600 bg-blue-100 dark:bg-blue-900/30">
-                            发送
-                          </span>
-                          {pair.echo && (
-                            <span className="text-xs text-gray-400">echo: {pair.echo}</span>
-                          )}
-                        </div>
-                        <div className="text-gray-800 dark:text-gray-200 font-mono text-xs">
-                          {expandedLog === i ? (
-                            <div className="whitespace-pre-wrap break-all bg-white dark:bg-gray-800 p-2 rounded">
-                              {pair.send}
-                            </div>
-                          ) : (
-                            <div className="truncate" title="点击展开">
-                              {pair.send}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {/* 接收消息 */}
-                    {pair.recv && (
-                      <div className="bg-green-50 dark:bg-green-900/10 p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold text-green-600 bg-green-100 dark:bg-green-900/30">
-                            返回
-                          </span>
-                          {pair.echo && (
-                            <span className="text-xs text-gray-400">echo: {pair.echo}</span>
-                          )}
-                        </div>
-                        <div className="text-gray-800 dark:text-gray-200 font-mono text-xs">
-                          {expandedLog === i ? (
-                            <div className="whitespace-pre-wrap break-all bg-white dark:bg-gray-800 p-2 rounded">
-                              {pair.recv}
-                            </div>
-                          ) : (
-                            <div className="truncate" title="点击展开">
-                              {pair.recv}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-                {/* 未配对的消息 */}
-                {unpaired.map((log, i) => (
-                  <motion.div
-                    key={`unpaired-${i}`}
-                    className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2A2E38]/50"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: (pairs.length + i) * 0.01 }}
-                    onClick={() => toggleExpand(pairs.length + i)}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getDirectionColor(log)}`}>
-                        {getDirectionText(log)}
-                      </span>
-                      <span className="text-xs text-gray-400">(未配对)</span>
-                    </div>
-                    <div className="text-gray-800 dark:text-gray-200 font-mono text-xs">
-                      {expandedLog === pairs.length + i ? (
-                        <div className="whitespace-pre-wrap break-all bg-gray-100 dark:bg-gray-800 p-2 rounded">
-                          {log}
-                        </div>
-                      ) : (
-                        <div className="truncate" title="点击展开">
-                          {log}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </>
-            )}
+
+      <div className="bg-white/60 dark:bg-black/40 backdrop-blur-sm border border-white/40 dark:border-white/10 rounded-2xl overflow-hidden flex-1 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-black/5 dark:border-white/10 bg-white/30 dark:bg-white/5">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {filteredLogs.length} / {logs.length} 条日志
+          </span>
+          <div className="flex items-center gap-2">
+            <motion.button
+              onClick={fetchLogs}
+              disabled={isLoading}
+              className="p-1.5 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </motion.button>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#165DFF] bg-[#165DFF]/10 hover:bg-[#165DFF]/20 rounded-lg transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              下载
+            </button>
           </div>
-        ) : (
-          // 筛选模式：列表视图
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 dark:bg-[#2A2E38] text-gray-500 sticky top-0">
-              <tr>
-                <th className="px-6 py-3 w-24">方向</th>
-                <th className="px-6 py-3">消息内容</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredLogs.length === 0 ? (
-                <tr>
-                  <td colSpan={2} className="px-6 py-12 text-center text-gray-500">
-                    {isLoading ? '加载中...' : '暂无日志'}
-                  </td>
-                </tr>
-              ) : (
-                filteredLogs.map((log, i) => (
-                  <motion.tr 
-                    key={i} 
-                    className="hover:bg-gray-50 dark:hover:bg-[#2A2E38]/50 transition-colors cursor-pointer"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.01 }}
-                    onClick={() => toggleExpand(i)}
-                  >
-                    <td className="px-6 py-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getDirectionColor(log)}`}>
-                        {getDirectionText(log)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-gray-800 dark:text-gray-200 font-mono text-xs">
-                      {expandedLog === i ? (
-                        <div className="whitespace-pre-wrap break-all bg-gray-100 dark:bg-gray-800 p-2 rounded">
-                          {log}
-                        </div>
+        </div>
+
+        <div
+          ref={logsContainerRef}
+          className="flex-1 overflow-y-auto p-3 space-y-1"
+        >
+          {isLoading && logs.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+              <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+              加载中...
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+              {searchKeyword || typeFilter !== 'all' ? '没有匹配的日志' : '暂无日志'}
+            </div>
+          ) : (
+            filteredLogs.map((log, i) => {
+              const logType = getLogType(log);
+              const isExpanded = expandedLogs.has(i);
+              const parsed = formatLogEntry(log);
+
+              return (
+                <div
+                  key={i}
+                  onClick={() => toggleLogExpand(i)}
+                  className={`group rounded-lg px-3 py-2 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-white/5 ${
+                    logType === 'send' ? 'border-l-2 border-l-amber-400' :
+                    logType === 'recv' ? 'border-l-2 border-l-blue-400' :
+                    'border-l-2 border-l-gray-300 dark:border-l-gray-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 text-xs">
+                    {parsed.timestamp && (
+                      <span className="text-gray-400 dark:text-gray-500 font-mono shrink-0">{parsed.timestamp}</span>
+                    )}
+                    {getTypeBadge(logType)}
+                    <span className={`flex-1 min-w-0 ${isExpanded ? '' : 'truncate'}`}>
+                      {parsed.jsonContent ? (
+                        isExpanded ? (
+                          <JsonHighlight json={parsed.jsonContent} />
+                        ) : (
+                          <span className="text-gray-700 dark:text-gray-300 font-mono">{parsed.jsonContent.substring(0, 120)}{parsed.jsonContent.length > 120 ? '...' : ''}</span>
+                        )
                       ) : (
-                        <div className="truncate max-w-2xl" title="点击展开">
-                          {log}
-                        </div>
+                        <span className="text-gray-700 dark:text-gray-300">{log.replace(/\[.*?\]/g, '').trim()}</span>
                       )}
-                    </td>
-                  </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        )}
-        <div ref={logsEndRef} />
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </motion.div>
   );
@@ -1402,26 +1542,71 @@ const Logs = ({ selfId }: { selfId: string }) => {
 export function BotDetail() {
   const { selfId } = useParams<{ selfId: string }>();
   const navigate = useNavigate();
-  const { bots, selectBot } = useBotStore();
+  const { bots, selectBot, setBots } = useBotStore();
   const [activeTab, setActiveTab] = useState('overview');
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [botLoading, setBotLoading] = useState(true);
 
-  const bot = bots.find(b => b.self_id === selfId);
+  let bot = bots.find(b => b.self_id === selfId);
 
   useEffect(() => {
     if (selfId) selectBot(selfId);
   }, [selfId, selectBot]);
 
-  const handleDisconnect = async () => {
+  useEffect(() => {
+    if (!selfId || bot) {
+      setBotLoading(false);
+      return;
+    }
+    const fetchBot = async () => {
+      try {
+        setBotLoading(true);
+        const res = await accountApi.getAccounts();
+        if ((res.success || res.status === 'ok') && Array.isArray(res.data)) {
+          const mapped = res.data.map((a: any) => ({
+            self_id: a.self_id,
+            nickname: a.login_info?.nickname || a.self_id,
+            custom_name: a.custom_name || '',
+            status: a.is_online ? 'online' as const : 'offline' as const,
+            last_connect: a.last_connected_at || '',
+            msg_count_today: 0,
+            friend_count: 0,
+            group_count: 0,
+            avatar: `https://q1.qlogo.cn/g?b=qq&nk=${a.self_id}&s=40`,
+            version_info: a.version_info,
+            bot_status: a.bot_status,
+          }));
+          setBots(mapped);
+        }
+      } catch {
+        // ignore
+      } finally {
+        setBotLoading(false);
+      }
+    };
+    fetchBot();
+  }, [selfId, bot, setBots]);
+
+  bot = bots.find(b => b.self_id === selfId);
+
+  if (botLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF]" />
+      </div>
+    );
+  }
+
+  const handleRestart = async () => {
     if (!selfId) return;
-    setDisconnecting(true);
+    setRestarting(true);
     try {
-      await systemApi.disconnect(selfId);
-      toast.success('已断开连接');
+      await botApi.callApi(selfId, 'set_restart');
+      toast.success('重启指令已发送');
     } catch (error) {
-      toast.error('断开连接失败');
+      toast.error('重启失败');
     } finally {
-      setDisconnecting(false);
+      setRestarting(false);
     }
   };
 
@@ -1429,7 +1614,7 @@ export function BotDetail() {
     return (
       <div className="p-8 text-center text-gray-500">
         <p className="mb-4">Bot not found</p>
-        <button onClick={() => navigate('/')} className="text-[#165DFF] underline">返回首页</button>
+        <button onClick={() => navigate('/bots')} className="text-[#165DFF] underline">返回列表</button>
       </div>
     );
   }
@@ -1445,50 +1630,50 @@ export function BotDetail() {
     <div className="flex flex-col h-full space-y-6">
       {/* Top Header */}
       <motion.div 
-        className="flex items-center justify-between bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800"
+        className="flex items-center justify-between bg-white dark:bg-[#1D2129] px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-800"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="flex items-center">
           <motion.button 
-            onClick={() => navigate('/')} 
-            className="mr-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            onClick={() => navigate('/bots')} 
+            className="mr-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
           >
-            <ArrowLeft className="w-5 h-5 text-gray-500" />
+            <ArrowLeft className="w-4 h-4 text-gray-500" />
           </motion.button>
           <motion.img 
             src={bot.avatar} 
-            className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 mr-4 ring-4 ring-white dark:ring-[#1D2129]" 
+            className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 mr-3 ring-2 ring-white dark:ring-[#1D2129]" 
             alt="Avatar"
             whileHover={{ scale: 1.1 }}
           />
           <div>
-             <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
+             <h1 className="text-base font-bold text-gray-900 dark:text-white flex items-center">
                {bot.nickname}
-               <span className={`ml-3 px-2 py-0.5 rounded-full text-xs font-normal border ${
+               <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                  bot.status === BotStatus.ONLINE 
-                   ? 'bg-green-50 border-green-200 text-green-600' 
-                   : 'bg-gray-50 border-gray-200 text-gray-500'
+                   ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                   : 'bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                }`}>
                  {bot.status === BotStatus.ONLINE ? '在线' : '离线'}
                </span>
              </h1>
-             <p className="text-gray-500 font-mono text-sm mt-1">QQ: {bot.self_id}</p>
+             <p className="text-gray-400 dark:text-gray-500 font-mono text-xs mt-0.5">QQ: {bot.self_id}</p>
           </div>
         </div>
         
-        <div className="flex space-x-3">
-          <motion.button
-            onClick={handleDisconnect}
-            disabled={disconnecting}
-            className="px-4 py-2 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+        <div className="flex space-x-2">
+          <motion.button 
+            onClick={handleRestart}
+            disabled={restarting}
+            className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-[#2A2E38] transition-colors text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            {disconnecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Unplug className="w-4 h-4" />}
-            断开连接
+            {restarting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            重启服务
           </motion.button>
         </div>
       </motion.div>

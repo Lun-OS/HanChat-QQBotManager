@@ -12,7 +12,7 @@ import (
 )
 
 // RegisterGroupRoutes 注册群组相关路由
-func RegisterGroupRoutes(r *gin.RouterGroup, ll *services.OneBotService, base *zap.Logger) {
+func RegisterGroupRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *zap.Logger) {
 	logger := base.With(zap.String("module", "api.group")).Sugar()
 
 	// 获取群列表

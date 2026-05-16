@@ -1,157 +1,287 @@
-import { useEffect, useState, useCallback } from 'react';
-import { motion } from 'motion/react';
-import { 
-  Users, 
-  MessageSquare, 
-  Activity,
-  RefreshCw, 
-  MoreHorizontal,
-  BotIcon,
-  TrendingUp,
-  Zap,
-  Loader2
+import { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  Monitor,
+  Cpu,
+  HardDrive,
+  Wifi,
+  Code,
+  Users,
+  Loader2,
+  ArrowUp,
+  ArrowDown,
+  MemoryStick,
 } from 'lucide-react';
-import { useBotStore, type Bot } from '../stores/botStore';
-import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { accountApi, type AccountData, pluginApi } from '../services/api';
+import { accountApi, type AccountData, pluginApi, systemApi, settingsApi } from '../services/api';
 import { BotStatus } from '../constants';
+import { UsagePie } from '../components/dashboard/UsagePie';
+
+interface ServerStatus {
+  os: {
+    platform: string;
+    platformFamily: string;
+    platformVersion: string;
+    kernelVersion: string;
+    os: string;
+  };
+  cpu: {
+    model: string;
+    cores: number;
+    usagePercent: number;
+  };
+  memory: {
+    total: number;
+    used: number;
+    available: number;
+    usagePercent: number;
+  };
+  network: {
+    uploadBytes: number;
+    downloadBytes: number;
+  };
+}
+
+interface PluginMemoryInfo {
+  name: string;
+  memory: number;
+  memory_mb: string;
+}
+
+// 格式化字节（用于网络速度）
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+};
+
+// 智能格式化内存大小
+const formatMemorySize = (bytes: number) => {
+  if (bytes < 1024) {
+    return bytes.toFixed(0) + ' B';
+  } else if (bytes < 1024 * 512) {
+    // 512KB 以内显示 KB
+    return (bytes / 1024).toFixed(1) + ' KB';
+  } else if (bytes < 1024 * 1024 * 1024) {
+    // 1GB 以内显示 MB
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  } else {
+    // 1GB 以上显示 GB
+    return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+  }
+};
+
+const cardCls = 'backdrop-blur-sm border border-white/40 dark:border-white/10 shadow-sm rounded-2xl transition-all overflow-hidden bg-white/60 dark:bg-black/40';
+
+const StatusItem: React.FC<{ title: string; value?: string | number; unit?: string }> = ({ title, value = '-', unit }) => (
+  <div className='py-1.5 text-sm col-span-1 flex justify-between items-center'>
+    <div className='w-24 font-medium text-default-600 dark:text-gray-300'>{title}</div>
+    <div className='font-mono text-xs text-default-500'>
+      {value}
+      {unit && <span className='ml-0.5 opacity-70'>{unit}</span>}
+    </div>
+  </div>
+);
 
 export function Dashboard() {
-  const { bots, setBots, selectBot } = useBotStore();
-  const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [totalPluginCount, setTotalPluginCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
+  const [backendVersion, setBackendVersion] = useState('');
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [totalAccountCount, setTotalAccountCount] = useState(0);
+  const [runningPluginCount, setRunningPluginCount] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState(0);
+  const [downloadSpeed, setDownloadSpeed] = useState(0);
+  const [prevUpload, setPrevUpload] = useState(0);
+  const [prevDownload, setPrevDownload] = useState(0);
+  const [pluginMemories, setPluginMemories] = useState<PluginMemoryInfo[]>([]);
+  const [pluginMemTotal, setPluginMemTotal] = useState(0);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const networkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pluginMemTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchAccounts = useCallback(async () => {
+  const fetchPluginMemory = useCallback(async () => {
     try {
-      const response = await accountApi.getAccounts();
+      console.log('开始获取插件内存...');
+      const allPluginsRes = await pluginApi.getAllPluginsWithMemory();
+      console.log('所有插件响应:', allPluginsRes);
       
-      if ((response.status === 'ok' || response.success) && Array.isArray(response.data)) {
-        const botList: Bot[] = response.data.map((account: AccountData) => {
-          // 优先使用登录信息中的昵称
-          let nickname = account.login_info?.nickname || account.custom_name || `Bot ${account.self_id}`;
-          let friendCount = 0;
-          let groupCount = 0;
-          let msgCountToday = 0;
+      if (!allPluginsRes.success || !Array.isArray(allPluginsRes.data)) return;
 
-          // 如果有状态信息，从中获取统计数据
-          if (account.bot_status?.stat) {
-            const stat = account.bot_status.stat;
-            msgCountToday = stat.message_received + stat.message_sent;
-          }
+      const allPlugins: PluginMemoryInfo[] = [];
+      let totalMem = 0;
 
-          // 从login_info获取user_id用于头像
-          const userId = account.login_info?.user_id?.toString() || account.self_id;
-
-          return {
-            self_id: account.self_id,
-            nickname: nickname,
-            custom_name: account.custom_name || '',
-            status: account.status,
-            last_connect: account.last_connected_at,
-            msg_count_today: msgCountToday,
-            friend_count: friendCount,
-            group_count: groupCount,
-            avatar: `http://q1.qlogo.cn/g?b=qq&nk=${userId}&s=100`,
-            version_info: account.version_info,
-            bot_status: account.bot_status,
-          };
+      for (const plugin of allPluginsRes.data) {
+        const mem = plugin.memory || 0;
+        totalMem += mem;
+        // 显示插件名称和所属账号
+        allPlugins.push({
+          name: `${plugin.name} (${plugin.self_id})`,
+          memory: mem,
+          // 使用我们自己的格式化函数
+          memory_mb: formatMemorySize(mem),
         });
-
-        // 排序：在线的在前，然后按自定义名称字母顺序排序
-        botList.sort((a, b) => {
-          if (a.status === BotStatus.ONLINE && b.status !== BotStatus.ONLINE) return -1;
-          if (a.status !== BotStatus.ONLINE && b.status === BotStatus.ONLINE) return 1;
-          const nameA = (a.custom_name || '').toLowerCase();
-          const nameB = (b.custom_name || '').toLowerCase();
-          return nameA.localeCompare(nameB);
-        });
-
-        setBots(botList);
-      } else {
-        setBots([]);
       }
-    } catch (error) {
-      console.error('获取账号列表失败:', error);
-      toast.error('获取账号列表失败');
-    }
-  }, [setBots]);
 
-  // 获取插件数量
-  const fetchPluginCount = useCallback(async () => {
-    try {
-      const response = await pluginApi.getAccountContainers();
-      if (response.success && Array.isArray(response.data)) {
-        const total = response.data.reduce((sum, container) => sum + (container.plugin_count || 0), 0);
-        setTotalPluginCount(total);
-      }
-    } catch (error) {
-      console.error('获取插件数量失败:', error);
+      // 确保按内存从高到低排序
+      allPlugins.sort((a, b) => b.memory - a.memory);
+      console.log('最终插件列表:', allPlugins);
+      setPluginMemories(allPlugins);
+      setPluginMemTotal(totalMem);
+    } catch (e) {
+      console.error('获取插件内存失败:', e);
     }
   }, []);
 
-  useEffect(() => {
-    setIsLoading(true);
-    Promise.all([fetchAccounts(), fetchPluginCount()]).finally(() => setIsLoading(false));
-  }, [fetchAccounts, fetchPluginCount]);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
+  const fetchInitialData = useCallback(async () => {
     try {
-      await Promise.all([fetchAccounts(), fetchPluginCount()]);
-      toast.success('刷新成功');
+      const [statusRes, infoRes, accountsRes, allPluginsRes] = await Promise.all([
+        systemApi.getServerStatus(),
+        systemApi.getSystemInfo(),
+        accountApi.getAccounts(),
+        pluginApi.getAllPluginsWithMemory(),
+      ]);
+
+      if (statusRes.success && statusRes.data) {
+        setServerStatus(statusRes.data);
+        setPrevUpload(statusRes.data.network.uploadBytes);
+        setPrevDownload(statusRes.data.network.downloadBytes);
+      }
+
+      if (infoRes.success && infoRes.data) {
+        setBackendVersion(infoRes.data.version);
+      }
+
+      if ((accountsRes.status === 'ok' || accountsRes.success) && Array.isArray(accountsRes.data)) {
+        setTotalAccountCount(accountsRes.data.length);
+        setOnlineCount(
+          accountsRes.data.filter((a: AccountData) => a.status === BotStatus.ONLINE).length
+        );
+      }
+
+      // 使用新的API获取准确的插件运行数量
+      if (allPluginsRes.success && Array.isArray(allPluginsRes.data)) {
+        setRunningPluginCount(allPluginsRes.data.length);
+      }
+
+      await fetchPluginMemory();
     } catch (error) {
-      toast.error('刷新失败');
-    } finally {
-      setIsRefreshing(false);
+      console.error('获取初始数据失败:', error);
+      toast.error('获取系统信息失败');
     }
-  };
+  }, [fetchPluginMemory]);
 
-  const handleViewBot = (botId: string) => {
-    selectBot(botId);
-    navigate(`/bot/${botId}`);
-  };
+  const fetchNetworkSpeed = useCallback(async () => {
+    try {
+      const res = await settingsApi.getNetworkSpeed();
+      if (res.success && res.data) {
+        setUploadSpeed(res.data.uploadSpeed);
+        setDownloadSpeed(res.data.downloadSpeed);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
 
-  const stats = [
-    {
-      title: '总账号数',
-      value: bots.length,
-      change: '+0',
-      icon: Users,
-      color: 'from-blue-500 to-blue-600',
-      bgColor: 'bg-blue-50 dark:bg-blue-900/20',
-      textColor: 'text-blue-600 dark:text-blue-400'
-    },
-    {
-      title: '在线账号',
-      value: bots.filter(b => b.status === BotStatus.ONLINE).length,
-      change: '+0',
-      icon: Activity,
-      color: 'from-green-500 to-emerald-600',
-      bgColor: 'bg-green-50 dark:bg-green-900/20',
-      textColor: 'text-green-600 dark:text-green-400'
-    },
-    {
-      title: '总处理消息数量',
-      value: bots.reduce((sum, b) => sum + (b.msg_count_today || 0), 0),
-      change: '+0',
-      icon: MessageSquare,
-      color: 'from-purple-500 to-purple-600',
-      bgColor: 'bg-purple-50 dark:bg-purple-900/20',
-      textColor: 'text-purple-600 dark:text-purple-400'
-    },
-    {
-      title: '插件运行数量',
-      value: totalPluginCount,
-      change: '+0',
-      icon: Zap,
-      color: 'from-orange-500 to-orange-600',
-      bgColor: 'bg-orange-50 dark:bg-orange-900/20',
-      textColor: 'text-orange-600 dark:text-orange-400'
-    },
-  ];
+  const connectSSE = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const token = localStorage.getItem('auth_token');
+    const url = token
+      ? `/api/system/status-stream?token=${encodeURIComponent(token)}`
+      : '/api/system/status-stream';
+
+    const es = new EventSource(url);
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data) {
+          setServerStatus((prev) => {
+            if (!prev) return prev;
+            const newUpload = data.network?.uploadBytes ?? prev.network.uploadBytes;
+            const newDownload = data.network?.downloadBytes ?? prev.network.downloadBytes;
+            if (prevUpload > 0 && newUpload > prevUpload) {
+              setUploadSpeed((newUpload - prevUpload) / 5);
+            }
+            if (prevDownload > 0 && newDownload > prevDownload) {
+              setDownloadSpeed((newDownload - prevDownload) / 5);
+            }
+            setPrevUpload(newUpload);
+            setPrevDownload(newDownload);
+            return {
+              os: prev.os,
+              cpu: data.cpu ?? prev.cpu,
+              memory: data.memory ?? prev.memory,
+              network: {
+                uploadBytes: newUpload,
+                downloadBytes: newDownload,
+              },
+            };
+          });
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+      startPolling();
+    };
+  }, [prevUpload, prevDownload]);
+
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const res = await systemApi.getServerStatus();
+        if (res.success && res.data) {
+          setServerStatus((prev) => {
+            if (!prev) return res.data;
+            const newUpload = res.data.network.uploadBytes;
+            const newDownload = res.data.network.downloadBytes;
+            if (prevUpload > 0 && newUpload > prevUpload) {
+              setUploadSpeed((newUpload - prevUpload) / 5);
+            }
+            if (prevDownload > 0 && newDownload > prevDownload) {
+              setDownloadSpeed((newDownload - prevDownload) / 5);
+            }
+            setPrevUpload(newUpload);
+            setPrevDownload(newDownload);
+            return res.data;
+          });
+        }
+      } catch {
+        // silent
+      }
+    }, 5000);
+  }, [prevUpload, prevDownload]);
+
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true);
+      await fetchInitialData();
+      setIsLoading(false);
+      connectSSE();
+    };
+    init();
+
+    networkTimerRef.current = setInterval(fetchNetworkSpeed, 5000);
+    fetchNetworkSpeed();
+
+    pluginMemTimerRef.current = setInterval(fetchPluginMemory, 10000);
+
+    return () => {
+      if (eventSourceRef.current) eventSourceRef.current.close();
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (networkTimerRef.current) clearInterval(networkTimerRef.current);
+      if (pluginMemTimerRef.current) clearInterval(pluginMemTimerRef.current);
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -161,152 +291,135 @@ export function Dashboard() {
     );
   }
 
+  const os = serverStatus?.os;
+  const cpu = serverStatus?.cpu;
+  const memory = serverStatus?.memory;
+
   return (
-    <div className="space-y-6">
-      <motion.div 
-        className="flex items-center justify-between"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">仪表盘</h1>
-          <p className="text-gray-500 dark:text-gray-400">管理所以连接的机器人ava</p>
-        </div>
-        <div className="flex gap-3">
-          <motion.button 
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="flex items-center px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-[#2A2E38] dark:border-gray-700 dark:text-gray-200 dark:hover:bg-[#343944] transition-all shadow-sm hover:shadow disabled:opacity-70"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-            刷新状态
-          </motion.button>
-          <motion.button
-            className="flex items-center px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-[#165DFF] to-[#0047FF] rounded-lg hover:shadow-lg hover:shadow-blue-500/50 transition-all shadow-md"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <BotIcon className="w-4 h-4 mr-2" />
-            偷懒中ava
-          </motion.button>
-        </div>
-      </motion.div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
-          <motion.div
-            key={index}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1, duration: 0.5 }}
-            whileHover={{ y: -4 }}
-            className="bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 hover:shadow-lg transition-shadow cursor-pointer group"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className={`p-3 rounded-xl ${stat.bgColor} group-hover:scale-110 transition-transform`}>
-                <stat.icon className={`w-6 h-6 ${stat.textColor}`} />
+    <section className='w-full p-2 md:p-4 md:max-w-[1000px] mx-auto overflow-hidden'>
+      <div className='grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch'>
+        <div className='flex flex-col gap-2'>
+          <div className={cardCls}>
+            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
+              <Monitor className='text-lg opacity-80' />
+              <span>系统信息</span>
+            </div>
+            <div className='px-4 pb-4 pt-2 flex flex-col gap-1'>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>OS</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{os?.os || '-'}</div>
               </div>
-              <div className={`flex items-center text-sm font-medium ${stat.textColor}`}>
-                <TrendingUp className="w-4 h-4 mr-1" />
-                <span>{stat.change}</span>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>平台</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{os?.platformFamily || '-'}</div>
+              </div>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>内核版本</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{os?.kernelVersion || '-'}</div>
+              </div>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>后端版本</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{backendVersion || '-'}</div>
               </div>
             </div>
-            <div>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">{stat.title}</p>
-              <h3 className="text-3xl font-bold text-gray-900 dark:text-white">{stat.value}</h3>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      <div>
-        <motion.h2
-          className="text-xl font-semibold text-gray-900 dark:text-white mb-4 flex items-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-        >
-          <BotIcon className="w-6 h-6 mr-2 text-[#165DFF]" />
-          机器人账号列表
-        </motion.h2>
-        
-        {bots.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-white dark:bg-[#1D2129] rounded-xl p-12 text-center border border-gray-100 dark:border-gray-800"
-          >
-            <BotIcon className="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">暂无机器人账号</h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              请在机器人客户端配置反向WebSocket连接到本服务端
-            </p>
-            <p className="text-sm text-gray-400 dark:text-gray-500">
-              WebSocket地址: ws://localhost:59178/ws/your_bot_name
-            </p>
-          </motion.div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {bots.map((bot, index) => (
-              <motion.div
-                key={bot.self_id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: index * 0.1 + 0.5, duration: 0.4 }}
-                whileHover={{ y: -8, transition: { duration: 0.2 } }}
-                className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl hover:border-[#165DFF]/50 transition-all p-6 group cursor-pointer"
-                onClick={() => handleViewBot(bot.self_id)}
-              >
-                <div className="flex items-start justify-between mb-6">
-                  <div className="flex items-center">
-                    <div className="relative">
-                      <motion.img 
-                        src={bot.avatar} 
-                        alt={bot.nickname} 
-                        className="w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 ring-4 ring-white dark:ring-[#1D2129] group-hover:ring-[#165DFF]/20"
-                        whileHover={{ scale: 1.1 }}
-                      />
-                      <motion.span 
-                        className={`absolute bottom-0 right-0 w-4 h-4 border-2 border-white dark:border-[#1D2129] rounded-full ${bot.status === BotStatus.ONLINE ? 'bg-green-500' : 'bg-gray-400'}`}
-                        animate={bot.status === BotStatus.ONLINE ? { scale: [1, 1.2, 1] } : {}}
-                        transition={{ duration: 2, repeat: Infinity }}
-                      />
-                    </div>
-                    <div className="ml-4">
-                      <h3 className="text-lg font-bold text-gray-900 dark:text-white group-hover:text-[#165DFF] transition-colors">{bot.nickname}</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">QQ: {bot.self_id}</p>
-                      {bot.version_info && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500">{bot.version_info.app_name} v{bot.version_info.app_version}</p>
-                      )}
-                    </div>
-                  </div>
-                  <motion.button 
-                    className="text-gray-400 hover:text-[#165DFF] transition-colors"
-                    whileHover={{ rotate: 90 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <MoreHorizontal className="w-6 h-6" />
-                  </motion.button>
-                </div>
-
-
-
-                <div className="flex items-center justify-between text-sm pt-4 border-t border-gray-100 dark:border-gray-800">
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {bot.custom_name}
-                  </span>
-                  <span className="text-[#165DFF] font-medium group-hover:underline">
-                    查看详情 →
-                  </span>
-                </div>
-              </motion.div>
-            ))}
           </div>
-        )}
+
+          <div className={cardCls}>
+            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
+              <Users className='text-lg opacity-80' />
+              <span>账号概览</span>
+            </div>
+            <div className='px-4 pb-4 pt-2 flex flex-col gap-1'>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>在线/总计</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{onlineCount} / {totalAccountCount}</div>
+              </div>
+              <div className='flex text-sm gap-3 py-2 items-baseline'>
+                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>运行中插件</div>
+                <div className='text-xs font-mono flex-1 text-default-500'>{runningPluginCount}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={`${cardCls} lg:col-span-2`}>
+          <div className='overflow-visible md:flex-row gap-4 items-center justify-stretch p-4 flex flex-col md:flex-row'>
+            <div className='flex-1 w-full md:max-w-96'>
+              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 text-default-700 dark:text-gray-200'>
+                <Cpu className='text-xl opacity-80' />
+                <span>CPU</span>
+              </h2>
+              <div className='grid grid-cols-2 gap-2'>
+                <StatusItem title='型号' value={cpu?.model || '-'} />
+                <StatusItem title='核心数' value={cpu?.cores ?? '-'} />
+                <StatusItem title='使用率' value={cpu?.usagePercent?.toFixed(1) ?? '-'} unit='%' />
+              </div>
+
+              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 mt-4 text-default-700 dark:text-gray-200'>
+                <HardDrive className='text-xl opacity-80' />
+                <span>内存</span>
+              </h2>
+              <div className='grid grid-cols-2 gap-2'>
+                <StatusItem title='总量' value={formatMemorySize(memory?.total ?? 0)} />
+                <StatusItem title='使用量' value={formatMemorySize(memory?.used ?? 0)} />
+              </div>
+            </div>
+            <div className='flex flex-row md:flex-col gap-2 flex-shrink-0 w-full justify-center md:w-40 min-h-40 mt-4 md:mt-0 md:mx-auto'>
+              <UsagePie
+                systemUsage={cpu?.usagePercent ?? 0}
+                processUsage={0}
+                title='CPU占用'
+              />
+              <UsagePie
+                systemUsage={memory?.usagePercent ?? 0}
+                processUsage={0}
+                title='内存占用'
+              />
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div className='mt-4 grid grid-cols-1 md:grid-cols-2 gap-4'>
+        <div className={cardCls}>
+          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
+            <Wifi className='text-lg opacity-80' />
+            <span>网络速度</span>
+          </div>
+          <div className='px-4 pb-4 pt-2 grid grid-cols-2 gap-4'>
+            <div className='flex items-center gap-2'>
+              <ArrowUp className='w-4 h-4 text-green-500' />
+              <div className='flex flex-col'>
+                <span className='text-xs text-default-600 dark:text-gray-300'>上传</span>
+                <span className='text-sm font-mono text-default-500'>{formatBytes(uploadSpeed)}/s</span>
+              </div>
+            </div>
+            <div className='flex items-center gap-2'>
+              <ArrowDown className='w-4 h-4 text-blue-500' />
+              <div className='flex flex-col'>
+                <span className='text-xs text-default-600 dark:text-gray-300'>下载</span>
+                <span className='text-sm font-mono text-default-500'>{formatBytes(downloadSpeed)}/s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={cardCls}>
+          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
+            <MemoryStick className='text-lg opacity-80' />
+            <span>Lua插件内存</span>
+            <span className='ml-auto text-xs font-normal text-default-500'>
+              暂不支持
+            </span>
+          </div>
+          <div className='px-4 pb-4 pt-2 flex flex-col gap-1 max-h-48 overflow-y-auto'>
+            <div className='flex flex-col items-center justify-center py-6'>
+              <Code className='w-8 h-8 text-gray-300 dark:text-gray-600 mb-2' />
+              <span className='text-sm text-gray-400 dark:text-gray-500'>暂不支持</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -13,16 +14,13 @@ import (
 	"HanChat-QQBotManager/internal/services"
 )
 
-// 内存中的设置存储（实际应用中应该使用配置文件或数据库）
 var (
 	settingsStore = make(map[string]string)
 	settingsMu    sync.RWMutex
 )
 
-// containsControlChars 检查字符串是否包含控制字符（防止注入攻击）
 func containsControlChars(s string) bool {
 	for _, r := range s {
-		// 禁止控制字符（0-31）和DEL（127），但允许正常的空白字符
 		if (r < 32 && r != '\t' && r != '\n' && r != '\r') || r == 127 {
 			return true
 		}
@@ -30,11 +28,9 @@ func containsControlChars(s string) bool {
 	return false
 }
 
-// RegisterSettingsRoutes 注册设置相关路由（已添加认证中间件）
 func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig *config.AccountConfig, reverseWS *services.ReverseWebSocketService) {
 	logger := base.With(zap.String("module", "api.settings")).Sugar()
 
-	// 获取系统设置
 	r.GET("", func(c *gin.Context) {
 		logger.Infow("获取系统设置", "requestId", c.GetString("requestId"))
 
@@ -42,7 +38,6 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 		websocketAuth := settingsStore["websocket_authorization"]
 		settingsMu.RUnlock()
 
-		// 如果内存中没有，尝试从环境变量读取
 		if websocketAuth == "" {
 			websocketAuth = os.Getenv("WEBSOCKET_AUTHORIZATION")
 		}
@@ -55,12 +50,15 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 		})
 	})
 
-	// 保存系统设置
 	r.POST("", func(c *gin.Context) {
 		logger.Infow("保存系统设置", "requestId", c.GetString("requestId"))
 
 		var body struct {
 			WebsocketAuthorization string `json:"websocket_authorization"`
+			WSPort                 *int   `json:"ws_port"`
+			LogLevel               string `json:"log_level"`
+			CorsOrigins            string `json:"cors_origins"`
+			LogRetentionDays       *int   `json:"log_retention_days"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -70,7 +68,6 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			return
 		}
 
-		// 输入验证：长度限制（最大512字符）
 		const maxTokenLength = 512
 		if len(body.WebsocketAuthorization) > maxTokenLength {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -80,7 +77,6 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			return
 		}
 
-		// 输入验证：禁止换行符和控制字符（防止注入）
 		if containsControlChars(body.WebsocketAuthorization) {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
@@ -89,15 +85,12 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			return
 		}
 
-		// 保存到内存
 		settingsMu.Lock()
 		settingsStore["websocket_authorization"] = body.WebsocketAuthorization
 		settingsMu.Unlock()
 
-		// 同时更新环境变量（仅当前进程有效）
 		os.Setenv("WEBSOCKET_AUTHORIZATION", body.WebsocketAuthorization)
 
-		// 更新配置文件
 		if accountConfig != nil {
 			cfg, err := accountConfig.LoadConfig()
 			if err == nil {
@@ -111,12 +104,60 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			}
 		}
 
-		// 实时更新ReverseWebSocketService的Token（使新连接立即生效）
 		if reverseWS != nil {
 			reverseWS.UpdateGlobalToken(body.WebsocketAuthorization)
 		}
 
-		// 安全日志：不记录Token内容，只记录是否设置
+		if accountConfig != nil && (body.WSPort != nil || body.LogLevel != "" || body.CorsOrigins != "" || body.LogRetentionDays != nil) {
+			cfg, err := accountConfig.LoadConfig()
+			if err == nil {
+				advanced := cfg.Advanced
+				if body.WSPort != nil {
+					if *body.WSPort < 1024 || *body.WSPort > 65535 {
+						c.JSON(http.StatusBadRequest, gin.H{
+							"success": false,
+							"message": "ws_port 必须在 1024-65535 之间",
+						})
+						return
+					}
+					advanced.WSPort = *body.WSPort
+				}
+				if body.LogLevel != "" {
+					validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+					if !validLevels[body.LogLevel] {
+						c.JSON(http.StatusBadRequest, gin.H{
+							"success": false,
+							"message": "log_level 必须为 debug/info/warn/error 之一",
+						})
+						return
+					}
+					advanced.LogLevel = body.LogLevel
+				}
+				if body.CorsOrigins != "" {
+					origins := strings.Split(body.CorsOrigins, ",")
+					for i, o := range origins {
+						origins[i] = strings.TrimSpace(o)
+					}
+					advanced.CorsOrigins = origins
+				}
+				if body.LogRetentionDays != nil {
+					if *body.LogRetentionDays < 1 || *body.LogRetentionDays > 365 {
+						c.JSON(http.StatusBadRequest, gin.H{
+							"success": false,
+							"message": "log_retention_days 必须在 1-365 之间",
+						})
+						return
+					}
+					advanced.LogRetentionDays = *body.LogRetentionDays
+				}
+				if saveErr := accountConfig.SaveAdvancedConfig(advanced); saveErr != nil {
+					logger.Warnw("保存高级配置到文件失败", "error", saveErr)
+				} else {
+					logger.Infow("高级配置已保存到文件")
+				}
+			}
+		}
+
 		logger.Infow("系统设置已保存",
 			"websocket_authorization_configured", body.WebsocketAuthorization != "",
 		)
@@ -127,7 +168,139 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 		})
 	})
 
-	// 获取系统日志
+	r.GET("/appearance", func(c *gin.Context) {
+		logger.Infow("获取外观配置", "requestId", c.GetString("requestId"))
+
+		if accountConfig == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"theme":     "light",
+					"fontSize":  16,
+					"customCSS": map[string]string{},
+				},
+			})
+			return
+		}
+
+		cfg, err := accountConfig.LoadConfig()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "加载配置失败",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"theme":     cfg.Appearance.Theme,
+				"fontSize":  cfg.Appearance.FontSize,
+				"customCSS": cfg.Appearance.CustomCSS,
+			},
+		})
+	})
+
+	r.POST("/appearance", func(c *gin.Context) {
+		logger.Infow("保存外观配置", "requestId", c.GetString("requestId"))
+
+		var body struct {
+			Theme     string            `json:"theme"`
+			FontSize  int               `json:"fontSize"`
+			CustomCSS map[string]string `json:"customCSS"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "参数错误",
+			})
+			return
+		}
+
+		if body.Theme != "light" && body.Theme != "dark" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "theme 必须为 light 或 dark",
+			})
+			return
+		}
+
+		if body.FontSize < 12 || body.FontSize > 24 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "fontSize 必须在 12-24 之间",
+			})
+			return
+		}
+
+		if accountConfig == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "配置服务不可用",
+			})
+			return
+		}
+
+		appearance := config.AppearanceConfig{
+			Theme:     body.Theme,
+			FontSize:  body.FontSize,
+			CustomCSS: body.CustomCSS,
+		}
+		if appearance.CustomCSS == nil {
+			appearance.CustomCSS = make(map[string]string)
+		}
+
+		if err := accountConfig.SaveAppearanceConfig(appearance); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "保存外观配置失败",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "外观配置已保存",
+		})
+	})
+
+	r.GET("/advanced", func(c *gin.Context) {
+		logger.Infow("获取高级配置", "requestId", c.GetString("requestId"))
+
+		if accountConfig == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"wsPort":           59178,
+					"logLevel":         "info",
+					"corsOrigins":      []string{"*"},
+					"logRetentionDays": 7,
+				},
+			})
+			return
+		}
+
+		cfg, err := accountConfig.LoadConfig()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "加载配置失败",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"wsPort":           cfg.Advanced.WSPort,
+				"logLevel":         cfg.Advanced.LogLevel,
+				"corsOrigins":      cfg.Advanced.CorsOrigins,
+				"logRetentionDays": cfg.Advanced.LogRetentionDays,
+			},
+		})
+	})
+
 	r.GET("/logs", func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
@@ -140,8 +313,6 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			pageSize = 50
 		}
 
-		// TODO: 从日志文件读取系统日志
-		// 暂时返回空列表
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{
@@ -154,17 +325,13 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 		})
 	})
 
-	// 获取管理员列表
 	r.GET("/admins", func(c *gin.Context) {
-		// TODO: 从配置文件或环境变量读取管理员列表
-		// 暂时返回空列表
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    []any{},
 		})
 	})
 
-	// 获取操作记录
 	r.GET("/operations", func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
@@ -176,8 +343,6 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 			pageSize = 50
 		}
 
-		// TODO: 从日志文件或存储读取操作记录
-		// 暂时返回空列表
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{

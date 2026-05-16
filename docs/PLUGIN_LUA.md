@@ -995,6 +995,177 @@ local value = db.get("dbname", 
 db.delete("dbname", 
 "key")               -- 删除
 ```
+### 21. 日期时间API (time)
+```
+-- 获取当前Unix时间戳（秒）
+local timestamp = time.now()
+
+-- 格式化时间戳为字符串
+-- 格式字符串使用Go时间格式
+local dateStr = time.format(timestamp, "2006-01-02 15:04:05")
+
+-- 解析时间字符串为时间戳
+local ts = time.parse("2024-01-01 12:00:00", "2006-01-02 15:04:05")
+
+-- 获取时间的各个组件
+local components = time.components(timestamp)
+-- 返回: {year, month, day, hour, minute, second, weekday}
+```
+### 22. 加密/哈希API (crypto)
+```
+-- MD5哈希
+local md5Hash = crypto.md5("hello world")
+
+-- SHA1哈希
+local sha1Hash = crypto.sha1("hello world")
+
+-- SHA256哈希
+local sha256Hash = crypto.sha256("hello world")
+```
+### 23. 正则表达式API (regex)
+```
+-- 正则匹配（返回布尔值）
+local matched = regex.match("^\\d+$", "12345")
+
+-- 查找所有匹配项（返回数组）
+local matches = regex.find_all("\\d+", "abc123def456")
+
+-- 替换匹配项
+local replaced = regex.replace("\\d+", "abc123def", "NUM")
+```
+### 24. 数学扩展API (math_ext)
+```
+-- 生成随机浮点数（默认0-1）
+local randFloat = math_ext.random_float()
+local randFloat = math_ext.random_float(1.0, 10.0)
+
+-- 生成随机整数
+local randInt = math_ext.random_int(1, 100)
+
+-- 四舍五入
+local rounded = math_ext.round(3.14159)
+
+-- 绝对值
+local abs = math_ext.abs(-10)
+
+-- 幂运算
+local result = math_ext.pow(2, 10)  -- 2^10 = 1024
+```
+### 25. 字符串处理扩展API (string_ext)
+```
+-- 分割字符串
+local parts = string_ext.split("a,b,c", ",")
+
+-- 连接字符串数组
+local joined = string_ext.join({"a", "b", "c"}, "-")
+
+-- 替换子串（n=-1表示全部替换）
+local replaced = string_ext.replace("hello world", "world", "lua", -1)
+
+-- 检查是否包含子串
+local contains = string_ext.contains("hello", "ll")
+
+-- 修剪字符串两端的字符（默认空白字符）
+local trimmed = string_ext.trim("  hello  ")
+local trimmed = string_ext.trim("+++hello+++", "+")
+```
+### 26. UUID生成API (uuid)
+```
+-- 生成UUID
+local id = uuid.new()
+-- 返回: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+### 27. 网络通信API (network) WebSocket
+```
+-- 连接WebSocket服务器
+local connId = network.websocket.connect("ws://example.com/ws")
+
+-- 发送消息
+network.websocket.send(connId, "hello")
+
+-- 接收消息（阻塞）
+local msg = network.websocket.receive(connId, 5000)  -- 超时5秒
+
+-- 关闭连接
+network.websocket.close(connId)
+``` TCP
+```
+-- 建立TCP连接
+local connId = network.tcp.connect("example.com:8080", 5000)
+
+-- 发送数据
+network.tcp.send(connId, "hello")
+
+-- 接收数据（阻塞）
+local data = network.tcp.receive(connId, 1024, 5000)
+
+-- 关闭连接
+network.tcp.close(connId)
+``` UDP
+```
+-- 创建UDP监听器（仅支持本地地址）
+local listenerId = network.udp.listen("127.0.0.1:8888")
+
+-- 接收数据（阻塞）
+local result = network.udp.receive(listenerId, 5000)
+-- 返回: {data = "收到的数据", from = "发送者地址"}
+
+-- 通过监听器发送数据
+network.udp.send_to(listenerId, "127.0.0.1:9999", "hello")
+
+-- 关闭监听器
+network.udp.close(listenerId)
+```
+### 28. 图像处理API (image)
+```
+-- 创建图像处理器（从base64图片）
+local processor = message.create_image_processor("base64图片数据")
+
+-- 裁剪图像
+image.crop(processor, 10, 10, 100, 100)
+
+-- 缩放图像
+image.resize(processor, 200, 200)
+
+-- 旋转图像（角度）
+image.rotate(processor, 90)
+
+-- 灰度化
+image.grayscale(processor)
+
+-- 添加水印
+image.add_watermark(processor, "水印文字", 10, 10, 12)
+
+-- 模糊效果
+image.blur(processor, 5)
+
+-- 调整亮度
+image.adjust_brightness(processor, 1.5)
+
+-- 调整对比度
+image.adjust_contrast(processor, 1.2)
+
+-- 调整饱和度
+image.adjust_saturation(processor, 0.8)
+
+-- 获取图像尺寸
+local size = image.get_size(processor)
+
+-- 保存为PNG（返回base64）
+local pngBase64 = image.save_png(processor)
+
+-- 保存为JPEG（返回base64）
+local jpegBase64 = image.save_jpeg(processor, 90)
+
+-- 绘制圆形
+image.draw_circle(processor, 100, 100, 50, 255, 0, 0, 255, true)
+
+-- 绘制线条
+image.draw_line(processor, 0, 0, 200, 200, 0, 0, 255, 255, 2)
+
+-- 释放处理器资源
+image.release(processor)
+```
 ## 事件系统
 ### 事件类型
 ```

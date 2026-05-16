@@ -196,56 +196,11 @@ func (h *MultiAccountHandler) GetAccountStatus(c *gin.Context) {
 	})
 }
 
-// DisconnectAccount 主动断开指定账号的WebSocket连接
-func (h *MultiAccountHandler) DisconnectAccount(c *gin.Context) {
-	selfID := c.Param("self_id")
-
-	if selfID == "" {
-		utils.BadRequest(c, "缺少self_id参数")
-		return
-	}
-
-	account, err := h.accountMgr.GetAccount(selfID)
-	if err != nil {
-		h.logger.Warnw("断开连接失败：账号不存在", "self_id", selfID)
-		utils.NotFound(c, fmt.Sprintf("账号不存在: %s", selfID))
-		return
-	}
-
-	if !account.IsOnline() {
-		h.logger.Warnw("断开连接失败：账号已离线", "self_id", selfID)
-		c.JSON(http.StatusServiceUnavailable, utils.APIResponse{
-			Status:    "failed",
-			RetCode:   int(utils.CodeError),
-			Message:   fmt.Sprintf("账号已离线: %s", selfID),
-			RequestID: c.GetString("requestId"),
-		})
-		return
-	}
-
-	h.logger.Infow("管理员主动断开账号连接", "self_id", selfID)
-
-	// 调用ReverseWebSocketService断开连接
-	if err := h.reverseWS.DisconnectAccount(selfID); err != nil {
-		h.logger.Errorw("断开连接失败", "self_id", selfID, "error", err)
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	utils.Success(c, map[string]interface{}{
-		"self_id": selfID,
-		"status":  "disconnected",
-	})
-}
-
 // RegisterRoutes 注册多账号API路由
 func (h *MultiAccountHandler) RegisterRoutes(r *gin.RouterGroup) {
 	// 账号管理路由
 	r.GET("/accounts", h.GetAccountList)
 	r.GET("/accounts/:self_id/status", h.GetAccountStatus)
-
-	// 断开连接路由 - 使用独立路径避免与通配路由冲突
-	r.POST("/disconnect/:self_id", h.DisconnectAccount)
 
 	// API调用路由 /api/bot/{self_id}/{apiName}
 	// 使用 /bot/ 前缀避免与固定路由冲突

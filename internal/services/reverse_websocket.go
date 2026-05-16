@@ -1076,7 +1076,7 @@ func (s *ReverseWebSocketService) CallBotAPI(selfID, action string, params map[s
 			"self_id", selfID,
 			"action", action,
 			"echo", echo)
-		// 修复问题19：确保响应数据结构与OneBotService一致
+		// 修复问题19：确保响应数据结构与LLOneBotService一致
 		// 返回完整的响应数据，包含status和data
 		return resp, nil
 	case <-time.After(30 * time.Second):
@@ -1522,31 +1522,6 @@ func (s *ReverseWebSocketService) GetCurrentConnections() int {
 // GetAccountManager 获取账号管理器
 func (s *ReverseWebSocketService) GetAccountManager() *BotAccountManager {
 	return s.accountMgr
-}
-
-// DisconnectAccount 主动断开指定账号的WebSocket连接
-func (s *ReverseWebSocketService) DisconnectAccount(selfID string) error {
-	account, err := s.accountMgr.GetAccount(selfID)
-	if err != nil {
-		return fmt.Errorf("账号不存在: %s", selfID)
-	}
-
-	if !account.IsOnline() {
-		return fmt.Errorf("账号已离线: %s", selfID)
-	}
-
-	// 安全关闭连接
-	if account.SafeClose() {
-		s.logger.Infow("已主动断开账号连接", "self_id", selfID)
-	}
-
-	// 触发断连处理
-	s.accountMgr.HandleDisconnect(selfID, fmt.Errorf("管理员主动断开连接"))
-
-	// 清理账号资源
-	s.CleanupAccount(selfID)
-
-	return nil
 }
 
 // SetLogManager 设置日志管理器

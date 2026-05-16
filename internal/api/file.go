@@ -11,7 +11,7 @@ import (
 )
 
 // RegisterFileRoutes 注册文件相关路由
-func RegisterFileRoutes(r *gin.RouterGroup, ll *services.OneBotService, base *zap.Logger) {
+func RegisterFileRoutes(r *gin.RouterGroup, ll *services.LLOneBotService, base *zap.Logger) {
 	logger := base.With(zap.String("module", "api.file")).Sugar()
 
 	// 群文件系统信息

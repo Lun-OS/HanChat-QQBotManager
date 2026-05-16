@@ -197,6 +197,12 @@ func RegisterPluginManageRoutes(r *gin.RouterGroup, pm *plugins.Manager, base *z
 		containers := pm.GetAccountContainers()
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": containers})
 	})
+	
+	// 获取所有插件信息（包含内存）
+	r.GET("/all-plugins", func(c *gin.Context) {
+		plugins := pm.GetAllPluginsWithMemory()
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": plugins})
+	})
 
 	// 手动检查插件文件是否存在（刷新）
 	r.POST("/check-files", func(c *gin.Context) {
