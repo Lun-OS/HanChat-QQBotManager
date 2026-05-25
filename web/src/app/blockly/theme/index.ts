@@ -28,6 +28,10 @@ const CATEGORY_STYLES = {
   comment_category: { colour: '#808080' },
   database_category: { colour: '#4CAF50' },
   time_category: { colour: '#FF9800' },
+  expand_category: { colour: '#E65100' },
+  expand_napcat_category: { colour: '#C62828' },
+  expand_llbot_category: { colour: '#2E7D32' },
+  expand_shared_category: { colour: '#1565C0' },
 };
 
 const BLOCK_STYLES = {

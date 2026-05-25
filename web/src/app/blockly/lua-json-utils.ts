@@ -663,7 +663,7 @@ export function generatePluginHeader(
 plugin.name = "${metadata.name}"
 plugin.version = "${metadata.version}"
 plugin.description = "${metadata.description}"${runtimeSection}
-${BLOCKLY_CODE_SEPARATOR}
+
 `;
 }
 

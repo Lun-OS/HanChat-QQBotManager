@@ -2,7 +2,6 @@
 web/node_modules/
 web/dist/
 build/
-.env
 plugins/
 test/
 log/

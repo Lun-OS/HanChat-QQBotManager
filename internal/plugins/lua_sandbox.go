@@ -15,6 +15,24 @@ const (
 	MaxInstructions = 10000000
 	// MemoryCheckInterval 内存检查间隔（指令数）
 	MemoryCheckInterval = 10000
+
+	// ========== API 权限常量 ==========
+	// PermGroupAdmin 群管理权限：设置管理员、群名片、特殊头衔、修改群名等
+	PermGroupAdmin = "group_admin"
+	// PermGroupBan 群禁言权限：禁言用户、全员禁言
+	PermGroupBan = "group_ban"
+	// PermGroupKick 踢人权限：踢出群成员
+	PermGroupKick = "group_kick"
+	// PermGroupLeave 退群权限：退出群组、解散群组
+	PermGroupLeave = "group_leave"
+	// PermDeleteMsg 删除消息权限：撤回消息、删除精华消息
+	PermDeleteMsg = "delete_msg"
+	// PermDeleteFile 删除文件权限：删除群文件、群文件夹
+	PermDeleteFile = "delete_file"
+	// PermFriendManage 好友管理权限：删除好友、处理好友请求
+	PermFriendManage = "friend_manage"
+	// PermGroupRequest 群请求权限：处理加群请求
+	PermGroupRequest = "group_request"
 )
 
 var maxMemoryUsage uint64 = 128 * 1024 * 1024 // 128MB 默认值
@@ -211,4 +229,54 @@ func CreateSandboxHook(sandbox *LuaSandbox) func(L *lua.LState) {
 			}
 		}
 	}
+}
+
+// RequirePermission 检查插件是否拥有指定权限
+// 权限配置存储在插件的 Config["permissions"] 字段中，应为字符串数组
+// 如果未配置权限或权限列表为空，默认拒绝危险操作（安全优先原则）
+func (s *LuaSandbox) RequirePermission(perm string) error {
+	if s.instance == nil {
+		return fmt.Errorf("沙箱实例未初始化")
+	}
+
+	// 从插件配置中读取权限列表
+	config := s.instance.Config
+	if config == nil {
+		s.instance.addPluginLog("WARN", fmt.Sprintf("权限检查失败: 插件无配置 [所需权限: %s]", perm))
+		return fmt.Errorf("权限不足: 插件无配置，需要权限 [%s]", perm)
+	}
+
+	// 获取 permissions 配置项
+	permInterface, exists := config["permissions"]
+	if !exists {
+		s.instance.addPluginLog("WARN", fmt.Sprintf("权限检查失败: 未配置权限 [插件: %s, 所需权限: %s]", s.instance.Name, perm))
+		return fmt.Errorf("权限不足: 未配置权限列表，需要权限 [%s] (请在插件 config.json 中配置 permissions 字段)", perm)
+	}
+
+	// 将权限列表转换为字符串切片
+	var allowedPerms []string
+	switch perms := permInterface.(type) {
+	case []interface{}:
+		for _, p := range perms {
+			if str, ok := p.(string); ok {
+				allowedPerms = append(allowedPerms, str)
+			}
+		}
+	case []string:
+		allowedPerms = perms
+	default:
+		s.instance.addPluginLog("ERROR", fmt.Sprintf("权限配置格式错误: permissions 应为字符串数组 [插件: %s]", s.instance.Name))
+		return fmt.Errorf("权限配置格式错误: permissions 应为字符串数组")
+	}
+
+	// 检查是否拥有所需权限
+	for _, allowed := range allowedPerms {
+		if allowed == perm {
+			return nil // 权限检查通过
+		}
+	}
+
+	// 权限不足，记录日志并返回错误
+	s.instance.addPluginLog("WARN", fmt.Sprintf("权限拒绝: 插件 [%s] 尝试调用需要权限 [%s] 的API，但未被授权", s.instance.Name, perm))
+	return fmt.Errorf("权限不足: 插件 [%s] 无权执行此操作，需要权限 [%s] (当前权限: %v)", s.instance.Name, perm, allowedPerms)
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Crown, Shield, Loader2 } from 'lucide-react'
 import type { GroupMemberItem } from '../../../types/webqq'
+import { validateImageUrl, getSafeQQAvatarUrl } from '../../../utils/security'
 
 interface MentionPickerProps {
   members: GroupMemberItem[]
@@ -103,7 +104,7 @@ export function MentionPicker({ members, loading, query, position, onSelect, onC
               }`}
             >
               <img
-                src={member.avatar || `https://q1.qlogo.cn/g?b=qq&nk=${member.uin}&s=40`}
+                src={validateImageUrl(member.avatar) || getSafeQQAvatarUrl(member.uin, 40)}
                 alt=""
                 className="w-7 h-7 rounded-full flex-shrink-0"
                 loading="lazy"

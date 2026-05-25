@@ -17,16 +17,16 @@ import (
 )
 
 // WebLoginService Web登录服务
-// 基于环境变量校验 + IP封锁机制，完全替代原MySQL登录
+// 基于环境变量校验 + IP封锁机制 + 验证码验证，完全替代原MySQL登录
 type WebLoginService struct {
 	mu              sync.RWMutex
 	logger          *zap.SugaredLogger
 	username        string
 	password        string
-	timezoneOffset  int
 	banIPFile       string
 	failedAttempts  map[string]int // IP -> 失败次数
 	tokens          map[string]*LoginToken // token -> 登录凭证
+	captchaSvc      *CaptchaService // 验证码服务
 
 	// Token续期配置
 	tokenDuration    time.Duration // Token默认有效期
@@ -56,7 +56,7 @@ type TokenRenewResult struct {
 
 // NewWebLoginService 创建Web登录服务
 // 从环境变量加载配置
-func NewWebLoginService(baseLogger *zap.Logger) *WebLoginService {
+func NewWebLoginService(baseLogger *zap.Logger, captchaSvc *CaptchaService) *WebLoginService {
 	logger := utils.NewModuleLogger(baseLogger, "service.web_login")
 
 	// 从环境变量读取配置
@@ -71,23 +71,16 @@ func NewWebLoginService(baseLogger *zap.Logger) *WebLoginService {
 		logger.Warnw("未设置WEB_LOGIN_PWD环境变量，使用默认密码")
 	}
 
-	timezoneOffset := 8 // 默认UTC+8
-	if tz := os.Getenv("TIMEZONE_OFFSET"); tz != "" {
-		if offset, err := fmt.Sscanf(tz, "%d", &timezoneOffset); err != nil || offset != 1 {
-			timezoneOffset = 8
-		}
-	}
-
 	banIPFile := filepath.Join("log", "BanIP.ini")
 
 	svc := &WebLoginService{
 		logger:         logger,
 		username:       username,
 		password:       password,
-		timezoneOffset: timezoneOffset,
 		banIPFile:      banIPFile,
 		failedAttempts: make(map[string]int),
 		tokens:         make(map[string]*LoginToken),
+		captchaSvc:     captchaSvc,
 
 		// Token续期配置 - 默认1小时有效期
 		tokenDuration:   1 * time.Hour,
@@ -110,9 +103,10 @@ func NewWebLoginService(baseLogger *zap.Logger) *WebLoginService {
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Topo     string `json:"topo" binding:"required"`
+	Username  string `json:"username" binding:"required"`
+	Password  string `json:"password" binding:"required"`
+	CaptchaID string `json:"captcha_id" binding:"required"`
+	Captcha   string `json:"captcha" binding:"required"`
 }
 
 // LoginResponse 登录响应
@@ -139,12 +133,12 @@ func (s *WebLoginService) Login(req *LoginRequest, clientIP string) *LoginRespon
 	}
 
 	// 3. 参数校验
-	// 校验TOPO（8位纯数字，匹配当前时区当日yyyymmdd格式）
-	if !s.validateTopo(req.Topo) {
+	// 校验验证码（如果启用）
+	if s.captchaSvc.IsEnabled() && !s.captchaSvc.VerifyCaptcha(req.CaptchaID, req.Captcha) {
 		s.recordFailedAttempt(realIP)
 		return &LoginResponse{
 			Success: false,
-			Message: "登录失败",
+			Message: "验证码错误或已过期",
 		}
 	}
 
@@ -200,6 +194,52 @@ func (s *WebLoginService) ValidateToken(token string) bool {
 	}
 
 	return true
+}
+
+// extractBannedIP 从BanIP.ini行中提取IP地址
+// 支持格式：
+//   - [10]{192.168.1.100}  (带时间限制)
+//   - 192.168.1.100         (简单格式)
+//   - 192.168.1.0/24        (CIDR格式)
+func extractBannedIP(line string) string {
+	// 尝试解析 [时长]{IP} 格式
+	if strings.HasPrefix(line, "[") {
+		start := strings.Index(line, "{")
+		end := strings.Index(line, "}")
+		if start != -1 && end != -1 && end > start {
+			return line[start+1 : end]
+		}
+	}
+
+	// 简单格式：直接是IP或CIDR
+	return strings.TrimSpace(line)
+}
+
+// matchIP 精确匹配IP地址
+// 支持精确匹配和CIDR网段匹配
+func matchIP(ip, pattern string) bool {
+	// 解析待检查的IP
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false // 无效IP
+	}
+
+	// 检查是否为CIDR格式
+	if strings.Contains(pattern, "/") {
+		_, ipNet, err := net.ParseCIDR(pattern)
+		if err != nil {
+			return false // 无效CIDR
+		}
+		return ipNet.Contains(parsedIP)
+	}
+
+	// 精确匹配（不使用子字符串匹配）
+	parsedPattern := net.ParseIP(pattern)
+	if parsedPattern == nil {
+		return false // 无效模式
+	}
+
+	return parsedIP.Equal(parsedPattern)
 }
 
 // RenewTokenIfNeeded 智能续期Token
@@ -364,6 +404,7 @@ func (s *WebLoginService) extractRealIP(clientIP string) string {
 }
 
 // isIPBanned 检查IP是否被封禁
+// 安全增强：使用精确的IP匹配，防止子字符串匹配导致的绕过或误判
 func (s *WebLoginService) isIPBanned(ip string) bool {
 	// 读取BanIP.ini文件
 	if _, err := os.Stat(s.banIPFile); os.IsNotExist(err) {
@@ -380,11 +421,23 @@ func (s *WebLoginService) isIPBanned(ip string) bool {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue // 跳过空行和注释
 		}
-		// 格式: [10]{IP}
-		if strings.Contains(line, ip) {
+
+		// 解析BanIP.ini格式: [时长]{IP}
+		// 支持多种格式：
+		//   - [10]{192.168.1.100}  (带时间限制)
+		//   - 192.168.1.100         (简单格式)
+		//   - 192.168.1.0/24        (CIDR格式)
+
+		bannedIP := extractBannedIP(line)
+		if bannedIP == "" {
+			continue // 格式无效，跳过
+		}
+
+		// 使用精确匹配而非子字符串匹配
+		if matchIP(ip, bannedIP) {
 			return true
 		}
 	}
@@ -436,31 +489,6 @@ func (s *WebLoginService) clearFailedAttempts(ip string) {
 	defer s.mu.Unlock()
 
 	delete(s.failedAttempts, ip)
-}
-
-// validateTopo 校验TOPO
-// 严格校验8位纯数字，匹配当前时区当日yyyymmdd格式
-func (s *WebLoginService) validateTopo(topo string) bool {
-	// 校验长度
-	if len(topo) != 8 {
-		return false
-	}
-
-	// 校验纯数字
-	for _, ch := range topo {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-
-	// 获取当前时区时间
-	location := time.FixedZone("Local", s.timezoneOffset*3600)
-	now := time.Now().In(location)
-
-	// 格式化为yyyymmdd
-	expected := now.Format("20060102")
-
-	return topo == expected
 }
 
 // generateToken 生成登录凭证

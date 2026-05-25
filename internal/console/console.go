@@ -757,7 +757,7 @@ func (c *Console) getBotStatus() error {
 func (c *Console) getSystemInfo() error {
 	version := os.Getenv("LLBOT_VERSION")
 	if version == "" {
-		version = "V26.5.16"
+		version = "V26.5.26"
 	}
 
 	fmt.Println("\n系统信息:")
@@ -1280,14 +1280,18 @@ func (c *Console) luaPluginInteractiveMode(selfID, pluginName string) error {
 func (c *Console) createSafeLuaState() *lua.LState {
 	L := lua.NewState(lua.Options{
 		SkipOpenLibs: true, // 不打开标准库，手动选择安全的库
+		// 增加注册表大小以支持更复杂的脚本
+		RegistrySize: 1024 * 20,
+		// 限制调用栈深度防止栈溢出
+		CallStackSize: 100,
 	})
 
-	// 打开基础安全库
+	// 只打开安全的库，移除危险的功能
 	for _, pair := range []struct {
 		name string
 		fn   lua.LGFunction
 	}{
-		{lua.LoadLibName, lua.OpenPackage},
+		// 移除了 lua.OpenPackage - 禁止require()加载外部模块
 		{lua.BaseLibName, lua.OpenBase},
 		{lua.TabLibName, lua.OpenTable},
 		{lua.StringLibName, lua.OpenString},
@@ -1298,9 +1302,22 @@ func (c *Console) createSafeLuaState() *lua.LState {
 		L.Call(1, 0)
 	}
 
-	// 移除危险的函数
-	L.SetGlobal("dofile", lua.LNil)
-	L.SetGlobal("loadfile", lua.LNil)
+	// 移除所有危险的函数
+	dangerousFunctions := []string{
+		"dofile",      // 加载并执行文件
+		"loadfile",    // 加载文件为函数
+		"load",        // 动态编译Lua代码
+		"require",     // 加载模块（即使没有package也可能存在）
+		"print",       // 可能被滥用输出大量信息（可选）
+	}
+
+	for _, fnName := range dangerousFunctions {
+		L.SetGlobal(fnName, lua.LNil)
+	}
+
+	// 设置安全的环境变量
+	// 限制可访问的全局变量
+	L.SetGlobal("_VERSION", lua.LString("Lua 5.1 (sandboxed)"))
 
 	return L
 }
@@ -1325,6 +1342,15 @@ func (c *Console) executeLuaCode(L *lua.LState, code string) error {
 				}
 			}
 		}()
+
+		// 代码长度限制（防止过大的脚本）
+		if len(code) > 1024*1024 { // 1MB限制
+			select {
+			case done <- fmt.Errorf("Lua代码过长，超过1MB限制"):
+			default:
+			}
+			return
+		}
 
 		// 编译并执行代码
 		if err := L.DoString(code); err != nil {

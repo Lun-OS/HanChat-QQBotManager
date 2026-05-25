@@ -74,8 +74,9 @@ const (
 	SubTypeConnect     SubType = "connect"
 	SubTypePoke        SubType = "poke"
 	SubTypePokeRecall  SubType = "poke_recall"
-	SubTypeProfileLike  SubType = "profile_like"
-	SubTypeTitle       SubType = "title"
+	SubTypeProfileLike   SubType = "profile_like"
+	SubTypeTitle         SubType = "title"
+	SubTypeInputStatus   SubType = "input_status"
 )
 
 type Sex string
@@ -424,6 +425,17 @@ type ProfileLikeEvent struct {
 	OperatorID   int64      `json:"operator_id"`
 	OperatorNick string     `json:"operator_nick"`
 	Times        int        `json:"times"`
+}
+
+type InputStatusEvent struct {
+	Time        int64                  `json:"time"`
+	SelfID      int64                  `json:"self_id"`
+	PostType    string                 `json:"post_type"`
+	NoticeType  string                 `json:"notice_type"`
+	SubType     string                 `json:"sub_type"`
+	GroupID     int64                  `json:"group_id,omitempty"`
+	UserID      int64                  `json:"user_id"`
+	Status      map[string]interface{} `json:"status"`
 }
 
 type GroupUploadNoticeEvent struct {

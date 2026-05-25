@@ -47,36 +47,31 @@ interface PluginMemoryInfo {
   memory_mb: string;
 }
 
-// 格式化字节（用于网络速度）
 const formatBytes = (bytes: number) => {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 };
 
-// 智能格式化内存大小
 const formatMemorySize = (bytes: number) => {
   if (bytes < 1024) {
     return bytes.toFixed(0) + ' B';
   } else if (bytes < 1024 * 512) {
-    // 512KB 以内显示 KB
     return (bytes / 1024).toFixed(1) + ' KB';
   } else if (bytes < 1024 * 1024 * 1024) {
-    // 1GB 以内显示 MB
     return (bytes / 1024 / 1024).toFixed(1) + ' MB';
   } else {
-    // 1GB 以上显示 GB
     return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
   }
 };
 
-const cardCls = 'backdrop-blur-sm border border-white/40 dark:border-white/10 shadow-sm rounded-2xl transition-all overflow-hidden bg-white/60 dark:bg-black/40';
+const cardCls = 'backdrop-blur-sm bg-white/60 dark:bg-black/40 dark:backdrop-blur-xl border border-gray-100 dark:border-white/10 rounded-2xl overflow-hidden dark:backdrop-saturate-150';
 
 const StatusItem: React.FC<{ title: string; value?: string | number; unit?: string }> = ({ title, value = '-', unit }) => (
   <div className='py-1.5 text-sm col-span-1 flex justify-between items-center'>
-    <div className='w-24 font-medium text-default-600 dark:text-gray-300'>{title}</div>
-    <div className='font-mono text-xs text-default-500'>
+    <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>{title}</div>
+    <div className='font-mono text-xs text-gray-900 dark:text-white font-medium'>
       {value}
-      {unit && <span className='ml-0.5 opacity-70'>{unit}</span>}
+      {unit && <span className='ml-0.5 text-gray-500'>{unit}</span>}
     </div>
   </div>
 );
@@ -95,6 +90,7 @@ export function Dashboard() {
   const [pluginMemories, setPluginMemories] = useState<PluginMemoryInfo[]>([]);
   const [pluginMemTotal, setPluginMemTotal] = useState(0);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const networkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pluginMemTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,16 +109,13 @@ export function Dashboard() {
       for (const plugin of allPluginsRes.data) {
         const mem = plugin.memory || 0;
         totalMem += mem;
-        // 显示插件名称和所属账号
         allPlugins.push({
           name: `${plugin.name} (${plugin.self_id})`,
           memory: mem,
-          // 使用我们自己的格式化函数
           memory_mb: formatMemorySize(mem),
         });
       }
 
-      // 确保按内存从高到低排序
       allPlugins.sort((a, b) => b.memory - a.memory);
       console.log('最终插件列表:', allPlugins);
       setPluginMemories(allPlugins);
@@ -158,7 +151,6 @@ export function Dashboard() {
         );
       }
 
-      // 使用新的API获取准确的插件运行数量
       if (allPluginsRes.success && Array.isArray(allPluginsRes.data)) {
         setRunningPluginCount(allPluginsRes.data.length);
       }
@@ -178,60 +170,111 @@ export function Dashboard() {
         setDownloadSpeed(res.data.downloadSpeed);
       }
     } catch {
-      // silent
     }
   }, []);
 
+  /**
+   * connectSSE - 使用 fetch + ReadableStream 实现 SSE 连接
+   *
+   * [安全修复] 原实现使用 EventSource (GET)，将认证 Token 暴露在 URL 查询参数中。
+   * 修复方案：改用 fetch + POST + ReadableStream，Token 通过 Authorization Header 传递。
+   */
   const connectSSE = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
 
-    const token = localStorage.getItem('auth_token');
-    const url = token
-      ? `/api/system/status-stream?token=${encodeURIComponent(token)}`
-      : '/api/system/status-stream';
+    const token = localStorage.getItem('auth_token') || '';
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+    const url = `${baseUrl}/api/system/status-stream`;
 
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-    es.onmessage = (event) => {
+    let isCleanClose = false;
+
+    (async () => {
       try {
-        const data = JSON.parse(event.data);
-        if (data) {
-          setServerStatus((prev) => {
-            if (!prev) return prev;
-            const newUpload = data.network?.uploadBytes ?? prev.network.uploadBytes;
-            const newDownload = data.network?.downloadBytes ?? prev.network.downloadBytes;
-            if (prevUpload > 0 && newUpload > prevUpload) {
-              setUploadSpeed((newUpload - prevUpload) / 5);
-            }
-            if (prevDownload > 0 && newDownload > prevDownload) {
-              setDownloadSpeed((newDownload - prevDownload) / 5);
-            }
-            setPrevUpload(newUpload);
-            setPrevDownload(newDownload);
-            return {
-              os: prev.os,
-              cpu: data.cpu ?? prev.cpu,
-              memory: data.memory ?? prev.memory,
-              network: {
-                uploadBytes: newUpload,
-                downloadBytes: newDownload,
-              },
-            };
-          });
-        }
-      } catch {
-        // ignore parse errors
-      }
-    };
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({}),
+          signal: controller.signal,
+        });
 
-    es.onerror = () => {
-      es.close();
-      eventSourceRef.current = null;
-      startPolling();
-    };
+        if (!response.ok || !response.body) {
+          console.warn(`[Dashboard SSE] 连接失败: HTTP ${response.status}，将使用轮询模式`);
+          startPolling();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (!controller.signal.aborted) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                const dataStr = line.slice(5).trim();
+                if (dataStr) {
+                  try {
+                    const data = JSON.parse(dataStr);
+                    if (data) {
+                      setServerStatus((prev) => {
+                        if (!prev) return prev;
+                        const newUpload = data.network?.uploadBytes ?? prev.network.uploadBytes;
+                        const newDownload = data.network?.downloadBytes ?? prev.network.downloadBytes;
+                        if (prevUpload > 0 && newUpload > prevUpload) {
+                          setUploadSpeed((newUpload - prevUpload) / 5);
+                        }
+                        if (prevDownload > 0 && newDownload > prevDownload) {
+                          setDownloadSpeed((newDownload - prevDownload) / 5);
+                        }
+                        setPrevUpload(newUpload);
+                        setPrevDownload(newDownload);
+                        return {
+                          os: prev.os,
+                          cpu: data.cpu ?? prev.cpu,
+                          memory: data.memory ?? prev.memory,
+                          network: {
+                            uploadBytes: newUpload,
+                            downloadBytes: newDownload,
+                          },
+                        };
+                      });
+                    }
+                  } catch {
+                    // 忽略单行解析错误
+                  }
+                }
+              }
+            }
+          } catch (readError) {
+            if ((readError as Error).name === 'AbortError') break;
+            throw readError;
+          }
+        }
+      } catch (error) {
+        if ((error as Error).name === 'AbortError' || isCleanClose) return;
+        console.warn('[Dashboard SSE] 连接异常，将使用轮询模式:', error);
+        startPolling();
+      }
+    })();
   }, [prevUpload, prevDownload]);
 
   const startPolling = useCallback(() => {
@@ -256,7 +299,6 @@ export function Dashboard() {
           });
         }
       } catch {
-        // silent
       }
     }, 5000);
   }, [prevUpload, prevDownload]);
@@ -276,6 +318,10 @@ export function Dashboard() {
     pluginMemTimerRef.current = setInterval(fetchPluginMemory, 10000);
 
     return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       if (eventSourceRef.current) eventSourceRef.current.close();
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       if (networkTimerRef.current) clearInterval(networkTimerRef.current);
@@ -286,7 +332,7 @@ export function Dashboard() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 animate-spin text-[#165DFF]" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#165DFF] dark:text-white/60" />
       </div>
     );
   }
@@ -300,43 +346,43 @@ export function Dashboard() {
       <div className='grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch'>
         <div className='flex flex-col gap-2'>
           <div className={cardCls}>
-            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
-              <Monitor className='text-lg opacity-80' />
+            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-gray-900 dark:text-white'>
+              <Monitor className='text-lg text-default-500 dark:text-white/60' />
               <span>系统信息</span>
             </div>
             <div className='px-4 pb-4 pt-2 flex flex-col gap-1'>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>OS</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{os?.os || '-'}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>OS</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.os || '-'}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>平台</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{os?.platformFamily || '-'}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>平台</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.platformFamily || '-'}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>内核版本</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{os?.kernelVersion || '-'}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>内核版本</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.kernelVersion || '-'}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>后端版本</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{backendVersion || '-'}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>后端版本</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{backendVersion || '-'}</div>
               </div>
             </div>
           </div>
 
           <div className={cardCls}>
-            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
-              <Users className='text-lg opacity-80' />
+            <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-gray-900 dark:text-white'>
+              <Users className='text-lg text-default-500 dark:text-white/60' />
               <span>账号概览</span>
             </div>
             <div className='px-4 pb-4 pt-2 flex flex-col gap-1'>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>在线/总计</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{onlineCount} / {totalAccountCount}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>在线/总计</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{onlineCount} / {totalAccountCount}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-default-600 dark:text-gray-300'>运行中插件</div>
-                <div className='text-xs font-mono flex-1 text-default-500'>{runningPluginCount}</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>运行中插件</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{runningPluginCount}</div>
               </div>
             </div>
           </div>
@@ -345,8 +391,8 @@ export function Dashboard() {
         <div className={`${cardCls} lg:col-span-2`}>
           <div className='overflow-visible md:flex-row gap-4 items-center justify-stretch p-4 flex flex-col md:flex-row'>
             <div className='flex-1 w-full md:max-w-96'>
-              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 text-default-700 dark:text-gray-200'>
-                <Cpu className='text-xl opacity-80' />
+              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 text-gray-900 dark:text-white'>
+                <Cpu className='text-xl text-default-500 dark:text-white/60' />
                 <span>CPU</span>
               </h2>
               <div className='grid grid-cols-2 gap-2'>
@@ -355,8 +401,8 @@ export function Dashboard() {
                 <StatusItem title='使用率' value={cpu?.usagePercent?.toFixed(1) ?? '-'} unit='%' />
               </div>
 
-              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 mt-4 text-default-700 dark:text-gray-200'>
-                <HardDrive className='text-xl opacity-80' />
+              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 mt-4 text-gray-900 dark:text-white'>
+                <HardDrive className='text-xl text-default-500 dark:text-white/60' />
                 <span>内存</span>
               </h2>
               <div className='grid grid-cols-2 gap-2'>
@@ -382,40 +428,40 @@ export function Dashboard() {
 
       <div className='mt-4 grid grid-cols-1 md:grid-cols-2 gap-4'>
         <div className={cardCls}>
-          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
-            <Wifi className='text-lg opacity-80' />
+          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-gray-900 dark:text-white'>
+            <Wifi className='text-lg text-default-500 dark:text-white/60' />
             <span>网络速度</span>
           </div>
           <div className='px-4 pb-4 pt-2 grid grid-cols-2 gap-4'>
             <div className='flex items-center gap-2'>
-              <ArrowUp className='w-4 h-4 text-green-500' />
+              <ArrowUp className='w-4 h-4 text-gray-500' />
               <div className='flex flex-col'>
-                <span className='text-xs text-default-600 dark:text-gray-300'>上传</span>
-                <span className='text-sm font-mono text-default-500'>{formatBytes(uploadSpeed)}/s</span>
+                <span className='text-xs text-gray-600 dark:text-gray-400'>上传</span>
+                <span className='text-sm font-mono text-gray-900 dark:text-white font-medium'>{formatBytes(uploadSpeed)}/s</span>
               </div>
             </div>
             <div className='flex items-center gap-2'>
-              <ArrowDown className='w-4 h-4 text-blue-500' />
+              <ArrowDown className='w-4 h-4 text-gray-500' />
               <div className='flex flex-col'>
-                <span className='text-xs text-default-600 dark:text-gray-300'>下载</span>
-                <span className='text-sm font-mono text-default-500'>{formatBytes(downloadSpeed)}/s</span>
+                <span className='text-xs text-gray-600 dark:text-gray-400'>下载</span>
+                <span className='text-sm font-mono text-gray-900 dark:text-white font-medium'>{formatBytes(downloadSpeed)}/s</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className={cardCls}>
-          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-default-700 dark:text-white'>
-            <MemoryStick className='text-lg opacity-80' />
+          <div className='flex items-center gap-2 font-bold px-4 pt-4 pb-0 text-gray-900 dark:text-white'>
+            <MemoryStick className='text-lg text-default-500 dark:text-white/60' />
             <span>Lua插件内存</span>
-            <span className='ml-auto text-xs font-normal text-default-500'>
+            <span className='ml-auto text-xs font-normal text-gray-500'>
               暂不支持
             </span>
           </div>
           <div className='px-4 pb-4 pt-2 flex flex-col gap-1 max-h-48 overflow-y-auto'>
             <div className='flex flex-col items-center justify-center py-6'>
-              <Code className='w-8 h-8 text-gray-300 dark:text-gray-600 mb-2' />
-              <span className='text-sm text-gray-400 dark:text-gray-500'>暂不支持</span>
+              <Code className='w-8 h-8 text-gray-500 mb-2' />
+              <span className='text-sm text-gray-500'>暂不支持</span>
             </div>
           </div>
         </div>

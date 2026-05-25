@@ -4,6 +4,7 @@ import type { FriendItem, GroupItem } from '../../../types/webqq'
 import { formatMessageTime, setGroupMsgMask, GroupMsgMask } from '../../../services/webqqApi'
 import { useWebQQStore } from '../../../stores/webqqStore'
 import { showToast } from '../../common/Toast'
+import { validateImageUrl, getSafeQQAvatarUrl, getSafeGroupAvatarUrl } from '../../../utils/security'
 
 export function useMenuPosition(initialX: number, initialY: number, menuRef: React.RefObject<HTMLDivElement | null>) {
   const [position, setPosition] = useState({ left: initialX, top: initialY, ready: false })
@@ -54,11 +55,11 @@ export const FriendListItem: React.FC<FriendListItemProps> = ({ friend, isSelect
     >
       <div className="relative flex-shrink-0">
         <img
-          src={friend.avatar}
+          src={validateImageUrl(friend.avatar)}
           alt={displayName}
           className="w-10 h-10 rounded-full object-cover"
           onError={(e) => {
-            e.currentTarget.src = `https://q1.qlogo.cn/g?b=qq&nk=${friend.uin}&s=640`
+            e.currentTarget.src = getSafeQQAvatarUrl(friend.uin, 640)
           }}
         />
         {isTop && (
@@ -103,11 +104,11 @@ export const GroupListItem: React.FC<GroupListItemProps> = ({ group, isSelected,
     >
       <div className="relative flex-shrink-0">
         <img
-          src={group.avatar}
+          src={validateImageUrl(group.avatar)}
           alt={displayName}
           className="w-10 h-10 rounded-full object-cover"
           onError={(e) => {
-            e.currentTarget.src = `https://p.qlogo.cn/gh/${group.groupCode}/${group.groupCode}/640/`
+            e.currentTarget.src = getSafeGroupAvatarUrl(group.groupCode)
           }}
         />
         {unreadCount > 0 && (

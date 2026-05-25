@@ -1,0 +1,187 @@
+## API Docs
+- OneBot 11 > 接口列表 > 用户 [点赞](https://api.luckylillia.com/api-149035376.md): 
+- OneBot 11 > 接口列表 > 用户 [好友列表](https://api.luckylillia.com/api-144641318.md): 
+- OneBot 11 > 接口列表 > 用户 [好友列表（带分组）](https://api.luckylillia.com/api-226464338.md): 
+- OneBot 11 > 接口列表 > 用户 [删除好友](https://api.luckylillia.com/api-227239179.md): 
+- OneBot 11 > 接口列表 > 用户 [处理好友申请](https://api.luckylillia.com/api-149701143.md): 
+- OneBot 11 > 接口列表 > 用户 [设置好友备注](https://api.luckylillia.com/api-234354198.md): 
+- OneBot 11 > 接口列表 > 用户 [获取陌生人信息](https://api.luckylillia.com/api-156648733.md): 
+- OneBot 11 > 接口列表 > 用户 [设置个人头像](https://api.luckylillia.com/api-156152067.md): 
+- OneBot 11 > 接口列表 > 用户 [好友戳一戳（双击头像）](https://api.luckylillia.com/api-226620269.md): 
+- OneBot 11 > 接口列表 > 用户 [获取我赞过谁列表](https://api.luckylillia.com/api-227239501.md): 
+- OneBot 11 > 接口列表 > 用户 [获取谁赞过我列表](https://api.luckylillia.com/api-247993651.md): 
+- OneBot 11 > 接口列表 > 用户 [获取官方机器人QQ号范围](https://api.luckylillia.com/api-170602981.md): 
+- OneBot 11 > 接口列表 > 用户 [移动好友分组](https://api.luckylillia.com/api-234354495.md): 
+- OneBot 11 > 接口列表 > 用户 [获取QQ或QQ群头像](https://api.luckylillia.com/api-318211672.md): 
+- OneBot 11 > 接口列表 > 用户 [获取被过滤好友请求](https://api.luckylillia.com/api-356195357.md): 此 API 需要 OneBot 6.2.0 及以上版本
+- OneBot 11 > 接口列表 > 用户 [处理被过滤好友请求](https://api.luckylillia.com/api-356196496.md): 此 API 需要 OneBot 6.2.0 及以上版本
+- OneBot 11 > 接口列表 > 用户 [设置登录号资料](https://api.luckylillia.com/api-387248605.md): 
+- OneBot 11 > 接口列表 > 用户 [设置输入状态](https://api.luckylillia.com/api-449484306.md): 此 API 需要 LLBot 7.12.3 及以上版本
+- OneBot 11 > 接口列表 > 群组 [获取群列表](https://api.luckylillia.com/api-120761715.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群信息](https://api.luckylillia.com/api-147864169.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群成员列表](https://api.luckylillia.com/api-120763084.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群成员信息](https://api.luckylillia.com/api-129962341.md): 
+- OneBot 11 > 接口列表 > 群组 [群员戳一戳（双击头像）](https://api.luckylillia.com/api-226620319.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群系统消息](https://api.luckylillia.com/api-227238038.md): 
+- OneBot 11 > 接口列表 > 群组 [处理加群请求](https://api.luckylillia.com/api-149642556.md): 
+- OneBot 11 > 接口列表 > 群组 [退群](https://api.luckylillia.com/api-149642881.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群管理员](https://api.luckylillia.com/api-150140186.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群名片](https://api.luckylillia.com/api-150140187.md): 
+- OneBot 11 > 接口列表 > 群组 [群禁言](https://api.luckylillia.com/api-150140189.md): 
+- OneBot 11 > 接口列表 > 群组 [群全体禁言](https://api.luckylillia.com/api-150140196.md): 
+- OneBot 11 > 接口列表 > 群组 [获取被禁言群员列表](https://api.luckylillia.com/api-311303893.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群名](https://api.luckylillia.com/api-150140247.md): 
+- OneBot 11 > 接口列表 > 群组 [批量踢出群成员](https://api.luckylillia.com/api-327231780.md): 需要 5.6.0 及以上版本
+- OneBot 11 > 接口列表 > 群组 [群踢人](https://api.luckylillia.com/api-150140250.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群头衔](https://api.luckylillia.com/api-224355364.md): 
+- OneBot 11 > 接口列表 > 群组 [群荣誉](https://api.luckylillia.com/api-174681709.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群精华消息](https://api.luckylillia.com/api-174674213.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群精华消息](https://api.luckylillia.com/api-227234474.md): 
+- OneBot 11 > 接口列表 > 群组 [删除群精华消息](https://api.luckylillia.com/api-227234575.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群 @全体成员 剩余次数](https://api.luckylillia.com/api-227238875.md): 
+- OneBot 11 > 接口列表 > 群组 [发送群公告](https://api.luckylillia.com/api-227239056.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群公告](https://api.luckylillia.com/api-170585759.md): 
+- OneBot 11 > 接口列表 > 群组 [群打卡](https://api.luckylillia.com/api-232894230.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群消息接收方式](https://api.luckylillia.com/api-234356893.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群备注](https://api.luckylillia.com/api-234358974.md): 
+- OneBot 11 > 接口列表 > 群组 [获取已过滤的加群通知](https://api.luckylillia.com/api-227239481.md): 
+- OneBot 11 > 接口列表 > 群组 [上传群相册](https://api.luckylillia.com/api-371578207.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群相册列表](https://api.luckylillia.com/api-371903958.md): 
+- OneBot 11 > 接口列表 > 群组 [创建群相册](https://api.luckylillia.com/api-371912372.md): 
+- OneBot 11 > 接口列表 > 群组 [删除群相册](https://api.luckylillia.com/api-377144215.md): 
+- OneBot 11 > 接口列表 > 群组 [获取群相册媒体列表](https://api.luckylillia.com/api-449542365.md): 此 API 需要 LLBot 7.12.3 及以上版本
+- OneBot 11 > 接口列表 > 群组 [删除群公告](https://api.luckylillia.com/api-377208720.md): 
+- OneBot 11 > 接口列表 > 群组 [设置群头像](https://api.luckylillia.com/api-449678411.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊文本消息](https://api.luckylillia.com/api-226194727.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊回复消息](https://api.luckylillia.com/api-226195014.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊图片](https://api.luckylillia.com/api-226246813.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊文字+图片](https://api.luckylillia.com/api-226250368.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊系统表情](https://api.luckylillia.com/api-226251326.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊语音消息](https://api.luckylillia.com/api-226254797.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊视频消息](https://api.luckylillia.com/api-226266762.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊超级表情 骰子](https://api.luckylillia.com/api-226279076.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊超级表情 猜拳](https://api.luckylillia.com/api-226288106.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊QQ音乐卡片](https://api.luckylillia.com/api-226294366.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊网易云音乐卡片](https://api.luckylillia.com/api-226296597.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊自定义音乐卡片](https://api.luckylillia.com/api-226298355.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊卡片(json)消息](https://api.luckylillia.com/api-252765517.md): json内容无法自定义，需要找签好名带token的
+- OneBot 11 > 接口列表 > 消息 > 发送私聊消息 [发送私聊合并转发消息](https://api.luckylillia.com/api-226189040.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊文本消息](https://api.luckylillia.com/api-226300081.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊回复消息](https://api.luckylillia.com/api-226300082.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊@消息](https://api.luckylillia.com/api-226302513.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊图片](https://api.luckylillia.com/api-226391767.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊文字+图片](https://api.luckylillia.com/api-226300086.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊系统表情](https://api.luckylillia.com/api-226300088.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊语音消息](https://api.luckylillia.com/api-226392170.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊视频消息](https://api.luckylillia.com/api-226393202.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊超级表情 骰子](https://api.luckylillia.com/api-226300095.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊超级表情 猜拳](https://api.luckylillia.com/api-226300096.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊QQ音乐卡片](https://api.luckylillia.com/api-226300098.md): 视频不能超过100M
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊网易云音乐卡片](https://api.luckylillia.com/api-226300099.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊自定义音乐卡片](https://api.luckylillia.com/api-226300100.md): 
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊卡片(json)消息](https://api.luckylillia.com/api-252772577.md): json内容无法自定义，需要找签好名带token的
+- OneBot 11 > 接口列表 > 消息 > 发送群聊消息 [发送群聊合并转发消息](https://api.luckylillia.com/api-226189162.md): 
+- OneBot 11 > 接口列表 > 消息 [长连接接收消息](https://api.luckylillia.com/api-308870539.md): HTTP SSE 的方式接收消息 
+- OneBot 11 > 接口列表 > 消息 [转发单条好友消息](https://api.luckylillia.com/api-168354013.md): 
+- OneBot 11 > 接口列表 > 消息 [转发单条群消息](https://api.luckylillia.com/api-168362359.md): 
+- OneBot 11 > 接口列表 > 消息 [获取消息详情](https://api.luckylillia.com/api-147574979.md): 
+- OneBot 11 > 接口列表 > 消息 [撤回消息](https://api.luckylillia.com/api-124033506.md): 
+- OneBot 11 > 接口列表 > 消息 [获取消息文件详情](https://api.luckylillia.com/api-156061303.md): 
+- OneBot 11 > 接口列表 > 消息 [获取消息图片详情](https://api.luckylillia.com/api-151567554.md): 
+- OneBot 11 > 接口列表 > 消息 [获取消息语音详情](https://api.luckylillia.com/api-151571424.md): 
+- OneBot 11 > 接口列表 > 消息 [表情回应消息](https://api.luckylillia.com/api-167098304.md): 只支持群聊消息
+- OneBot 11 > 接口列表 > 消息 [获取好友历史消息记录](https://api.luckylillia.com/api-227239657.md): 
+- OneBot 11 > 接口列表 > 消息 [获取群历史消息](https://api.luckylillia.com/api-156808591.md): 
+- OneBot 11 > 接口列表 > 消息 [获取转发消息详情](https://api.luckylillia.com/api-159742006.md): 
+- OneBot 11 > 接口列表 > 消息 [标记消息已读](https://api.luckylillia.com/api-227239139.md): 
+- OneBot 11 > 接口列表 > 消息 [语音消息转文字](https://api.luckylillia.com/api-308868025.md): OneBot 5.1 版本才支持此 api
+- OneBot 11 > 接口列表 > 消息 [发送群 Ai 语音](https://api.luckylillia.com/api-333741857.md): 此 API 需要 OneBot 5.6.1 及以上版本
+- OneBot 11 > 接口列表 > 消息 [获取群 Ai 语音可用声色列表](https://api.luckylillia.com/api-333736037.md): 此 API 需要 OneBot 5.6.1 及以上版本
+- OneBot 11 > 接口列表 > 消息 [发送戳一戳（双击头像）](https://api.luckylillia.com/api-440902553.md): 此 API 需要 LLBot 7.11.3 及以上版本
+- OneBot 11 > 接口列表 > 文件 [上传群文件](https://api.luckylillia.com/api-155975222.md): 
+- OneBot 11 > 接口列表 > 文件 [群文件转永久](https://api.luckylillia.com/api-363202170.md): 需要 6.5.0 之后的版本
+- OneBot 11 > 接口列表 > 文件 [删除群文件](https://api.luckylillia.com/api-227237095.md): 
+- OneBot 11 > 接口列表 > 文件 [移动群文件](https://api.luckylillia.com/api-349842098.md): 
+- OneBot 11 > 接口列表 > 文件 [创建群文件文件夹](https://api.luckylillia.com/api-227237287.md): 
+- OneBot 11 > 接口列表 > 文件 [删除群文件文件夹](https://api.luckylillia.com/api-227237610.md): 
+- OneBot 11 > 接口列表 > 文件 [获取群文件系统信息](https://api.luckylillia.com/api-349841637.md): 
+- OneBot 11 > 接口列表 > 文件 [获取群根目录文件列表](https://api.luckylillia.com/api-227237874.md): 
+- OneBot 11 > 接口列表 > 文件 [获取群子目录文件列表](https://api.luckylillia.com/api-340139786.md): 
+- OneBot 11 > 接口列表 > 文件 [重命名群文件文件夹名](https://api.luckylillia.com/api-343325366.md): 
+- OneBot 11 > 接口列表 > 文件 [重命名群文件名](https://api.luckylillia.com/api-427869412.md): 此 API 需要 LLBot 7.10.1 及以上版本
+- OneBot 11 > 接口列表 > 文件 [获取群文件资源链接](https://api.luckylillia.com/api-227239277.md): 
+- OneBot 11 > 接口列表 > 文件 [获取私聊文件资源链接](https://api.luckylillia.com/api-343369371.md): 此 API 需要 OneBot 5.9.0 及以上版本
+- OneBot 11 > 接口列表 > 文件 [上传私聊文件](https://api.luckylillia.com/api-227234065.md): 
+- OneBot 11 > 接口列表 > 文件 [上传闪传文件](https://api.luckylillia.com/api-317839399.md): **此 API 需要 OneBot 5.3.0 以上版本**
+- OneBot 11 > 接口列表 > 文件 [下载闪传文件](https://api.luckylillia.com/api-317850249.md): **此 API 需要 OneBot 5.3.0 以上版本**
+- OneBot 11 > 接口列表 > 文件 [获取闪传文件详情](https://api.luckylillia.com/api-317884181.md): **此 API 需要 OneBot 5.3.0 以上版本**
+- OneBot 11 > 接口列表 > 文件 [下载文件到缓存目录](https://api.luckylillia.com/api-156943324.md): 
+- OneBot 11 > 接口列表 > 文件 [重新分享闪传文件](https://api.luckylillia.com/api-427472768.md): **此 API 需要 LLBot 7.11.0 以上版本**
+- OneBot 11 > 接口列表 > 系统 [获取登录号信息](https://api.luckylillia.com/api-147864132.md): 
+- OneBot 11 > 接口列表 > 系统 [获取版本信息](https://api.luckylillia.com/api-230654488.md): 
+- OneBot 11 > 接口列表 > 系统 [bot状态](https://api.luckylillia.com/api-151572557.md): 
+- OneBot 11 > 接口列表 > 系统 [清理缓存](https://api.luckylillia.com/api-153826516.md): 该 API 在 OneBot 5.0+ 之后失效
+- OneBot 11 > 接口列表 > 系统 [获取cookies](https://api.luckylillia.com/api-165659467.md): 
+- OneBot 11 > 接口列表 > 系统 [设置在线状态](https://api.luckylillia.com/api-226466249.md): 
+- OneBot 11 > 接口列表 > 系统 [重启](https://api.luckylillia.com/api-234347932.md): 该 API 在 OneBot 5.0+ 之后失效
+- OneBot 11 > 接口列表 > 系统 [扫描二维码](https://api.luckylillia.com/api-394346126.md): 需要7.2.0及以上版本
+- OneBot 11 > 接口列表 > 系统 [获取登录号信息 Copy](https://api.luckylillia.com/api-439391979.md): 
+- OneBot 11 > 接口列表 > 其他 [图片 OCR](https://api.luckylillia.com/api-227239205.md): 
+- OneBot 11 > 接口列表 > 其他 [获取图片rkey](https://api.luckylillia.com/api-318107442.md): 
+- OneBot 11 > 接口列表 > 其他 [获取推荐表情](https://api.luckylillia.com/api-324325097.md): 需 5.5.0 版本及以上
+- OneBot 11 > 接口列表 > 其他 [获取收藏表情](https://api.luckylillia.com/api-227239885.md): 
+- OneBot 11 > 接口列表 > 其他 [发送Protobuf数据包](https://api.luckylillia.com/api-359521726.md): 
+
+## Schemas
+- OneBot11 > 上报事件 > 消息段 [MessageSegment](https://api.luckylillia.com/schema-189483990.md): 
+- OneBot11 > 上报事件 > 消息段 [TextSegment](https://api.luckylillia.com/schema-189483991.md): 
+- OneBot11 > 上报事件 > 消息段 [ImageSegment](https://api.luckylillia.com/schema-189483992.md): 
+- OneBot11 > 上报事件 > 消息段 [VideoSegment](https://api.luckylillia.com/schema-189483993.md): 
+- OneBot11 > 上报事件 > 消息段 [RecordSegment](https://api.luckylillia.com/schema-189483994.md): 
+- OneBot11 > 上报事件 > 消息段 [FileSegment](https://api.luckylillia.com/schema-189483995.md): 
+- OneBot11 > 上报事件 > 消息段 [FlashFileSegment](https://api.luckylillia.com/schema-189483996.md): 
+- OneBot11 > 上报事件 > 消息段 [AtSegment](https://api.luckylillia.com/schema-189483997.md): 
+- OneBot11 > 上报事件 > 消息段 [ReplySegment](https://api.luckylillia.com/schema-189483998.md): 
+- OneBot11 > 上报事件 > 消息段 [JsonSegment](https://api.luckylillia.com/schema-189483999.md): 
+- OneBot11 > 上报事件 > 消息段 [XmlSegment](https://api.luckylillia.com/schema-189484000.md): 
+- OneBot11 > 上报事件 > 消息段 [FaceSegment](https://api.luckylillia.com/schema-189484001.md): 
+- OneBot11 > 上报事件 > 消息段 [MfaceSegment](https://api.luckylillia.com/schema-189484002.md): 
+- OneBot11 > 上报事件 > 消息段 [MarkdownSegment](https://api.luckylillia.com/schema-189484003.md): 
+- OneBot11 > 上报事件 > 消息段 [NodeSegment](https://api.luckylillia.com/schema-189484004.md): 
+- OneBot11 > 上报事件 > 消息段 [ForwardSegment](https://api.luckylillia.com/schema-189484005.md): 
+- OneBot11 > 上报事件 > 消息段 [MusicSegment](https://api.luckylillia.com/schema-189484006.md): 
+- OneBot11 > 上报事件 > 消息段 [PokeSegment](https://api.luckylillia.com/schema-189484007.md): 
+- OneBot11 > 上报事件 > 消息段 [DiceSegment](https://api.luckylillia.com/schema-189484008.md): 
+- OneBot11 > 上报事件 > 消息段 [RpsSegment](https://api.luckylillia.com/schema-189484009.md): 
+- OneBot11 > 上报事件 > 消息段 [ContactSegment](https://api.luckylillia.com/schema-189484010.md): 
+- OneBot11 > 上报事件 > 消息段 [ShakeSegment](https://api.luckylillia.com/schema-189484011.md): 
+- OneBot11 > 上报事件 > 消息段 [KeyboardSegment](https://api.luckylillia.com/schema-189484012.md): 
+- OneBot11 > 上报事件 > 消息段 [KeyboardButton](https://api.luckylillia.com/schema-189484013.md): 
+- OneBot11 > 上报事件 > _ [GroupUploadFile](https://api.luckylillia.com/schema-189483973.md): 
+- OneBot11 > 上报事件 > _ [FlashFile](https://api.luckylillia.com/schema-189483985.md): 
+- OneBot11 > 上报事件 > _ [MsgEmojiLike](https://api.luckylillia.com/schema-189483987.md): 
+- OneBot11 > 上报事件 > _ [MessageSender](https://api.luckylillia.com/schema-189483989.md): 
+- OneBot11 > 上报事件 [MessageEvent](https://api.luckylillia.com/schema-189483988.md): 
+- OneBot11 > 上报事件 [PokeEvent](https://api.luckylillia.com/schema-189483980.md): 
+- OneBot11 > 上报事件 [PokeRecallEvent](https://api.luckylillia.com/schema-191565928.md): 
+- OneBot11 > 上报事件 [FriendRecallNoticeEvent](https://api.luckylillia.com/schema-189483971.md): 
+- OneBot11 > 上报事件 [FriendRequestEvent](https://api.luckylillia.com/schema-189483968.md): 
+- OneBot11 > 上报事件 [FriendAddNoticeEvent](https://api.luckylillia.com/schema-189483970.md): 
+- OneBot11 > 上报事件 [ProfileLikeEvent](https://api.luckylillia.com/schema-189483982.md): 
+- OneBot11 > 上报事件 [GroupUploadNoticeEvent](https://api.luckylillia.com/schema-189483972.md): 
+- OneBot11 > 上报事件 [GroupRequestEvent](https://api.luckylillia.com/schema-189483969.md): 
+- OneBot11 > 上报事件 [GroupDismissEvent](https://api.luckylillia.com/schema-197450697.md): 
+- OneBot11 > 上报事件 [GroupIncreaseEvent](https://api.luckylillia.com/schema-189483976.md): 
+- OneBot11 > 上报事件 [GroupDecreaseEvent](https://api.luckylillia.com/schema-189483975.md): 
+- OneBot11 > 上报事件 [GroupTitleEvent](https://api.luckylillia.com/schema-189483981.md): 
+- OneBot11 > 上报事件 [GroupCardEvent](https://api.luckylillia.com/schema-189483979.md): 
+- OneBot11 > 上报事件 [GroupMsgEmojiLikeEvent](https://api.luckylillia.com/schema-189483986.md): 
+- OneBot11 > 上报事件 [GroupRecallNoticeEvent](https://api.luckylillia.com/schema-189483978.md): 
+- OneBot11 > 上报事件 [GroupAdminNoticeEvent](https://api.luckylillia.com/schema-189483974.md): 
+- OneBot11 > 上报事件 [GroupBanEvent](https://api.luckylillia.com/schema-189483977.md): 
+- OneBot11 > 上报事件 [EssenceEvent](https://api.luckylillia.com/schema-189483983.md): 
+- OneBot11 > 上报事件 [FlashFileEvent](https://api.luckylillia.com/schema-189483984.md): 
+- OneBot11 > 上报事件 [HeartbeatEvent](https://api.luckylillia.com/schema-189483966.md): 
+- OneBot11 > 上报事件 [LifeCycleEvent](https://api.luckylillia.com/schema-189483967.md): 
+- OneBot11 > 实体 [FileEntity](https://api.luckylillia.com/schema-195512258.md): 
+- OneBot11 > 实体 [FolderEntity](https://api.luckylillia.com/schema-195512345.md): 

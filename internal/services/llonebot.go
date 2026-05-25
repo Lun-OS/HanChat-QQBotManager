@@ -670,3 +670,285 @@ func (s *LLOneBotService) CheckUrlSafely(url string) (map[string]interface{}, er
 		"url": url,
 	}, "POST")
 }
+
+// ========== 拓展API - NapCat独有 ==========
+
+func (s *LLOneBotService) HandleQuickOperation(ctx interface{}, operation interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/.handle_quick_operation", map[string]interface{}{"context": ctx, "operation": operation}, "POST")
+}
+
+func (s *LLOneBotService) ArkShareGroup(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/ArkShareGroup", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) ArkSharePeer(userID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/ArkSharePeer", map[string]interface{}{"user_id": userID}, "POST")
+}
+
+func (s *LLOneBotService) DelGroupNotice(groupID interface{}, noticeID string) (map[string]interface{}, error) {
+	return s.CallAPI("/_del_group_notice", map[string]interface{}{"group_id": groupID, "notice_id": noticeID}, "POST")
+}
+
+func (s *LLOneBotService) MarkAllAsRead() (map[string]interface{}, error) {
+	return s.CallAPI("/_mark_all_as_read", nil, "POST")
+}
+
+func (s *LLOneBotService) BotExit() (map[string]interface{}, error) {
+	return s.CallAPI("/bot_exit", nil, "POST")
+}
+
+func (s *LLOneBotService) CancelGroupTodo(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/cancel_group_todo", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) CancelOnlineFile(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/cancel_online_file", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) CleanStreamTempFile() (map[string]interface{}, error) {
+	return s.CallAPI("/clean_stream_temp_file", nil, "POST")
+}
+
+func (s *LLOneBotService) ClickInlineKeyboardButton(groupID interface{}, botID interface{}, seq interface{}, buttonID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/click_inline_keyboard_button", map[string]interface{}{"group_id": groupID, "bot_id": botID, "seq": seq, "button_id": buttonID}, "POST")
+}
+
+func (s *LLOneBotService) CompleteGroupTodo(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/complete_group_todo", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) CreateCollection(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/create_collection", params, "POST")
+}
+
+func (s *LLOneBotService) CreateFlashTask(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/create_flash_task", params, "POST")
+}
+
+func (s *LLOneBotService) DelGroupAlbumMedia(groupID interface{}, albumID string, mediaID string) (map[string]interface{}, error) {
+	return s.CallAPI("/del_group_album_media", map[string]interface{}{"group_id": groupID, "album_id": albumID, "media_id": mediaID}, "POST")
+}
+
+func (s *LLOneBotService) DownloadFileImageStream(file string, threadCnt int) (map[string]interface{}, error) {
+	return s.CallAPI("/download_file_image_stream", map[string]interface{}{"file": file, "thread_cnt": threadCnt}, "POST")
+}
+
+func (s *LLOneBotService) DownloadFileRecordStream(file string, outFormat string, threadCnt int) (map[string]interface{}, error) {
+	return s.CallAPI("/download_file_record_stream", map[string]interface{}{"file": file, "out_format": outFormat, "thread_cnt": threadCnt}, "POST")
+}
+
+func (s *LLOneBotService) DownloadFileStream(url string, threadCnt int, headers []string) (map[string]interface{}, error) {
+	return s.CallAPI("/download_file_stream", map[string]interface{}{"url": url, "thread_cnt": threadCnt, "headers": headers}, "POST")
+}
+
+func (s *LLOneBotService) DownloadFileset(fileSetID string) (map[string]interface{}, error) {
+	return s.CallAPI("/download_fileset", map[string]interface{}{"file_set_id": fileSetID}, "POST")
+}
+
+func (s *LLOneBotService) FetchEmojiLike(messageID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/fetch_emoji_like", map[string]interface{}{"message_id": messageID}, "POST")
+}
+
+func (s *LLOneBotService) GetAIRecord(character string, text string, chatType int) (map[string]interface{}, error) {
+	return s.CallAPI("/get_ai_record", map[string]interface{}{"character": character, "text": text, "chat_type": chatType}, "POST")
+}
+
+func (s *LLOneBotService) GetClientKey() (map[string]interface{}, error) {
+	return s.CallAPI("/get_clientkey", nil, "POST")
+}
+
+func (s *LLOneBotService) GetCollectionList(category interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_collection_list", map[string]interface{}{"category": category}, "POST")
+}
+
+func (s *LLOneBotService) GetEmojiLikes(messageID interface{}, emojiID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_emoji_likes", map[string]interface{}{"message_id": messageID, "emoji_id": emojiID}, "POST")
+}
+
+func (s *LLOneBotService) GetFilesetID(fileSetID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_fileset_id", map[string]interface{}{"file_set_id": fileSetID}, "POST")
+}
+
+func (s *LLOneBotService) GetFilesetInfo(fileSetID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_fileset_info", map[string]interface{}{"file_set_id": fileSetID}, "POST")
+}
+
+func (s *LLOneBotService) GetFlashFileList(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_flash_file_list", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) GetFlashFileURL(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_flash_file_url", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) GetGroupDetailInfo(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_group_detail_info", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) GetGroupIgnoredNotifies(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_group_ignored_notifies", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) GetGroupInfoEx(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_group_info_ex", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) GetGuildList() (map[string]interface{}, error) {
+	return s.CallAPI("/get_guild_list", nil, "POST")
+}
+
+func (s *LLOneBotService) GetGuildServiceProfile() (map[string]interface{}, error) {
+	return s.CallAPI("/get_guild_service_profile", nil, "POST")
+}
+
+func (s *LLOneBotService) GetMiniAppArk(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_mini_app_ark", params, "POST")
+}
+
+func (s *LLOneBotService) GetOnlineFileMsg(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_online_file_msg", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) GetQunAlbumList(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/get_qun_album_list", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) GetRecentContact(count int) (map[string]interface{}, error) {
+	return s.CallAPI("/get_recent_contact", map[string]interface{}{"count": count}, "POST")
+}
+
+func (s *LLOneBotService) GetRkeyServer() (map[string]interface{}, error) {
+	return s.CallAPI("/get_rkey_server", nil, "POST")
+}
+
+func (s *LLOneBotService) GetShareLink(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/get_share_link", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) GetUnidirectionalFriendList() (map[string]interface{}, error) {
+	return s.CallAPI("/get_unidirectional_friend_list", nil, "POST")
+}
+
+func (s *LLOneBotService) MarkGroupMsgAsRead(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/mark_group_msg_as_read", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) MarkPrivateMsgAsRead(userID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/mark_private_msg_as_read", map[string]interface{}{"user_id": userID}, "POST")
+}
+
+func (s *LLOneBotService) NcGetPacketStatus() (map[string]interface{}, error) {
+	return s.CallAPI("/nc_get_packet_status", nil, "POST")
+}
+
+func (s *LLOneBotService) NcGetRkey() (map[string]interface{}, error) {
+	return s.CallAPI("/nc_get_rkey", nil, "POST")
+}
+
+func (s *LLOneBotService) NcGetUserStatus(userID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/nc_get_user_status", map[string]interface{}{"user_id": userID}, "POST")
+}
+
+func (s *LLOneBotService) ReceiveOnlineFile(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/receive_online_file", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) RefuseOnlineFile(fileID string) (map[string]interface{}, error) {
+	return s.CallAPI("/refuse_online_file", map[string]interface{}{"file_id": fileID}, "POST")
+}
+
+func (s *LLOneBotService) SendArkShare(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_ark_share", params, "POST")
+}
+
+func (s *LLOneBotService) SendFlashMsg(userID interface{}, message interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_flash_msg", map[string]interface{}{"user_id": userID, "message": message}, "POST")
+}
+
+func (s *LLOneBotService) SendForwardMsg(messages interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_forward_msg", map[string]interface{}{"messages": messages}, "POST")
+}
+
+func (s *LLOneBotService) SendGroupArkShare(groupID interface{}, params map[string]interface{}) (map[string]interface{}, error) {
+	p := map[string]interface{}{"group_id": groupID}
+	for k, v := range params {
+		p[k] = v
+	}
+	return s.CallAPI("/send_group_ark_share", p, "POST")
+}
+
+func (s *LLOneBotService) SendOnlineFile(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_online_file", params, "POST")
+}
+
+func (s *LLOneBotService) SendOnlineFolder(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_online_folder", params, "POST")
+}
+
+func (s *LLOneBotService) SendPacket(cmd string, data interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/send_packet", map[string]interface{}{"cmd": cmd, "data": data}, "POST")
+}
+
+func (s *LLOneBotService) SetDiyOnlineStatus(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/set_diy_online_status", params, "POST")
+}
+
+func (s *LLOneBotService) SetGroupAddOption(groupID interface{}, option string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_add_option", map[string]interface{}{"group_id": groupID, "option": option}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupAlbumMediaLike(groupID interface{}, albumID string, mediaID string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_album_media_like", map[string]interface{}{"group_id": groupID, "album_id": albumID, "media_id": mediaID}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupKickMembers(groupID interface{}, userIDs []interface{}, rejectAddRequest bool) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_kick_members", map[string]interface{}{"group_id": groupID, "user_ids": userIDs, "reject_add_request": rejectAddRequest}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupPortrait(groupID interface{}, file string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_portrait", map[string]interface{}{"group_id": groupID, "file": file}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupRobotAddOption(groupID interface{}, option string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_robot_add_option", map[string]interface{}{"group_id": groupID, "option": option}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupSearch(groupID interface{}, option string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_search", map[string]interface{}{"group_id": groupID, "option": option}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupSign(groupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_sign", map[string]interface{}{"group_id": groupID}, "POST")
+}
+
+func (s *LLOneBotService) SetGroupTodo(groupID interface{}, todo string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_group_todo", map[string]interface{}{"group_id": groupID, "todo": todo}, "POST")
+}
+
+func (s *LLOneBotService) SetInputStatus(userID interface{}, status int) (map[string]interface{}, error) {
+	return s.CallAPI("/set_input_status", map[string]interface{}{"user_id": userID, "status": status}, "POST")
+}
+
+func (s *LLOneBotService) SetSelfLongnick(nickname string) (map[string]interface{}, error) {
+	return s.CallAPI("/set_self_longnick", map[string]interface{}{"nickname": nickname}, "POST")
+}
+
+func (s *LLOneBotService) TestDownloadStream(url string, threadCnt int) (map[string]interface{}, error) {
+	return s.CallAPI("/test_download_stream", map[string]interface{}{"url": url, "thread_cnt": threadCnt}, "POST")
+}
+
+func (s *LLOneBotService) TransGroupFile(groupID interface{}, fileID string, targetGroupID interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/trans_group_file", map[string]interface{}{"group_id": groupID, "file_id": fileID, "target_group_id": targetGroupID}, "POST")
+}
+
+func (s *LLOneBotService) TranslateEn2zh(words string) (map[string]interface{}, error) {
+	return s.CallAPI("/translate_en2zh", map[string]interface{}{"words": words}, "POST")
+}
+
+func (s *LLOneBotService) UploadFileStream(params map[string]interface{}) (map[string]interface{}, error) {
+	return s.CallAPI("/upload_file_stream", params, "POST")
+}
+
+func (s *LLOneBotService) UploadImageToQunAlbum(groupID interface{}, file string, albumID string) (map[string]interface{}, error) {
+	return s.CallAPI("/upload_image_to_qun_album", map[string]interface{}{"group_id": groupID, "file": file, "album_id": albumID}, "POST")
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -116,6 +117,15 @@ type waitingConnectInfo struct {
 	xSelfID    string
 	ip         string
 	createdAt  time.Time
+}
+
+var botIDPattern = regexp.MustCompile(`^[\w\-.\p{Han}]+$`)
+
+func isValidBotID(id string) bool {
+	if id == "" {
+		return false
+	}
+	return botIDPattern.MatchString(id)
 }
 
 // NewReverseWebSocketService 创建反向WebSocket服务端
@@ -399,6 +409,16 @@ func (s *ReverseWebSocketService) HandleWebSocket(c *gin.Context) {
 	if customName == "" {
 		s.logger.Warnw("WebSocket连接被拒绝：缺少customName", "ip", c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少customName参数"})
+		return
+	}
+
+	if !isValidBotID(customName) {
+		s.logger.Warnw("WebSocket连接被拒绝：customName格式无效",
+			"ip", c.ClientIP(),
+			"custom_name", customName)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "customName格式无效，仅允许中文、英文、数字、点(.)、下划线(_)、减号(-)",
+		})
 		return
 	}
 

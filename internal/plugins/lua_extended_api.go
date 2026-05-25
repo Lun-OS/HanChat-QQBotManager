@@ -293,9 +293,54 @@ func (m *Manager) luaUUIDNew() func(*lua.LState) int {
 	}
 }
 
+// ==================== WebSocket自定义消息API ====================
+
+// 发送自定义WebSocket消息（用于发送未声明过的消息）
+// 参数：action (string) - 接口地址/动作名称
+//       data (table) - 请求数据
+// 返回：成功返回 true，失败返回 nil, error
+func (m *Manager) luaSendCustomWSMessage(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		if instance == nil || instance.reverseWS == nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString("WebSocket服务未初始化"))
+			return 2
+		}
+
+		action := L.CheckString(1)
+		if action == "" {
+			L.Push(lua.LNil)
+			L.Push(lua.LString("接口地址不能为空"))
+			return 2
+		}
+
+		var data interface{}
+		if L.GetTop() >= 2 {
+			tbl := L.CheckTable(2)
+			data = luaTableToMap(L, tbl)
+		} else {
+			data = make(map[string]interface{})
+		}
+
+		request := map[string]interface{}{
+			"action": action,
+			"params": data,
+		}
+
+		if err := instance.reverseWS.SendMessageToAccount(instance.SelfID, request); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		L.Push(lua.LBool(true))
+		return 1
+	}
+}
+
 // ==================== 注册扩展API ====================
 
-func (m *Manager) registerExtendedAPI(L *lua.LState) {
+func (m *Manager) registerExtendedAPI(L *lua.LState, instance *LuaPluginInstance) {
 	// 日期时间API
 	timeTable := L.NewTable()
 	L.SetField(timeTable, "now", L.NewFunction(m.luaTimeNow()))
@@ -340,4 +385,9 @@ func (m *Manager) registerExtendedAPI(L *lua.LState) {
 	uuidTable := L.NewTable()
 	L.SetField(uuidTable, "new", L.NewFunction(m.luaUUIDNew()))
 	L.SetGlobal("uuid", uuidTable)
+
+	// WebSocket自定义消息API
+	wsTable := L.NewTable()
+	L.SetField(wsTable, "send", L.NewFunction(m.luaSendCustomWSMessage(instance)))
+	L.SetGlobal("ws", wsTable)
 }

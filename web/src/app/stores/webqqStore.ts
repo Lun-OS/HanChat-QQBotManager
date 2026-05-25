@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { FriendCategory, GroupItem, RecentChatItem, ChatSession, GroupMemberItem, NotificationItem } from '../types/webqq'
 import { getFriends, getGroups, getRecentChats, getGroupNotifications, getFriendRequests, getDoubtBuddyRequests } from '../services/webqqApi'
+import { getSafeQQAvatarUrl, getSafeGroupAvatarUrl } from '../utils/security'
 
 const CACHE_EXPIRY_MS = 60 * 60 * 1000
 const MEMBERS_CACHE_EXPIRY_MS = 30 * 60 * 1000
@@ -567,7 +568,7 @@ export const useWebQQStore = create<WebQQState>()(
               }
             }
             if (!avatar) {
-              avatar = `https://q1.qlogo.cn/g?b=qq&nk=${peerId}&s=640`
+              avatar = getSafeQQAvatarUrl(peerId, 640)
             }
           } else if (chatType === 2) {
             const group = state.groups.find(g => g.groupCode === peerId)
@@ -582,7 +583,7 @@ export const useWebQQStore = create<WebQQState>()(
               avatar = group.avatar
             }
             if (!avatar) {
-              avatar = `https://p.qlogo.cn/gh/${peerId}/${peerId}/640/`
+              avatar = getSafeGroupAvatarUrl(peerId)
             }
           }
 

@@ -2733,7 +2733,7 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 
 	m.registerNetworkAPI(L, selfID, pluginName)
 	m.registerImageAPI(L, instance)
-	m.registerExtendedAPI(L)
+	m.registerExtendedAPI(L, instance)
 
 	// 系统/时间API
 	systemTable := L.NewTable()
@@ -2840,6 +2840,7 @@ func (m *Manager) registerAPI(instance *LuaPluginInstance) {
 	L.SetGlobal("on_notice", L.NewFunction(m.luaOnNotice(instance)))
 	L.SetGlobal("on_request", L.NewFunction(m.luaOnRequest(instance)))
 	L.SetGlobal("on_message_sent", L.NewFunction(m.luaOnMessageSent(instance)))
+	L.SetGlobal("on_meta_event", L.NewFunction(m.luaOnMetaEvent(instance)))
 
 	// 加载 Lua 运行时辅助库
 	m.loadLuaRuntimeLibrary(L, instance)

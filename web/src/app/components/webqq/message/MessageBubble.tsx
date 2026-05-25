@@ -4,6 +4,7 @@ import type { RawMessage, GroupMemberItem } from '../../../types/webqq'
 import { formatMessageTime, getSelfUid, getSelfUin, ntCall } from '../../../services/webqqApi'
 import { MessageElementRenderer, hasValidContent, isSystemTipMessage } from './MessageElements'
 import { showToast } from '../../common/Toast'
+import { getSafeQQAvatarUrl } from '../../../utils/security'
 
 export const MessageContextMenuContext = React.createContext<{
   showMenu: (e: React.MouseEvent, message: RawMessage) => void
@@ -176,7 +177,7 @@ export const RawMessageBubble = memo<{ message: RawMessage; allMessages: RawMess
     }
   }
 
-  const senderAvatar = `https://q1.qlogo.cn/g?b=qq&nk=${message.senderUin}&s=640`
+  const senderAvatar = getSafeQQAvatarUrl(message.senderUin, 640)
   const timestamp = parseInt(message.msgTime) * 1000
 
   let memberLevel: number | undefined
@@ -385,10 +386,14 @@ const EmojiReactionList = memo<{ message: RawMessage; isSelf: boolean }>(({ mess
               className="w-4 h-4"
               onError={(e) => {
                 if (emoji.emojiType === '2') {
+                  // 安全修复：使用 textContent 替代 insertAdjacentHTML 防止 XSS（REACT-XSS-002, REACT-DOM-001）
                   const target = e.target as HTMLImageElement
                   const char = String.fromCodePoint(parseInt(emoji.emojiId))
                   target.style.display = 'none'
-                  target.insertAdjacentHTML('afterend', `<span class="text-sm">${char}</span>`)
+                  const charSpan = document.createElement('span')
+                  charSpan.className = 'text-sm'
+                  charSpan.textContent = char
+                  target.after(charSpan)
                 }
               }}
             />
@@ -402,7 +407,7 @@ const EmojiReactionList = memo<{ message: RawMessage; isSelf: boolean }>(({ mess
 
 export const TempMessageBubble = memo<{ message: TempMessage; onRetry: () => void }>(({ message, onRetry }) => {
   const selfUin = getSelfUin()
-  const selfAvatar = selfUin ? `https://q1.qlogo.cn/g?b=qq&nk=${selfUin}&s=640` : ''
+  const selfAvatar = getSafeQQAvatarUrl(selfUin, 640)
 
   return (
     <div className="flex gap-2 flex-row-reverse w-full">

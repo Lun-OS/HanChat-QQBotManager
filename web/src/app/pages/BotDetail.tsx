@@ -28,6 +28,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { validateImageUrl, getSafeQQAvatarUrl } from '../utils/security';
 import apiTemplatesData from '../resources/ApiDebugTMPL.json';
 import { 
   accountApi,
@@ -151,17 +152,17 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF]" />
+        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF] dark:text-white/60" />
       </div>
     );
   }
 
   const statCards = [
-    { label: '运行时间', value: stats.uptime, icon: Activity, gradient: 'from-blue-500 to-cyan-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-    { label: '收到消息', value: stats.msg_received.toLocaleString(), icon: TrendingUp, gradient: 'from-green-500 to-emerald-400', bg: 'bg-green-50 dark:bg-green-900/20' },
-    { label: '发送消息', value: stats.msg_sent.toLocaleString(), icon: Send, gradient: 'from-purple-500 to-violet-400', bg: 'bg-purple-50 dark:bg-purple-900/20' },
-    { label: '好友数', value: friendCount.toLocaleString(), icon: Users, gradient: 'from-amber-500 to-orange-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
-    { label: '群组数', value: groupCount.toLocaleString(), icon: Package, gradient: 'from-pink-500 to-rose-400', bg: 'bg-pink-50 dark:bg-pink-900/20' },
+    { label: '运行时间', value: stats.uptime, icon: Activity, gradient: 'from-[#165DFF]/20 to-[#165DFF]/5 dark:from-white/10 dark:to-white/5', bg: 'bg-white dark:bg-white/[0.03]' },
+    { label: '收到消息', value: stats.msg_received.toLocaleString(), icon: TrendingUp, gradient: 'from-[#165DFF]/20 to-[#165DFF]/5 dark:from-white/10 dark:to-white/5', bg: 'bg-white dark:bg-white/[0.03]' },
+    { label: '发送消息', value: stats.msg_sent.toLocaleString(), icon: Send, gradient: 'from-[#165DFF]/20 to-[#165DFF]/5 dark:from-white/10 dark:to-white/5', bg: 'bg-white dark:bg-white/[0.03]' },
+    { label: '好友数', value: friendCount.toLocaleString(), icon: Users, gradient: 'from-[#165DFF]/20 to-[#165DFF]/5 dark:from-white/10 dark:to-white/5', bg: 'bg-white dark:bg-white/[0.03]' },
+    { label: '群组数', value: groupCount.toLocaleString(), icon: Package, gradient: 'from-[#165DFF]/20 to-[#165DFF]/5 dark:from-white/10 dark:to-white/5', bg: 'bg-white dark:bg-white/[0.03]' },
   ];
 
   return (
@@ -175,7 +176,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
         {statCards.map((stat, idx) => (
           <motion.div
             key={idx}
-            className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-md transition-shadow"
+            className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-md transition-shadow"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.08 }}
@@ -185,7 +186,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{stat.label}</span>
                 <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center`}>
-                  <stat.icon className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                  <stat.icon className="w-4 h-4 text-gray-700 dark:text-gray-300" />
                 </div>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
@@ -196,13 +197,13 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <motion.div
-          className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 p-5"
+          className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-xl border border-gray-100 dark:border-gray-800 p-5"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
         >
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <Settings className="w-4 h-4 text-[#165DFF]" />
+            <Settings className="w-4 h-4 text-gray-900 dark:text-white" />
             系统信息
           </h3>
           <div className="space-y-3">
@@ -212,11 +213,11 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
               { label: 'QQ 号', value: selfId },
               { label: '状态', value: bot?.status === BotStatus.ONLINE ? '在线' : '离线' },
             ].map((item, i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                 <span className="text-sm text-gray-500 dark:text-gray-400">{item.label}</span>
                 <span className={`text-sm font-medium ${
                   item.label === '状态'
-                    ? (item.value === '在线' ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400')
+                    ? (item.value === '在线' ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400')
                     : 'text-gray-900 dark:text-white'
                 }`}>
                   {item.label === '状态' && (
@@ -230,13 +231,13 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
         </motion.div>
 
         <motion.div
-          className="bg-white dark:bg-[#1D2129] rounded-xl border border-gray-100 dark:border-gray-800 p-5"
+          className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-xl border border-gray-100 dark:border-gray-800 p-5"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
         >
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#165DFF]" />
+            <Activity className="w-4 h-4 text-gray-900 dark:text-white" />
             消息统计
           </h3>
           <div className="space-y-4">
@@ -245,9 +246,9 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
                 <span className="text-xs text-gray-500 dark:text-gray-400">收到消息</span>
                 <span className="text-xs font-medium text-gray-900 dark:text-white">{stats.msg_received.toLocaleString()}</span>
               </div>
-              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-50 dark:bg-gray-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-[#165DFF]/50 to-[#165DFF]/20 dark:from-white/30 dark:to-white/10 rounded-full transition-all duration-500"
                   style={{ width: `${Math.min(100, (stats.msg_received / Math.max(stats.msg_received + stats.msg_sent, 1)) * 100)}%` }}
                 />
               </div>
@@ -257,14 +258,14 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
                 <span className="text-xs text-gray-500 dark:text-gray-400">发送消息</span>
                 <span className="text-xs font-medium text-gray-900 dark:text-white">{stats.msg_sent.toLocaleString()}</span>
               </div>
-              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-50 dark:bg-gray-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-[#165DFF]/40 to-[#165DFF]/15 dark:from-white/25 dark:to-white/8 rounded-full transition-all duration-500"
                   style={{ width: `${Math.min(100, (stats.msg_sent / Math.max(stats.msg_received + stats.msg_sent, 1)) * 100)}%` }}
                 />
               </div>
             </div>
-            <div className="pt-2 border-t border-gray-50 dark:border-gray-800">
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-500 dark:text-gray-400">消息总量</span>
                 <span className="text-sm font-bold text-gray-900 dark:text-white">{(stats.msg_received + stats.msg_sent).toLocaleString()}</span>
@@ -282,7 +283,7 @@ const BotOverview = ({ selfId }: { selfId: string }) => {
       >
         <motion.button
           onClick={fetchStats}
-          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
         >
@@ -406,12 +407,12 @@ const ApiDebug = ({ botId }: { botId: string }) => {
 
   return (
     <motion.div
-      className="backdrop-blur-sm bg-white/60 dark:bg-black/40 border border-white/40 dark:border-white/10 rounded-xl overflow-hidden flex flex-col"
+      className="backdrop-blur-sm bg-white dark:bg-[#1D2129] border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden flex flex-col"
       style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="flex items-center gap-1 px-3 py-2 bg-white/30 dark:bg-white/5 rounded-t-xl border-b border-black/5 dark:border-white/10">
+      <div className="flex items-center gap-1 px-3 py-2 bg-gray-50 dark:bg-white/5 rounded-t-xl border-b border-gray-100 dark:border-gray-800">
         <div className="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
           {openApis.map(apiKey => (
             <div
@@ -419,15 +420,15 @@ const ApiDebug = ({ botId }: { botId: string }) => {
               onClick={() => { setActiveApi(apiKey); setRequestBody(JSON.stringify(templates[apiKey]?.json ?? {}, null, 2)); setRequestPath(extractEndpoint(apiKey)); setResponse(''); setResponseStatus(null); }}
               className={`flex items-center gap-2 px-3 h-8 rounded-md cursor-pointer shrink-0 transition-colors ${
                 activeApi === apiKey
-                  ? 'bg-white/80 dark:bg-white/15 shadow-sm font-medium text-gray-900 dark:text-white'
-                  : 'text-gray-600 dark:text-white/70 hover:bg-white/10'
+                  ? 'bg-[#165DFF]/15 dark:bg-white/15 font-medium text-[#165DFF] dark:text-white'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.05]'
               }`}
             >
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600">POST</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-[#165DFF] text-white dark:bg-white/10 dark:text-white">POST</span>
               <span className="text-xs truncate max-w-[120px]">{templates[apiKey]?.PS ?? extractEndpoint(apiKey)}</span>
               <button
                 onClick={(e) => closeApi(apiKey, e)}
-                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white transition-colors"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -436,46 +437,46 @@ const ApiDebug = ({ botId }: { botId: string }) => {
         </div>
         <button
           onClick={() => { setPaletteOpen(true); setPaletteSearch(''); }}
-          className="flex items-center gap-1.5 px-3 h-8 rounded-md text-gray-500 dark:text-white/50 hover:bg-white/10 transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-3 h-8 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-colors shrink-0"
           title="Ctrl+K 搜索接口"
         >
           <Search className="w-3.5 h-3.5" />
           <span className="text-xs">搜索</span>
-          <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono">⌘K</kbd>
+          <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-[#165DFF]/10 dark:bg-white/10 font-mono text-[#165DFF] dark:text-white">⌘K</kbd>
         </button>
       </div>
 
       {activeApi && currentTemplate ? (
         <>
-          <div className="flex items-center gap-4 px-4 py-2 border-b border-black/5 dark:border-white/10 bg-white/40 dark:bg-black/20">
+          <div className="flex items-center gap-4 px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-white/[0.04]">
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600 shrink-0">POST</span>
-              <span className="text-gray-400 dark:text-gray-500 shrink-0">/</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-[#165DFF] text-white dark:bg-white/10 dark:text-white shrink-0">POST</span>
+              <span className="text-gray-500 dark:text-gray-400 shrink-0">/</span>
               <input
                 type="text"
                 value={requestPath}
                 onChange={e => setRequestPath(e.target.value)}
-                className="flex-1 min-w-0 bg-transparent font-mono text-sm text-gray-800 dark:text-white/90 outline-none border-none placeholder-gray-400"
+                className="flex-1 min-w-0 bg-transparent font-mono text-sm text-gray-900/90 dark:text-white/90 outline-none border-none placeholder-gray-400"
                 placeholder="请求路径"
               />
             </div>
             <button
               onClick={handleSend}
               disabled={isFetching}
-              className="bg-[#165DFF] text-white rounded-md px-4 h-8 font-bold shadow-sm hover:bg-[#4080FF] transition-colors flex items-center gap-2 disabled:opacity-50 shrink-0"
+              className="bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-md px-4 h-8 font-bold hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-50 shrink-0"
             >
               {isFetching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
               发送
             </button>
           </div>
 
-          <div className="flex items-center gap-4 px-4 pt-2 border-b border-black/5 dark:border-white/10">
+          <div className="flex items-center gap-4 px-4 pt-2 border-b border-gray-100 dark:border-gray-800">
             <button
               onClick={() => setActiveEditorTab('request')}
               className={`text-xs font-medium pb-2 border-b-2 transition-colors ${
                 activeEditorTab === 'request'
-                  ? 'border-[#165DFF] text-[#165DFF]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'border-[#165DFF] text-[#165DFF] dark:border-white/40 dark:text-white'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
             >
               请求体
@@ -484,8 +485,8 @@ const ApiDebug = ({ botId }: { botId: string }) => {
               onClick={() => setActiveEditorTab('docs')}
               className={`text-xs font-medium pb-2 border-b-2 transition-colors ${
                 activeEditorTab === 'docs'
-                  ? 'border-[#165DFF] text-[#165DFF]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                  ? 'border-[#165DFF] text-[#165DFF] dark:border-white/40 dark:text-white'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
             >
               接口文档
@@ -529,18 +530,18 @@ const ApiDebug = ({ botId }: { botId: string }) => {
                         const [type, description, defaultValue] = fieldConfig;
                         const isRequired = defaultValue === '必须';
                         return (
-                          <div key={fieldName} className="flex items-start gap-3 p-2 rounded-lg bg-gray-50/50 dark:bg-white/5">
+                          <div key={fieldName} className="flex items-start gap-3 p-2 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <code className="text-xs font-mono font-bold text-[#165DFF]">{fieldName}</code>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200/50 dark:bg-white/10 text-gray-500 dark:text-gray-400">{type}</span>
+                                <code className="text-xs font-mono font-bold text-gray-700 dark:text-gray-300">{fieldName}</code>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400">{type}</span>
                                 {isRequired && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">必填</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400">必填</span>
                                 )}
                               </div>
                               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>
                               {!isRequired && defaultValue && (
-                                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">默认: {defaultValue}</p>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">默认: {defaultValue}</p>
                               )}
                             </div>
                           </div>
@@ -553,18 +554,18 @@ const ApiDebug = ({ botId }: { botId: string }) => {
             )}
           </div>
 
-          <div className="border-t border-black/5 dark:border-white/10">
+          <div className="border-t border-gray-100 dark:border-gray-800">
             <div
               onClick={() => setResponseExpanded(!responseExpanded)}
-              className="flex items-center gap-2 px-4 py-2 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-colors"
             >
-              <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${responseExpanded ? '' : '-rotate-90'}`} />
+              <ChevronDown className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform ${responseExpanded ? '' : '-rotate-90'}`} />
               <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Response</span>
               {responseStatus !== null && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                   responseStatus >= 200 && responseStatus < 300
-                    ? 'bg-green-500/20 text-green-600'
-                    : 'bg-red-500/20 text-red-600'
+                    ? 'bg-[#165DFF]/10 text-[#165DFF] dark:bg-white/10 dark:text-white'
+                    : 'bg-[#165DFF]/10 text-[#165DFF] dark:bg-white/10 dark:text-gray-400'
                 }`}>
                   {responseStatus} {responseStatus < 300 ? 'OK' : 'Error'}
                 </span>
@@ -573,7 +574,7 @@ const ApiDebug = ({ botId }: { botId: string }) => {
               {response && (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCopyResponse(); }}
-                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                 >
                   <Copy className="w-3 h-3" />
                   复制
@@ -619,9 +620,9 @@ const ApiDebug = ({ botId }: { botId: string }) => {
           </div>
         </>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 gap-4">
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 gap-4">
           <Code className="w-12 h-12 opacity-30" />
-          <p className="text-sm">按 <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 font-mono text-xs">Ctrl+K</kbd> 搜索并打开接口</p>
+          <p className="text-sm">按 <kbd className="px-1.5 py-0.5 rounded bg-[#165DFF]/10 dark:bg-white/10 font-mono text-xs text-[#165DFF] dark:text-white">Ctrl+K</kbd> 搜索并打开接口</p>
         </div>
       )}
 
@@ -639,11 +640,11 @@ const ApiDebug = ({ botId }: { botId: string }) => {
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: -10 }}
               transition={{ duration: 0.15 }}
-              className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 w-full max-w-lg overflow-hidden"
+              className="bg-white dark:bg-black/80 dark:backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-100 dark:border-white/[0.06] w-full max-w-lg overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center border-b border-gray-200/50 dark:border-white/10">
-                <Search className="w-4 h-4 text-gray-400 ml-4 shrink-0" />
+              <div className="flex items-center border-b border-gray-100 dark:border-white/[0.06]">
+                <Search className="w-4 h-4 text-gray-500 dark:text-gray-400 ml-4 shrink-0" />
                 <input
                   ref={paletteInputRef}
                   type="text"
@@ -663,15 +664,15 @@ const ApiDebug = ({ botId }: { botId: string }) => {
               </div>
               <div className="max-h-[300px] overflow-y-auto">
                 {filteredTemplates.length === 0 ? (
-                  <div className="p-4 text-center text-gray-400 text-sm">未找到匹配的接口</div>
+                  <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">未找到匹配的接口</div>
                 ) : (
                   filteredTemplates.map(([key, template]) => (
                     <button
                       key={key}
                       onClick={() => openApi(key)}
-                      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-left"
+                      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-colors text-left"
                     >
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-green-500/20 text-green-600 shrink-0">POST</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-[#165DFF] text-white dark:bg-white/10 dark:text-white shrink-0">POST</span>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{template.PS}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">{extractEndpoint(key)}</div>
@@ -875,7 +876,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF]" />
+        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF] dark:text-white/60" />
       </div>
     );
   }
@@ -887,21 +888,21 @@ const Plugins = ({ selfId }: { selfId: string }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="flex justify-between items-center bg-white dark:bg-[#1D2129] p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex-shrink-0">
+      <div className="flex justify-between items-center bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl p-4 rounded-xl border border-gray-100 dark:border-gray-800 flex-shrink-0">
         <div className="relative">
           <input
             type="text"
             placeholder="搜索插件..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 bg-gray-50 dark:bg-[#2A2E38] rounded-lg text-sm w-64 border-none outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
+            className="pl-10 pr-4 py-2 bg-gray-50 dark:bg-white/[0.03] rounded-lg text-sm w-64 border-none outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 text-gray-900 dark:text-white"
           />
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-gray-500 dark:text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         </div>
         <div className="flex gap-2">
           <motion.button
             onClick={handleCheckPluginFiles}
-            className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+            className="p-2 text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
             title="检查插件文件"
             whileHover={{ scale: 1.1 }}
             transition={{ duration: 0.2 }}
@@ -910,7 +911,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
           </motion.button>
           <motion.button
             onClick={fetchPlugins}
-            className="p-2 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-2 text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
             whileHover={{ rotate: 180 }}
             transition={{ duration: 0.3 }}
           >
@@ -924,7 +925,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
           {filteredPlugins.map((plugin, idx) => (
           <motion.div 
             key={`${plugin.self_id}/${plugin.name}`}
-            className="bg-white dark:bg-[#1D2129] p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-48 group hover:border-[#165DFF]/50 transition-all hover:shadow-lg"
+            className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl p-6 rounded-xl border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-48 group hover:border-[#165DFF]/30 dark:hover:border-white/20 transition-all hover:shadow-lg"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: idx * 0.05 }}
@@ -939,20 +940,20 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                   transition={{ duration: 2, repeat: Infinity }}
                 />
               </div>
-              <p className="text-sm text-gray-500 mb-1">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
                 {plugin.version ? `v${plugin.version}` : '未指定版本'}
-                {plugin.remark && <span className="ml-2 text-xs text-gray-400">{plugin.remark}</span>}
+                {plugin.remark && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{plugin.remark}</span>}
               </p>
             </div>
             
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
               <motion.button 
                 onClick={() => handleTogglePlugin(plugin)}
                 disabled={actionLoading === plugin.name}
                 className={`p-2 rounded-lg transition-colors ${
                   plugin.running 
-                    ? 'text-green-600 bg-green-50 hover:bg-green-100' 
-                    : 'text-gray-500 bg-gray-50 hover:bg-gray-100'
+                    ? 'text-white bg-[#165DFF] dark:text-white dark:bg-white/10 hover:bg-[#0047FF] dark:hover:bg-white/15' 
+                    : 'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05]'
                 }`}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
@@ -968,7 +969,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               <div className="space-x-2">
                 <motion.button 
                   onClick={() => openLogModal(plugin)}
-                  className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   title="查看日志"
@@ -977,7 +978,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                 </motion.button>
                 <motion.button 
                   onClick={() => openConfigModal(plugin)}
-                  className="p-2 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   title="配置"
@@ -992,10 +993,10 @@ const Plugins = ({ selfId }: { selfId: string }) => {
       </div>
 
       {filteredPlugins.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>暂无插件</p>
-          <p className="text-sm text-gray-400 mt-2">请在 /plugins/{selfId}/ 目录下添加插件</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">请在 /plugins/{selfId}/ 目录下添加插件</p>
         </div>
       )}
 
@@ -1013,33 +1014,33 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
+              className="bg-white dark:bg-black/80 dark:backdrop-blur-xl rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-white/[0.06]">
                 <div className="flex items-center gap-4">
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                     配置: {selectedPlugin.name}
                   </h3>
-                  <div className="flex bg-gray-100 dark:bg-[#2A2E38] rounded-lg p-1">
+                  <div className="flex bg-gray-100 dark:bg-white/[0.06] rounded-lg p-1">
                     <button
                       onClick={() => setConfigMode('simple')}
                       disabled={!isJsonValid}
                       className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                         configMode === 'simple'
-                          ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                          : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                          ? 'bg-[#165DFF] text-white dark:bg-white/10 dark:text-white'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                       }`}
                     >
-                      简易模式
+                      可视化模式
                     </button>
                     <button
                       onClick={() => setConfigMode('advanced')}
                       disabled={!isJsonValid}
                       className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                         configMode === 'advanced'
-                          ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                          : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                          ? 'bg-[#165DFF] text-white dark:bg-white/10 dark:text-white'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                       }`}
                     >
                       高级模式
@@ -1051,7 +1052,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                 </div>
                 <button
                   onClick={() => setConfigModalOpen(false)}
-                  className="p-2 text-gray-500 hover:text-gray-700 rounded-lg"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 rounded-lg"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1060,7 +1061,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                 {configMode === 'simple' ? (
                   <div className="space-y-4">
                     {Object.entries(pluginConfig).length === 0 ? (
-                      <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
+                      <div className="flex items-center justify-center h-32 text-gray-500 dark:text-gray-400 text-sm">
                         配置为空
                       </div>
                     ) : (
@@ -1068,7 +1069,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                         <div key={idx} className="space-y-1">
                           <label className="flex items-center text-sm text-gray-700 dark:text-gray-300">
                             <span className="font-medium">{key}</span>
-                            <span className="ml-2 text-xs text-gray-500">
+                            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
                               ({typeof value === 'object' ? (Array.isArray(value) ? 'array' : 'object') : typeof value})
                             </span>
                           </label>
@@ -1082,9 +1083,9 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                                   setPluginConfig(newConfig);
                                   setPluginConfigText(JSON.stringify(newConfig, null, 2));
                                 }}
-                                className="w-4 h-4 text-[#165DFF] rounded border-gray-300 focus:ring-[#165DFF]"
+                                className="w-4 h-4 text-[#165DFF] dark:text-white rounded border-gray-300 focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20"
                               />
-                              <span className="text-sm text-gray-600 dark:text-gray-400">
+                              <span className="text-sm text-gray-500 dark:text-gray-400">
                                 {value ? '是' : '否'}
                               </span>
                             </label>
@@ -1098,7 +1099,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                                 setPluginConfig(newConfig);
                                 setPluginConfigText(JSON.stringify(newConfig, null, 2));
                               }}
-                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
+                              className="w-full p-2 text-sm bg-gray-50 dark:bg-white/[0.03] border border-gray-100 dark:border-white/[0.06] rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 text-gray-900 dark:text-white"
                             />
                           ) : typeof value === 'object' ? (
                             <textarea
@@ -1115,7 +1116,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                                 }
                               }}
                               rows={3}
-                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white resize-none font-mono"
+                              className="w-full p-2 text-sm bg-gray-50 dark:bg-white/[0.03] border border-gray-100 dark:border-white/[0.06] rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 text-gray-900 dark:text-white resize-none font-mono"
                             />
                           ) : (
                             <input
@@ -1126,7 +1127,7 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                                 setPluginConfig(newConfig);
                                 setPluginConfigText(JSON.stringify(newConfig, null, 2));
                               }}
-                              className="w-full p-2 text-sm bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-2 ring-[#165DFF] text-gray-900 dark:text-white"
+                              className="w-full p-2 text-sm bg-gray-50 dark:bg-white/[0.03] border border-gray-100 dark:border-white/[0.06] rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 text-gray-900 dark:text-white"
                             />
                           )}
                         </div>
@@ -1147,22 +1148,22 @@ const Plugins = ({ selfId }: { selfId: string }) => {
                         setIsJsonValid(false);
                       }
                     }}
-                    className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-[#2A2E38] border border-gray-200 dark:border-gray-700 rounded-lg outline-none resize-y text-gray-900 dark:text-white focus:ring-2 focus:ring-[#165DFF] focus:border-transparent"
+                    className="w-full h-64 p-4 font-mono text-sm bg-gray-50 dark:bg-white/[0.03] border border-gray-100 dark:border-white/[0.06] rounded-lg outline-none resize-y text-gray-900 dark:text-white focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 focus:border-transparent"
                     style={{ display: 'block' }}
                   />
                 )}
               </div>
-              <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-white/[0.06]">
                 <button
                   onClick={() => setConfigModalOpen(false)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="px-4 py-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSaveConfig}
                   disabled={savingConfig}
-                  className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingConfig ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   保存
@@ -1187,16 +1188,16 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col"
+              className="bg-white dark:bg-black/80 dark:backdrop-blur-xl rounded-xl shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-white/[0.06]">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                   插件日志: {selectedPlugin.name}
                 </h3>
                 <button
                   onClick={() => setLogModalOpen(false)}
-                  className="p-2 text-gray-500 hover:text-gray-700 rounded-lg"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 rounded-lg"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1204,34 +1205,34 @@ const Plugins = ({ selfId }: { selfId: string }) => {
               <div className="flex-1 overflow-auto p-4">
                 {loadingLogs ? (
                   <div className="flex items-center justify-center h-64">
-                    <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF]" />
+                    <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF] dark:text-white/60" />
                   </div>
                 ) : pluginLogs.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
+                  <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                     <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>暂无日志</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {pluginLogs.map((log, idx) => (
-                      <div key={idx} className="p-2 bg-gray-50 dark:bg-[#2A2E38] rounded text-sm font-mono text-gray-700 dark:text-gray-300 break-all">
+                      <div key={idx} className="p-2 bg-gray-50 dark:bg-white/[0.03] rounded text-sm font-mono text-gray-700 dark:text-gray-300 break-all">
                         {log}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-              <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-white/[0.06]">
                 <button
                   onClick={() => openLogModal(selectedPlugin)}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2"
+                  className="px-4 py-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors flex items-center gap-2"
                 >
                   <RefreshCw className="w-4 h-4" />
                   刷新
                 </button>
                 <button
                   onClick={() => setLogModalOpen(false)}
-                  className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors"
+                  className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors"
                 >
                   关闭
                 </button>
@@ -1315,14 +1316,14 @@ const FormattedLogContent = ({ log, expanded }: { log: string; expanded: boolean
   return (
     <pre className="whitespace-pre-wrap break-all font-mono text-xs">
       {parsed.timestamp && (
-        <span className="text-blue-500 dark:text-blue-400 font-medium">[{parsed.timestamp}]</span>
+        <span className="text-gray-700 dark:text-gray-300 font-medium">[{parsed.timestamp}]</span>
       )}
       {' '}
       {parsed.direction && (
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
           parsed.direction === 'send'
-            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            ? 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300'
+            : 'bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400'
         }`}>
           {parsed.direction}
         </span>
@@ -1409,17 +1410,17 @@ const Logs = ({ selfId }: { selfId: string }) => {
   };
 
   const typeOptions = [
-    { key: 'all' as const, label: '全部', color: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
-    { key: 'send' as const, label: '发送', color: 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' },
-    { key: 'recv' as const, label: '接收', color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400' },
-    { key: 'info' as const, label: '信息', color: 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400' },
+    { key: 'all' as const, label: '全部', color: 'bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400' },
+    { key: 'send' as const, label: '发送', color: 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300' },
+    { key: 'recv' as const, label: '接收', color: 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300' },
+    { key: 'info' as const, label: '信息', color: 'bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400' },
   ];
 
   const getTypeBadge = (type: 'send' | 'recv' | 'info') => {
     const config = {
-      send: { label: 'SEND', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-      recv: { label: 'RECV', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-      info: { label: 'INFO', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+      send: { label: 'SEND', cls: 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300' },
+      recv: { label: 'RECV', cls: 'bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-gray-300' },
+      info: { label: 'INFO', cls: 'bg-gray-100 dark:bg-white/[0.06] text-gray-500 dark:text-gray-400' },
     };
     const c = config[type];
     return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${c.cls}`}>{c.label}</span>;
@@ -1433,13 +1434,13 @@ const Logs = ({ selfId }: { selfId: string }) => {
     >
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 dark:text-gray-400" />
           <input
             type="text"
             placeholder="搜索日志关键词..."
             value={searchKeyword}
             onChange={e => setSearchKeyword(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#165DFF] backdrop-blur-sm transition-all"
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/[0.06] rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 backdrop-blur-sm transition-all text-gray-900 dark:text-white"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -1448,7 +1449,7 @@ const Logs = ({ selfId }: { selfId: string }) => {
               key={opt.key}
               onClick={() => setTypeFilter(opt.key)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${opt.color} ${
-                typeFilter === opt.key ? 'ring-2 ring-offset-1 ring-current shadow-sm' : 'opacity-60 hover:opacity-100'
+                typeFilter === opt.key ? 'ring-1 ring-offset-1 ring-current' : 'opacity-60 hover:opacity-100'
               }`}
             >
               {opt.label}
@@ -1457,8 +1458,8 @@ const Logs = ({ selfId }: { selfId: string }) => {
         </div>
       </div>
 
-      <div className="bg-white/60 dark:bg-black/40 backdrop-blur-sm border border-white/40 dark:border-white/10 rounded-2xl overflow-hidden flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-black/5 dark:border-white/10 bg-white/30 dark:bg-white/5">
+      <div className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-sm border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden flex-1 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5">
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {filteredLogs.length} / {logs.length} 条日志
           </span>
@@ -1466,7 +1467,7 @@ const Logs = ({ selfId }: { selfId: string }) => {
             <motion.button
               onClick={fetchLogs}
               disabled={isLoading}
-              className="p-1.5 text-gray-500 hover:text-[#165DFF] hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+              className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
             >
@@ -1474,7 +1475,7 @@ const Logs = ({ selfId }: { selfId: string }) => {
             </motion.button>
             <button
               onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#165DFF] bg-[#165DFF]/10 hover:bg-[#165DFF]/20 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/[0.10] rounded-lg transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
               下载
@@ -1487,12 +1488,12 @@ const Logs = ({ selfId }: { selfId: string }) => {
           className="flex-1 overflow-y-auto p-3 space-y-1"
         >
           {isLoading && logs.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+            <div className="flex items-center justify-center h-32 text-gray-500 dark:text-gray-400 text-sm">
               <RefreshCw className="w-5 h-5 animate-spin mr-2" />
               加载中...
             </div>
           ) : filteredLogs.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+            <div className="flex items-center justify-center h-32 text-gray-500 dark:text-gray-400 text-sm">
               {searchKeyword || typeFilter !== 'all' ? '没有匹配的日志' : '暂无日志'}
             </div>
           ) : (
@@ -1505,15 +1506,15 @@ const Logs = ({ selfId }: { selfId: string }) => {
                 <div
                   key={i}
                   onClick={() => toggleLogExpand(i)}
-                  className={`group rounded-lg px-3 py-2 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-white/5 ${
-                    logType === 'send' ? 'border-l-2 border-l-amber-400' :
-                    logType === 'recv' ? 'border-l-2 border-l-blue-400' :
-                    'border-l-2 border-l-gray-300 dark:border-l-gray-600'
+                  className={`group rounded-lg px-3 py-2 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.05] ${
+                    logType === 'send' ? 'border-l-2 border-l-gray-400' :
+                    logType === 'recv' ? 'border-l-2 border-l-gray-400' :
+                    'border-l-2 border-l-gray-600'
                   }`}
                 >
                   <div className="flex items-center gap-2 text-xs">
                     {parsed.timestamp && (
-                      <span className="text-gray-400 dark:text-gray-500 font-mono shrink-0">{parsed.timestamp}</span>
+                      <span className="text-gray-500 dark:text-gray-400 font-mono shrink-0">{parsed.timestamp}</span>
                     )}
                     {getTypeBadge(logType)}
                     <span className={`flex-1 min-w-0 ${isExpanded ? '' : 'truncate'}`}>
@@ -1572,7 +1573,7 @@ export function BotDetail() {
             msg_count_today: 0,
             friend_count: 0,
             group_count: 0,
-            avatar: `https://q1.qlogo.cn/g?b=qq&nk=${a.self_id}&s=40`,
+            avatar: getSafeQQAvatarUrl(a.self_id, 40),
             version_info: a.version_info,
             bot_status: a.bot_status,
           }));
@@ -1592,7 +1593,7 @@ export function BotDetail() {
   if (botLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF]" />
+        <RefreshCw className="w-8 h-8 animate-spin text-[#165DFF] dark:text-white/60" />
       </div>
     );
   }
@@ -1612,9 +1613,9 @@ export function BotDetail() {
 
   if (!bot) {
     return (
-      <div className="p-8 text-center text-gray-500">
+      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
         <p className="mb-4">Bot not found</p>
-        <button onClick={() => navigate('/bots')} className="text-[#165DFF] underline">返回列表</button>
+        <button onClick={() => navigate('/bots')} className="text-[#165DFF] dark:text-white underline">返回列表</button>
       </div>
     );
   }
@@ -1630,22 +1631,22 @@ export function BotDetail() {
     <div className="flex flex-col h-full space-y-6">
       {/* Top Header */}
       <motion.div 
-        className="flex items-center justify-between bg-white dark:bg-[#1D2129] px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-800"
+        className="flex items-center justify-between bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-800"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
       >
         <div className="flex items-center">
           <motion.button 
             onClick={() => navigate('/bots')} 
-            className="mr-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            className="mr-3 p-1.5 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
           >
-            <ArrowLeft className="w-4 h-4 text-gray-500" />
+            <ArrowLeft className="w-4 h-4 text-gray-500 dark:text-gray-400" />
           </motion.button>
-          <motion.img 
-            src={bot.avatar} 
-            className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 mr-3 ring-2 ring-white dark:ring-[#1D2129]" 
+          <motion.img
+            src={validateImageUrl(bot.avatar)}
+            className="w-10 h-10 rounded-full bg-gray-50 dark:bg-white/[0.03] mr-3 ring-2 ring-gray-200 dark:ring-white/10"
             alt="Avatar"
             whileHover={{ scale: 1.1 }}
           />
@@ -1654,13 +1655,13 @@ export function BotDetail() {
                {bot.nickname}
                <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                  bot.status === BotStatus.ONLINE 
-                   ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
-                   : 'bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                   ? 'bg-[#165DFF]/10 text-[#165DFF] dark:bg-white/10 dark:text-white'
+                   : 'bg-gray-50 dark:bg-white/[0.03] text-gray-500 dark:text-gray-400'
                }`}>
                  {bot.status === BotStatus.ONLINE ? '在线' : '离线'}
                </span>
              </h1>
-             <p className="text-gray-400 dark:text-gray-500 font-mono text-xs mt-0.5">QQ: {bot.self_id}</p>
+             <p className="text-gray-500 dark:text-gray-400 font-mono text-xs mt-0.5">QQ: {bot.self_id}</p>
           </div>
         </div>
         
@@ -1668,7 +1669,7 @@ export function BotDetail() {
           <motion.button 
             onClick={handleRestart}
             disabled={restarting}
-            className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-[#2A2E38] transition-colors text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
+            className="px-3 py-1.5 border border-gray-100 dark:border-white/[0.06] text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-colors text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
@@ -1679,15 +1680,15 @@ export function BotDetail() {
       </motion.div>
 
       {/* Tabs Navigation */}
-      <div className="flex border-b border-gray-200 dark:border-gray-800">
+      <div className="flex border-b border-gray-100 dark:border-gray-800">
         {tabs.map((tab, index) => (
           <motion.button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center px-6 py-3 border-b-2 font-medium text-sm transition-all ${
               activeTab === tab.id 
-                ? 'border-[#165DFF] text-[#165DFF]' 
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                ? 'border-[#165DFF] text-[#165DFF] dark:border-white/40 dark:text-white' 
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}

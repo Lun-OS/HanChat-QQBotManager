@@ -12,15 +12,17 @@ import (
 
 // WebLoginHandler Web登录API处理器
 type WebLoginHandler struct {
-	logger     *zap.SugaredLogger
-	loginSvc   *services.WebLoginService
+	logger      *zap.SugaredLogger
+	loginSvc    *services.WebLoginService
+	captchaSvc  *services.CaptchaService
 }
 
 // NewWebLoginHandler 创建Web登录处理器
-func NewWebLoginHandler(baseLogger *zap.Logger, loginSvc *services.WebLoginService) *WebLoginHandler {
+func NewWebLoginHandler(baseLogger *zap.Logger, loginSvc *services.WebLoginService, captchaSvc *services.CaptchaService) *WebLoginHandler {
 	return &WebLoginHandler{
-		logger:   utils.NewModuleLogger(baseLogger, "api.web_login"),
-		loginSvc: loginSvc,
+		logger:     utils.NewModuleLogger(baseLogger, "api.web_login"),
+		loginSvc:   loginSvc,
+		captchaSvc: captchaSvc,
 	}
 }
 
@@ -149,8 +151,9 @@ func (h *WebLoginHandler) UnbanIP(c *gin.Context) {
 }
 
 // extractToken 从请求中提取token
+// 安全增强：不再支持从Query参数获取token，防止Token泄露
 func (h *WebLoginHandler) extractToken(c *gin.Context) string {
-	// 1. 从Authorization头获取
+	// 1. 从Authorization头获取（推荐方式）
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
 		if strings.HasPrefix(authHeader, "Bearer ") {
@@ -159,15 +162,19 @@ func (h *WebLoginHandler) extractToken(c *gin.Context) string {
 		return authHeader
 	}
 
-	// 2. 从Cookie获取
+	// 2. 从Cookie获取（次选方式）
 	if cookieToken, err := c.Cookie("auth_token"); err == nil {
 		return cookieToken
 	}
 
-	// 3. 从Query参数获取（用于SSE等无法设置header的场景）
-	if queryToken := c.Query("token"); queryToken != "" {
-		return queryToken
-	}
+	// 安全警告：已移除从Query参数获取Token的功能
+	// 原因：Token出现在URL中会导致以下安全风险：
+	//   - Token会保存在浏览器历史记录中
+	//   - Token会出现在HTTP Referer头中（访问外部链接时）
+	//   - Token会被Web服务器和代理服务器的访问日志记录
+	//
+	// 如果确实需要支持SSE等无法设置header的场景，
+	// 请使用Cookie方式传递Token
 
 	return ""
 }
@@ -211,10 +218,57 @@ func (h *WebLoginHandler) AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// GetCaptcha 获取验证码
+// GET /api/auth/captcha
+func (h *WebLoginHandler) GetCaptcha(c *gin.Context) {
+	resp, err := h.captchaSvc.GenerateCaptcha()
+	if err != nil {
+		h.logger.Errorw("生成验证码失败", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "生成验证码失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp,
+	})
+}
+
+// RefreshCaptcha 刷新验证码
+// POST /api/auth/captcha/refresh
+func (h *WebLoginHandler) RefreshCaptcha(c *gin.Context) {
+	var req struct {
+		CaptchaID string `json:"captcha_id"`
+	}
+	c.ShouldBindJSON(&req)
+
+	resp, err := h.captchaSvc.RefreshCaptcha(req.CaptchaID)
+	if err != nil {
+		h.logger.Errorw("刷新验证码失败", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "刷新验证码失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp,
+	})
+}
+
 // RegisterRoutes 注册登录相关路由
 func (h *WebLoginHandler) RegisterRoutes(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
 	{
+		// 验证码接口（不需要认证）
+		auth.GET("/captcha", h.GetCaptcha)
+		auth.POST("/captcha/refresh", h.RefreshCaptcha)
+
 		auth.POST("/login", h.Login)
 		auth.POST("/logout", h.Logout)
 		auth.POST("/verify", h.VerifyToken)

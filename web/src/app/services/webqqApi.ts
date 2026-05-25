@@ -1,6 +1,7 @@
 // WebQQ API 工具函数 - 对接后端 API
 import axios, { AxiosError } from 'axios'
 import type { GroupMemberItem, FriendCategory as WebqqFriendCategory, GroupItem } from '../types/webqq'
+import { getSafeQQAvatarUrl, getSafeGroupAvatarUrl } from '../utils/security'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -94,11 +95,11 @@ export function getSelfUin(): string | null {
 }
 
 export function getUserAvatar(uin: string): string {
-  return `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=640`
+  return getSafeQQAvatarUrl(uin, 640)
 }
 
 export function getGroupAvatar(groupCode: string): string {
-  return `https://p.qlogo.cn/gh/${groupCode}/${groupCode}/640/`
+  return getSafeGroupAvatarUrl(groupCode)
 }
 
 // 账号信息接口

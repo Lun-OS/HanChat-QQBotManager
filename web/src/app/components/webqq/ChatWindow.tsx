@@ -13,6 +13,7 @@ import { MessageElementRenderer, hasValidContent, isSystemTipMessage, ImagePrevi
 import { RawMessageBubble, TempMessageBubble, MessageContextMenuContext, AvatarContextMenuContext, ScrollToMessageContext, GroupMembersContext, FriendsContext } from './message/MessageBubble'
 import type { TempMessage, AvatarContextMenuInfo } from './message/MessageBubble'
 import { MuteDialog, KickConfirmDialog, TitleDialog } from './chat/ChatDialogs'
+import { validateImageUrl } from '../../utils/security'
 import { MessageContextMenu, AvatarContextMenu } from './chat/ContextMenus'
 import { ChatInput } from './chat/ChatInput'
 import { EmojiReactionPicker } from './message/EmojiReactionPicker'
@@ -67,8 +68,12 @@ const EmojiReactionTip: React.FC<{ tip: SystemTip; onScrollToMessage: (msgSeq: s
             if (!img.dataset.fallback) {
               img.dataset.fallback = '1'
               if (emojiId > 1000) {
+                // 安全修复：使用 textContent 替代 insertAdjacentHTML 防止 XSS（REACT-XSS-002, REACT-DOM-001）
                 img.style.display = 'none'
-                img.insertAdjacentHTML('afterend', `<span class="text-sm">${String.fromCodePoint(emojiId)}</span>`)
+                const emojiSpan = document.createElement('span')
+                emojiSpan.className = 'text-sm'
+                emojiSpan.textContent = String.fromCodePoint(emojiId)
+                img.after(emojiSpan)
               } else {
                 img.src = `https://gxh.vip.qq.com/club/item/parcel/item/${tip.emojiId.slice(0, 2)}/${tip.emojiId}/100x100.png`
               }
@@ -763,7 +768,7 @@ export function ChatWindow({
               }
             }}
           >
-            <img src={session.peerAvatar} alt={session.peerName} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            <img src={validateImageUrl(session.peerAvatar)} alt={session.peerName} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
             <div className="min-w-0">
               <div className="font-medium text-theme truncate">
                 {(() => {

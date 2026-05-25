@@ -4,6 +4,7 @@ import type { UserProfile } from '../../../services/webqqApi'
 import { deleteFriend } from '../../../services/webqqApi'
 import { showToast } from '../../common/Toast'
 import { useWebQQStore } from '../../../stores/webqqStore'
+import { validateImageUrl } from '../../../utils/security'
 
 interface UserProfileCardProps {
   profile: UserProfile | null
@@ -85,7 +86,7 @@ export const UserProfileCard = memo<UserProfileCardProps>(({ profile, loading, p
           <div className="px-4 pb-4 -mt-10">
             <div className="flex items-end gap-3">
               <img
-                src={profile.avatar}
+                src={validateImageUrl(profile.avatar)}
                 alt={profile.nickname}
                 className="w-16 h-16 rounded-xl border-4 border-white dark:border-neutral-800 object-cover"
               />
@@ -248,7 +249,7 @@ export const GroupProfileCard = memo<GroupProfileCardProps>(({ profile, loading,
           <div className="px-4 pb-4 -mt-10">
             <div className="flex items-end gap-3">
               <img
-                src={profile.avatar}
+                src={validateImageUrl(profile.avatar)}
                 alt={profile.groupName}
                 className="w-16 h-16 rounded-xl border-4 border-white dark:border-neutral-800 object-cover"
               />

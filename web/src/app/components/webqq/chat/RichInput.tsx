@@ -1,5 +1,42 @@
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState } from 'react'
 
+/**
+ * 验证 URL 是否安全（REACT-XSS-002）
+ * - 只允许 http/https 协议，阻止 javascript:, data: 等危险协议
+ * - 验证 URL 格式合法性
+ * @returns 安全的 URL 字符串，不安全时返回空字符串
+ */
+function isSafeUrl(url: string): string {
+  if (!url || typeof url !== 'string') return ''
+
+  // 去除首尾空白
+  const trimmed = url.trim()
+
+  // 协议白名单校验 - 只允许 http 和 https
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.warn('[Security] Blocked unsafe URL protocol:', parsed.protocol)
+      return ''
+    }
+  } catch {
+    // URL 构造失败说明格式不合法
+    console.warn('[Security] Invalid URL format:', trimmed)
+    return ''
+  }
+
+  // 基本格式验证：防止包含控制字符或 HTML 实体注入
+  if (/[\x00-\x1f<>"]/.test(trimmed)) {
+    console.warn('[Security] URL contains invalid characters')
+    return ''
+  }
+
+  return trimmed
+}
+
+/** 不安全 URL 时的默认占位图 */
+const SAFE_IMAGE_PLACEHOLDER = ''
+
 export interface RichInputItem {
   type: 'text' | 'face' | 'image' | 'at'
   content?: string
@@ -213,7 +250,14 @@ export const RichInput = forwardRef<RichInputRef, RichInputProps>(({
     span.dataset.type = 'face'
     span.dataset.faceId = String(faceId)
     span.className = 'inline-block align-middle mx-0.5 select-all'
-    span.innerHTML = `<img src="/face/${faceId}.png" alt="[表情]" class="w-6 h-6 inline-block" draggable="false" />`
+
+    // 安全的 DOM API 方式创建表情图片元素（避免 innerHTML 注入风险，符合 REACT-DOM-001 安全规范）
+    const img = document.createElement('img')
+    img.src = `/face/${faceId}.png`  // faceId 是数字类型，URL 拼接安全
+    img.alt = '[表情]'
+    img.className = 'w-6 h-6 inline-block'
+    img.draggable = false
+    span.appendChild(img)
 
     const selection = window.getSelection()
     if (selection && selection.rangeCount > 0) {
@@ -258,7 +302,21 @@ export const RichInput = forwardRef<RichInputRef, RichInputProps>(({
       ;(span as any).__file = file
     }
     span.className = 'inline-block align-middle mx-0.5 select-all'
-    span.innerHTML = `<img src="${url}" alt="[图片]" class="h-16 max-w-[200px] rounded inline-block object-cover" draggable="false" />`
+
+    // [安全修复] REACT-DOM-001 / REACT-XSS-002:
+    // 禁止使用 innerHTML 直接插入用户提供的 URL（原代码存在 XSS 注入风险）
+    // 改用 DOM API 创建元素 + isSafeUrl 白名单校验，确保：
+    //   1. URL 协议仅限 http/https，阻止 javascript: / data: / vbscript: 等危险协议
+    //   2. URL 不含控制字符或 HTML 注入字符
+    //   3. 通过 img.src 赋值（DOM 属性赋值会自动转义），而非 innerHTML 字符串拼接
+    const safeUrl = isSafeUrl(url) || SAFE_IMAGE_PLACEHOLDER
+
+    const img = document.createElement('img')
+    img.src = safeUrl          // DOM 属性赋值，浏览器自动转义，无 XSS 风险
+    img.alt = '[图片]'
+    img.className = 'h-16 max-w-[200px] rounded inline-block object-cover'
+    img.draggable = false
+    span.appendChild(img)       // 使用 appendChild 而非 innerHTML
 
     const selection = window.getSelection()
     if (selection && selection.rangeCount > 0) {

@@ -1,5 +1,6 @@
 import * as Blockly from 'blockly';
 import { GeneratedCode, PluginMetadata } from './types';
+import { getCurrentConfig } from './blocks';
 import {
   generateLuaJSONEncodeCode,
   generateLuaJSONDecodeCode,
@@ -10,6 +11,130 @@ import {
   BLOCKLY_CODE_SEPARATOR,
   RuntimeLibraryType,
 } from './lua-json-utils';
+
+interface BlockGeneratorConfig {
+  type: 'statement' | 'value' | 'event' | 'conditional' | 'with_var' | 'pcall' | 'custom';
+  template?: string;
+  order?: string;
+  handler?: string;
+  varField?: string | null;
+  condition?: string;
+  subTypeField?: string;
+  successInput?: string;
+  errorInput?: string;
+  conditionInput?: string;
+  ifInput?: string;
+  elseInput?: string;
+}
+
+function resolveTemplate(template: string, block: Blockly.Block, gen: any): string {
+  return template.replace(/\$\{(\w+):([^}]+)\}/g, (_match, kind: string, expr: string) => {
+    switch (kind) {
+      case 'field':
+        return block.getFieldValue(expr) || '';
+      case 'field_escaped':
+        return gen.luaStringEscape(block.getFieldValue(expr) || '');
+      case 'field_bool':
+        return String(block.getFieldValue(expr) === 'TRUE');
+      case 'value': {
+        const sep = expr.indexOf('||');
+        if (sep >= 0) {
+          const name = expr.substring(0, sep);
+          const def = expr.substring(sep + 2);
+          return gen.valueToCode(block, name, gen.ORDER_NONE) || def;
+        }
+        return gen.valueToCode(block, expr, gen.ORDER_NONE) || 'nil';
+      }
+      case 'statement': {
+        const sep = expr.indexOf('||');
+        if (sep >= 0) {
+          const name = expr.substring(0, sep);
+          const def = expr.substring(sep + 2);
+          return gen.statementToCode(block, name) || def;
+        }
+        return gen.statementToCode(block, expr) || '';
+      }
+      case 'var': {
+        const sep = expr.indexOf('||');
+        const fieldName = sep >= 0 ? expr.substring(0, sep) : expr;
+        const def = sep >= 0 ? expr.substring(sep + 2) : 'result';
+        return gen.getVariableName(block, block.getFieldValue(fieldName)) || def;
+      }
+      default:
+        return _match;
+    }
+  });
+}
+
+function registerTemplateGenerator(gen: any, blockType: string, config: BlockGeneratorConfig): void {
+  switch (config.type) {
+    case 'statement':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        return resolveTemplate(config.template!, block, gen);
+      };
+      break;
+    case 'value':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        const code = resolveTemplate(config.template!, block, gen);
+        const order = config.order || 'ORDER_HIGH';
+        return [code, gen[order]];
+      };
+      break;
+    case 'event':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        const statements = gen.statementToCode(block, 'HANDLER') || '';
+        const handler = config.handler!;
+        if (!config.varField) {
+          return `function ${handler}()\n${statements}end\n\n`;
+        }
+        const varName = gen.getVariableName(block, block.getFieldValue(config.varField)) || 'blockly_v__event';
+        let conditionCode = '';
+        if (config.condition) {
+          const cond = config.condition.replace(/\$\{var\}/g, varName).replace(/\$\{field:([^}]+)\}/g, (_m: string, f: string) => block.getFieldValue(f) || '');
+          conditionCode = `  if ${cond} then\n`;
+        }
+        const hasCondition = !!config.condition;
+        const result = `${handler}(function(${varName})\n  if type(${varName}) ~= "table" then ${varName} = {} end\n  _G["${varName}"] = ${varName}\n${hasCondition ? conditionCode : ''}${statements}${hasCondition ? '  end\n' : ''}end)\n\n`;
+        return result;
+      };
+      break;
+    case 'conditional':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        const condition = gen.valueToCode(block, config.conditionInput || 'CONDITION', gen.ORDER_NONE) || 'false';
+        const ifBranch = gen.statementToCode(block, config.ifInput || 'IF') || '';
+        const elseBranch = gen.statementToCode(block, config.elseInput || 'ELSE') || '';
+        return `if ${condition} then\n${ifBranch}else\n${elseBranch}end\n`;
+      };
+      break;
+    case 'with_var':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        const varName = gen.getVariableName(block, block.getFieldValue(config.varField || 'VAR')) || 'result';
+        const call = resolveTemplate(config.template!, block, gen);
+        return `_G["${varName}"] = ${call}\nif type(_G["${varName}"]) ~= "table" then\n  _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}\nend\n`;
+      };
+      break;
+    case 'pcall':
+      gen.forBlock[blockType] = function(block: Blockly.Block) {
+        const call = resolveTemplate(config.template!, block, gen);
+        const onSuccess = gen.statementToCode(block, config.successInput || 'ON_SUCCESS') || '';
+        const onError = gen.statementToCode(block, config.errorInput || 'ON_ERROR') || '';
+        return `local _ok, _result = pcall(${call})\nif _ok then\n${onSuccess}else\n${onError}end\n`;
+      };
+      break;
+    case 'custom':
+      break;
+  }
+}
+
+function registerConfigGenerators(gen: any): void {
+  const config = getCurrentConfig();
+  if (!config || !config.blocks) return;
+  for (const block of config.blocks) {
+    if (block.generator && block.generator.type !== 'custom') {
+      registerTemplateGenerator(gen, block.type, block.generator as BlockGeneratorConfig);
+    }
+  }
+}
 
 // 生成器实例存储（按工作空间ID隔离，避免多实例冲突）
 const generatorInstances = new Map<string, Blockly.Generator>();
@@ -3468,4 +3593,269 @@ end)()`, generator.ORDER_HIGH];
     // 如果index为0或空，返回所有二维码内容；否则返回指定位置的二维码内容
     return [`message.image_get_qrcodes(${image}, ${index})`, generator.ORDER_HIGH];
   };
+
+  // ========== 拓展API积木 ==========
+  generator.forBlock['onebot_get_group_detail_info'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("get_group_detail_info", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_get_group_info_ex'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("get_group_info_ex", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_get_unidirectional_friend_list'] = function(block: Blockly.Block) {
+    return `api.call("get_unidirectional_friend_list", {})\n`;
+  };
+
+  generator.forBlock['onebot_set_group_portrait'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
+    return `api.call("set_group_portrait", {group_id = ${groupId}, file = ${file}})\n`;
+  };
+
+  generator.forBlock['onebot_set_group_add_option'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const option = generator.valueToCode(block, 'OPTION', generator.ORDER_NONE) || '""';
+    return `api.call("set_group_add_option", {group_id = ${groupId}, option = ${option}})\n`;
+  };
+
+  generator.forBlock['onebot_get_clientkey'] = function(block: Blockly.Block) {
+    return `api.call("get_clientkey", {})\n`;
+  };
+
+  generator.forBlock['onebot_set_diy_online_status'] = function(block: Blockly.Block) {
+    const params = generator.valueToCode(block, 'PARAMS', generator.ORDER_NONE) || '{}';
+    return `api.call("set_diy_online_status", ${params})\n`;
+  };
+
+  generator.forBlock['onebot_set_input_status'] = function(block: Blockly.Block) {
+    const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
+    const status = generator.valueToCode(block, 'STATUS', generator.ORDER_NONE) || '0';
+    return `api.call("set_input_status", {user_id = ${userId}, status = ${status}})\n`;
+  };
+
+  generator.forBlock['onebot_mark_group_msg_as_read'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("mark_group_msg_as_read", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_mark_private_msg_as_read'] = function(block: Blockly.Block) {
+    const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
+    return `api.call("mark_private_msg_as_read", {user_id = ${userId}})\n`;
+  };
+
+  generator.forBlock['onebot_send_group_ark_share'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const params = generator.valueToCode(block, 'PARAMS', generator.ORDER_NONE) || '{}';
+    return `api.call("send_group_ark_share", {group_id = ${groupId}, params = ${params}})\n`;
+  };
+
+  generator.forBlock['onebot_send_ark_share'] = function(block: Blockly.Block) {
+    const params = generator.valueToCode(block, 'PARAMS', generator.ORDER_NONE) || '{}';
+    return `api.call("send_ark_share", ${params})\n`;
+  };
+
+  generator.forBlock['onebot_get_online_clients'] = function(block: Blockly.Block) {
+    return `api.call("get_online_clients", {})\n`;
+  };
+
+  generator.forBlock['onebot_get_recent_contact'] = function(block: Blockly.Block) {
+    const count = generator.valueToCode(block, 'COUNT', generator.ORDER_NONE) || '10';
+    return `api.call("get_recent_contact", {count = ${count}})\n`;
+  };
+
+  generator.forBlock['onebot_translate_en2zh'] = function(block: Blockly.Block) {
+    const words = generator.valueToCode(block, 'WORDS', generator.ORDER_NONE) || '""';
+    return [`api.call("translate_en2zh", {words = ${words}})`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['onebot_set_qq_profile_full'] = function(block: Blockly.Block) {
+    const nickname = generator.valueToCode(block, 'NICKNAME', generator.ORDER_NONE) || '""';
+    const company = generator.valueToCode(block, 'COMPANY', generator.ORDER_NONE) || '""';
+    const email = generator.valueToCode(block, 'EMAIL', generator.ORDER_NONE) || '""';
+    const college = generator.valueToCode(block, 'COLLEGE', generator.ORDER_NONE) || '""';
+    const personalNote = generator.valueToCode(block, 'PERSONAL_NOTE', generator.ORDER_NONE) || '""';
+    return `api.call("set_qq_profile", {nickname = ${nickname}, company = ${company}, email = ${email}, college = ${college}, personal_note = ${personalNote}})\n`;
+  };
+
+  generator.forBlock['onebot_set_self_longnick'] = function(block: Blockly.Block) {
+    const nickname = generator.valueToCode(block, 'NICKNAME', generator.ORDER_NONE) || '""';
+    return `api.call("set_self_longnick", {nickname = ${nickname}})\n`;
+  };
+
+  generator.forBlock['onebot_get_guild_list'] = function(block: Blockly.Block) {
+    return `api.call("get_guild_list", {})\n`;
+  };
+
+  generator.forBlock['onebot_set_group_todo'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const todo = generator.valueToCode(block, 'TODO', generator.ORDER_NONE) || '""';
+    return `api.call("set_group_todo", {group_id = ${groupId}, todo = ${todo}})\n`;
+  };
+
+  generator.forBlock['onebot_cancel_group_todo'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("cancel_group_todo", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_complete_group_todo'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("complete_group_todo", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_set_group_kick_members'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const userIds = generator.valueToCode(block, 'USER_IDS', generator.ORDER_NONE) || '{}';
+    const reject = block.getFieldValue('REJECT') === 'TRUE' ? 'true' : 'false';
+    return `api.call("set_group_kick_members", {group_id = ${groupId}, user_ids = ${userIds}, reject_add_request = ${reject}})\n`;
+  };
+
+  generator.forBlock['onebot_reshare_flash_file'] = function(block: Blockly.Block) {
+    const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
+    return `api.call("reshare_flash_file", {file_id = ${fileId}})\n`;
+  };
+
+  generator.forBlock['onebot_group_poke'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
+    return `api.call("group_poke", {group_id = ${groupId}, user_id = ${userId}})\n`;
+  };
+
+  generator.forBlock['onebot_rename_group_file'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
+    const newName = generator.valueToCode(block, 'NEW_NAME', generator.ORDER_NONE) || '""';
+    return `api.call("rename_group_file", {group_id = ${groupId}, file_id = ${fileId}, new_name = ${newName}})\n`;
+  };
+
+  generator.forBlock['onebot_send_group_forward_msg'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    const messages = generator.valueToCode(block, 'MESSAGES', generator.ORDER_NONE) || '{}';
+    return `api.call("send_group_forward_msg", {group_id = ${groupId}, messages = ${messages}})\n`;
+  };
+
+  generator.forBlock['onebot_send_poke'] = function(block: Blockly.Block) {
+    const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
+    return `api.call("send_poke", {user_id = ${userId}})\n`;
+  };
+
+  generator.forBlock['onebot_send_private_forward_msg'] = function(block: Blockly.Block) {
+    const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
+    const messages = generator.valueToCode(block, 'MESSAGES', generator.ORDER_NONE) || '{}';
+    return `api.call("send_private_forward_msg", {user_id = ${userId}, messages = ${messages}})\n`;
+  };
+
+  generator.forBlock['onebot_get_essence_msg_list'] = function(block: Blockly.Block) {
+    const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
+    return `api.call("get_essence_msg_list", {group_id = ${groupId}})\n`;
+  };
+
+  generator.forBlock['onebot_set_essence_msg'] = function(block: Blockly.Block) {
+    const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
+    return `api.call("set_essence_msg", {message_id = ${messageId}})\n`;
+  };
+
+  generator.forBlock['event_on_message_sent'] = function(block: Blockly.Block) {
+    const branch = generator.statementToCode(block, 'DO');
+    return `on_message_sent(function(msg)\n${branch}end)\n`;
+  };
+
+  generator.forBlock['event_on_lifecycle'] = function(block: Blockly.Block) {
+    const subType = block.getFieldValue('SUB_TYPE');
+    const branch = generator.statementToCode(block, 'DO');
+    return `on_meta_event(function(evt)\n  if evt.meta_event_type == "lifecycle" and evt.sub_type == "${subType}" then\n${branch}  end\nend)\n`;
+  };
+
+  generator.forBlock['event_on_input_status'] = function(block: Blockly.Block) {
+    const branch = generator.statementToCode(block, 'DO');
+    return `on_notice(function(evt)\n  if evt.notice_type == "notify" and evt.sub_type == "input_status" then\n${branch}  end\nend)\n`;
+  };
+
+  generator.forBlock['event_on_profile_like'] = function(block: Blockly.Block) {
+    const branch = generator.statementToCode(block, 'DO');
+    return `on_notice(function(evt)\n  if evt.notice_type == "notify" and evt.sub_type == "profile_like" then\n${branch}  end\nend)\n`;
+  };
+
+  generator.forBlock['msg_get_sender_temp_source'] = function(block: Blockly.Block) {
+    return [`msg.temp_source or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_notice_type'] = function(block: Blockly.Block) {
+    return [`evt.notice_type or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_sub_type'] = function(block: Blockly.Block) {
+    return [`evt.sub_type or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_operator_id'] = function(block: Blockly.Block) {
+    return [`evt.operator_id or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_target_id'] = function(block: Blockly.Block) {
+    return [`evt.target_id or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_duration'] = function(block: Blockly.Block) {
+    return [`evt.duration or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_card_new'] = function(block: Blockly.Block) {
+    return [`evt.card_new or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_card_old'] = function(block: Blockly.Block) {
+    return [`evt.card_old or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_title_new'] = function(block: Blockly.Block) {
+    return [`evt.title_new or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_title_old'] = function(block: Blockly.Block) {
+    return [`evt.title_old or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_request_flag'] = function(block: Blockly.Block) {
+    return [`evt.flag or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_comment'] = function(block: Blockly.Block) {
+    return [`evt.comment or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_file_info'] = function(block: Blockly.Block) {
+    const field = block.getFieldValue('FIELD');
+    return [`(evt.file and evt.file.${field}) or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_like_times'] = function(block: Blockly.Block) {
+    return [`evt.times or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_like_count'] = function(block: Blockly.Block) {
+    return [`evt.like_count or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_input_status_text'] = function(block: Blockly.Block) {
+    return [`(evt.status and evt.status.text) or ""`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['event_get_self_id'] = function(block: Blockly.Block) {
+    return [`evt.self_id or 0`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['api_get_result_field'] = function(block: Blockly.Block) {
+    const fieldName = generator.valueToCode(block, 'FIELD_NAME', generator.ORDER_NONE) || '"data"';
+    return [`result[${fieldName}]`, generator.ORDER_ATOMIC];
+  };
+
+  generator.forBlock['api_get_result_data'] = function(block: Blockly.Block) {
+    const fieldName = generator.valueToCode(block, 'FIELD_NAME', generator.ORDER_NONE) || '"data"';
+    return [`(result.data and result.data[${fieldName}]) or nil`, generator.ORDER_ATOMIC];
+  };
+
+  registerConfigGenerators(generator);
 }

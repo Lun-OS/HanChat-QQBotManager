@@ -4,6 +4,7 @@ import type { NotificationItem } from '../../../types/webqq'
 import { handleGroupNotification, handleFriendRequest, approveDoubtBuddy } from '../../../services/webqqApi'
 import { useWebQQStore } from '../../../stores/webqqStore'
 import { showToast } from '../../common/Toast'
+import { validateImageUrl, getSafeQQAvatarUrl } from '../../../utils/security'
 
 interface NotificationPanelProps {
   onClose: () => void
@@ -134,7 +135,7 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <img
-                    src={item.friendAvatarUrl || `https://q1.qlogo.cn/g?b=qq&nk=${item.friendUin}&s=640`}
+                    src={validateImageUrl(item.friendAvatarUrl) || getSafeQQAvatarUrl(item.friendUin, 640)}
                     alt={item.friendNick}
                     className="w-10 h-10 rounded-full object-cover"
                   />
@@ -175,7 +176,7 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <img
-                    src={`https://q1.qlogo.cn/g?b=qq&nk=${item.uid}&s=640`}
+                    src={getSafeQQAvatarUrl(item.uid, 640)}
                     alt={item.nick}
                     className="w-10 h-10 rounded-full object-cover"
                   />

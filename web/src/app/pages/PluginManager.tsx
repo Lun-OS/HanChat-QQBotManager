@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { pluginManagerApi, type FileNode, type AccountInfo } from '../services/api';
 import { BlocklyEditor } from '../blockly';
+import { PluginStore } from '../components/PluginStore';
 
 loader.config({ monaco });
 
@@ -170,34 +171,34 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-md w-full"
+        className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl max-w-md w-full"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className={`p-2 rounded-full ${danger ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+            <div className={`p-2 rounded-full ${danger ? 'bg-red-100 text-red-600' : 'bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-white'}`}>
               <AlertTriangle className="w-6 h-6" />
             </div>
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">{title}</h3>
           </div>
           <p className="text-gray-600 dark:text-gray-400 mb-4">{message}</p>
-          
+
           {requireConfirmText && (
             <div className="mb-4">
               <label className="block text-sm text-gray-500 mb-2">
-                请输入 <span className="font-mono font-bold text-gray-700">{confirmPlaceholder}</span> 以确认操作
+                请输入 <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{confirmPlaceholder}</span> 以确认操作
               </label>
               <input
                 type="text"
                 value={confirmInput}
                 onChange={(e) => setConfirmInput(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-[#2A2E38] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-white/20 outline-none"
                 placeholder={`输入 "${confirmPlaceholder}"`}
               />
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-3 p-4 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -210,7 +211,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             className={`px-4 py-2 rounded-lg transition-colors ${
               danger
                 ? 'bg-red-500 text-white hover:bg-red-600 disabled:bg-red-300'
-                : 'bg-[#165DFF] text-white hover:bg-[#0047FF] disabled:bg-blue-300'
+                : 'bg-[#165DFF] text-white dark:bg-white dark:text-black hover:bg-[#0047FF] dark:hover:bg-gray-200 disabled:opacity-50'
             }`}
           >
             {confirmText}
@@ -249,7 +250,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({ isOpen, onConfi
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-md w-full"
+        className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl max-w-md w-full"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
@@ -259,7 +260,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({ isOpen, onConfi
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-[#2A2E38] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-white/20 outline-none"
             placeholder="请输入插件名称"
             autoFocus
             onKeyDown={(e) => {
@@ -269,7 +270,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({ isOpen, onConfi
             }}
           />
         </div>
-        <div className="flex justify-end gap-3 p-4 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -279,7 +280,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({ isOpen, onConfi
           <button
             onClick={() => name.trim() && onConfirm(name.trim())}
             disabled={!name.trim()}
-            className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
           >
             创建
           </button>
@@ -318,7 +319,7 @@ const CreateFileDialog: React.FC<CreateFileDialogProps> = ({ isOpen, isDirectory
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-md w-full"
+        className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl max-w-md w-full"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
@@ -329,7 +330,7 @@ const CreateFileDialog: React.FC<CreateFileDialogProps> = ({ isOpen, isDirectory
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-[#2A2E38] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-white/20 outline-none"
             placeholder={`请输入${isDirectory ? '文件夹' : '文件'}名称`}
             autoFocus
             onKeyDown={(e) => {
@@ -339,7 +340,7 @@ const CreateFileDialog: React.FC<CreateFileDialogProps> = ({ isOpen, isDirectory
             }}
           />
         </div>
-        <div className="flex justify-end gap-3 p-4 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -349,7 +350,7 @@ const CreateFileDialog: React.FC<CreateFileDialogProps> = ({ isOpen, isDirectory
           <button
             onClick={() => name.trim() && onConfirm(name.trim())}
             disabled={!name.trim()}
-            className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
           >
             创建
           </button>
@@ -388,7 +389,7 @@ const RenameDialog: React.FC<RenameDialogProps> = ({ isOpen, currentName, onConf
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl max-w-md w-full"
+        className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl max-w-md w-full"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
@@ -397,7 +398,7 @@ const RenameDialog: React.FC<RenameDialogProps> = ({ isOpen, currentName, onConf
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-[#2A2E38] text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-white/20 outline-none"
             placeholder="请输入新名称"
             autoFocus
             onKeyDown={(e) => {
@@ -407,7 +408,7 @@ const RenameDialog: React.FC<RenameDialogProps> = ({ isOpen, currentName, onConf
             }}
           />
         </div>
-        <div className="flex justify-end gap-3 p-4 border-t border-gray-100 dark:border-gray-800">
+        <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -417,7 +418,7 @@ const RenameDialog: React.FC<RenameDialogProps> = ({ isOpen, currentName, onConf
           <button
             onClick={() => name.trim() && name !== currentName && onConfirm(name.trim())}
             disabled={!name.trim() || name === currentName}
-            className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
           >
             确认
           </button>
@@ -526,15 +527,15 @@ const FileEditor: React.FC<FileEditorProps> = ({
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-white dark:bg-[#1D2129] rounded-xl shadow-xl w-full max-w-6xl h-[85vh] flex flex-col"
+        className="bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl w-full max-w-6xl h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
             {getFileIcon(fileName, false)}
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">{fileName}</h3>
             {isReadOnly && (
-              <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 rounded">
+              <span className="px-2 py-0.5 text-xs bg-gray-50 dark:bg-white/[0.03] text-gray-500 rounded">
                 只读
               </span>
             )}
@@ -554,9 +555,9 @@ const FileEditor: React.FC<FileEditorProps> = ({
               <button
                 onClick={() => setShowPreview(!showPreview)}
                 className={`px-3 py-2 rounded-lg transition-colors text-sm ${
-                  showPreview 
-                    ? 'bg-[#165DFF] text-white' 
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                  showPreview
+                    ? 'bg-[#165DFF] text-white dark:bg-white dark:text-black'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
               >
                 {showPreview ? '编辑' : '预览'}
@@ -566,7 +567,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
               <button
                 onClick={handleSave}
                 disabled={isSaving || !hasUnsavedChanges}
-                className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 保存
@@ -574,7 +575,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
             )}
             <button
               onClick={handleClose}
-              className="p-2 text-gray-500 hover:text-gray-700 rounded-lg"
+              className="p-2 text-gray-500 hover:text-[#165DFF] dark:hover:text-gray-300 rounded-lg"
             >
               <X className="w-5 h-5" />
             </button>
@@ -583,27 +584,27 @@ const FileEditor: React.FC<FileEditorProps> = ({
         <div className="flex-1 overflow-hidden">
           {isBinary ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-500">
-              <div className="w-24 h-24 mb-6 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+              <div className="w-24 h-24 mb-6 rounded-full bg-gray-50 dark:bg-white/[0.03] flex items-center justify-center">
                 <File className="w-12 h-12 text-gray-400" />
               </div>
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                 无法预览二进制文件
               </h3>
-              <p className="text-sm text-gray-400 max-w-md text-center mb-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400 max-w-md text-center mb-4">
                 该文件类型（.{fileName.split('.').pop()?.toLowerCase() || 'unknown'}）是二进制文件，无法直接编辑或预览。
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={handleClose}
-                  className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors"
+                  className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors"
                 >
                   关闭
                 </button>
               </div>
             </div>
           ) : isMarkdown && showPreview ? (
-            <div 
-              className="h-full overflow-auto p-6 bg-[#1D2129] text-gray-300"
+            <div
+              className="h-full overflow-auto p-6 bg-white dark:bg-[#1D2129] text-gray-800 dark:text-gray-300"
               dangerouslySetInnerHTML={renderMarkdown(editedContent)}
             />
           ) : (
@@ -613,10 +614,10 @@ const FileEditor: React.FC<FileEditorProps> = ({
               value={editedContent}
               onChange={(value) => setEditedContent(value || '')}
               loading={
-                <div className="h-full flex items-center justify-center bg-[#1D2129]">
+                <div className="h-full flex items-center justify-center bg-white dark:bg-[#1D2129]">
                   <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-2 border-[#165DFF] border-t-transparent rounded-full animate-spin" />
-                    <span className="text-gray-400 text-sm">正在加载编辑器...</span>
+                    <div className="w-8 h-8 border-2 border-[#165DFF] dark:border-white/60 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-[#165DFF] dark:text-gray-400 text-sm">正在加载编辑器...</span>
                   </div>
                 </div>
               }
@@ -688,7 +689,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="fixed bg-white dark:bg-[#1D2129] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50 min-w-[180px]"
+        className="fixed bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 z-50 min-w-[180px]"
         style={{ left: x, top: y }}
       >
         {/* 新建操作组 - 只在有权限时显示 */}
@@ -749,7 +750,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 打开
               </button>
             )}
-            
+
             <button
               onClick={() => { onCopy(); onClose(); }}
               className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2"
@@ -757,7 +758,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
               <Copy className="w-4 h-4" />
               复制
             </button>
-            
+
             {canWrite && (
               <button
                 onClick={() => { onCut(); onClose(); }}
@@ -767,7 +768,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 剪切
               </button>
             )}
-            
+
             {canWrite && (
               <>
                 <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
@@ -787,7 +788,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 </button>
               </>
             )}
-            
+
             <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
           </>
         )}
@@ -841,12 +842,12 @@ const FileTree: React.FC<FileTreeProps> = ({
             <motion.div
               className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
                 isSelected
-                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                  ? 'bg-blue-100 dark:bg-white/[0.08] text-blue-700 dark:text-white'
                   : isCut
-                    ? 'opacity-50 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 dark:text-gray-500'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                    ? 'opacity-50 hover:bg-gray-50 dark:hover:bg-white/[0.04] text-gray-600 dark:text-gray-400'
+                    : 'hover:bg-gray-50 dark:hover:bg-white/[0.04] text-gray-700 dark:text-gray-300'
               }`}
-              style={{ 
+              style={{
                 paddingLeft: `${level * 16 + 8}px`,
               }}
               onClick={() => onSelect(node)}
@@ -859,7 +860,7 @@ const FileTree: React.FC<FileTreeProps> = ({
                     e.stopPropagation();
                     onToggleExpand(node.path);
                   }}
-                  className={`p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded ${isCut ? 'opacity-50' : ''}`}
+                  className={`p-0.5 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded ${isCut ? 'opacity-50' : ''}`}
                 >
                   {isExpanded ? (
                     <ChevronDown className="w-4 h-4 text-gray-500" />
@@ -910,6 +911,7 @@ export function PluginManager() {
   const blocklyUnsavedRef = useRef(false);
   const [showModeSwitchDialog, setShowModeSwitchDialog] = useState(false);
   const [pendingModeSwitch, setPendingModeSwitch] = useState<ViewMode | null>(null);
+  const [showStore, setShowStore] = useState(false);
   
   // 左右面板当前查看的账号
   const [leftSelfId, setLeftSelfId] = useState<string>('template');
@@ -941,6 +943,7 @@ export function PluginManager() {
   const [showCreateFileDialog, setShowCreateFileDialog] = useState(false);
   const [createFileIsDirectory, setCreateFileIsDirectory] = useState(false);
   const [createFileSide, setCreateFileSide] = useState<'left' | 'right'>('right');
+  const [createPluginSide, setCreatePluginSide] = useState<'left' | 'right'>('right');
   const [createFileTargetPath, setCreateFileTargetPath] = useState<string>('');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteNode, setDeleteNode] = useState<FileNode | null>(null);
@@ -1039,9 +1042,8 @@ export function PluginManager() {
     setExpandedPaths(newExpanded);
   };
 
-  const isPathWritable = (path: string, side: 'left' | 'right') => {
-    const selfIdToCheck = side === 'left' ? leftSelfId : rightSelfId;
-    return selfIdToCheck !== 'template';
+  const isPathWritable = (_path: string, side: 'left' | 'right') => {
+    return true;
   };
 
   const handleSelectLeft = (node: FileNode) => {
@@ -1072,24 +1074,22 @@ export function PluginManager() {
   };
 
   const handleCreatePlugin = async (name: string) => {
-    const parentPath = `/plugins/${rightSelfId}`;
+    const targetSelfId = createPluginSide === 'left' ? leftSelfId : rightSelfId;
+    const parentPath = `/plugins/${targetSelfId}`;
     
     try {
-      // 创建插件文件夹
       const folderRes = await pluginManagerApi.createFile(parentPath, name, 'folder');
       if (!folderRes.success) {
         toast.error(folderRes.message || '创建插件文件夹失败');
         return;
       }
       
-      // 创建 main.lua
       const luaRes = await pluginManagerApi.createFile(`${parentPath}/${name}`, 'main.lua', 'file');
       if (!luaRes.success) {
         toast.error(luaRes.message || '创建 main.lua 失败');
         return;
       }
       
-      // 创建 config.json
       const jsonRes = await pluginManagerApi.createFile(`${parentPath}/${name}`, 'config.json', 'file');
       if (!jsonRes.success) {
         toast.error(jsonRes.message || '创建 config.json 失败');
@@ -1097,7 +1097,11 @@ export function PluginManager() {
       }
       
       toast.success('插件创建成功');
-      loadRightFiles(rightSelfId);
+      if (createPluginSide === 'left') {
+        loadLeftFiles(leftSelfId);
+      } else {
+        loadRightFiles(rightSelfId);
+      }
     } catch (error) {
       toast.error('创建插件失败');
     }
@@ -1290,12 +1294,12 @@ export function PluginManager() {
 
   const Toolbar: React.FC<ToolbarProps> = ({ side, selfId, onSelfIdChange, selectedNode, canWrite }) => {
     return (
-      <div className="flex items-center gap-2 p-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-[#2A2E38]">
+      <div className="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#2A2E38]">
         {/* 账号选择 */}
         <select
           value={selfId}
           onChange={(e) => onSelfIdChange(e.target.value)}
-          className="px-2 py-1 bg-white dark:bg-[#1D2129] border border-gray-200 dark:border-gray-700 rounded text-sm outline-none text-gray-900 dark:text-white"
+          className="px-2 py-1 bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-white/[0.06] rounded text-sm outline-none text-gray-900 dark:text-white"
         >
           <option value="template">模板目录</option>
           {availableAccounts.map(account => (
@@ -1305,13 +1309,15 @@ export function PluginManager() {
           ))}
         </select>
 
-        <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1" />
+        <div className="w-px h-4 bg-gray-200 dark:bg-white/[0.1] mx-1" />
 
-        {/* 新建插件按钮 - 只在右侧显示 */}
-        {side === 'right' && canWrite && (
+        {canWrite && (
           <button
-            onClick={() => setShowCreatePluginDialog(true)}
-            className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+            onClick={() => {
+              setCreatePluginSide(side);
+              setShowCreatePluginDialog(true);
+            }}
+            className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
             title="新建插件"
           >
             <FolderPlus className="w-4 h-4" />
@@ -1321,7 +1327,7 @@ export function PluginManager() {
         {/* 刷新按钮 */}
         <button
           onClick={() => side === 'left' ? loadLeftFiles(leftSelfId) : loadRightFiles(rightSelfId)}
-          className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+          className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
           title="刷新"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -1329,12 +1335,12 @@ export function PluginManager() {
 
         {selectedNode && (
           <>
-            <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1" />
-            
+            <div className="w-px h-4 bg-gray-200 dark:bg-white/[0.1] mx-1" />
+
             {/* 复制按钮 */}
             <button
               onClick={() => handleCopy(selectedNode, side)}
-              className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+              className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
               title="复制"
             >
               <Copy className="w-4 h-4" />
@@ -1344,7 +1350,7 @@ export function PluginManager() {
             {canWrite && (
               <button
                 onClick={() => handleCut(selectedNode, side)}
-                className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+                className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
                 title="剪切"
               >
                 <Scissors className="w-4 h-4" />
@@ -1355,7 +1361,7 @@ export function PluginManager() {
             {clipboard && canWrite && (
               <button
                 onClick={() => handlePaste(selectedNode, side)}
-                className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+                className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
                 title="粘贴"
               >
                 <FolderInput className="w-4 h-4" />
@@ -1366,7 +1372,7 @@ export function PluginManager() {
             {canWrite && (
               <button
                 onClick={() => handleRename(selectedNode)}
-                className="p-1.5 text-gray-600 hover:text-[#165DFF] hover:bg-blue-50 rounded transition-colors"
+                className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded transition-colors"
                 title="重命名"
               >
                 <Edit3 className="w-4 h-4" />
@@ -1377,7 +1383,7 @@ export function PluginManager() {
             {canWrite && (
               <button
                 onClick={() => handleDelete(selectedNode)}
-                className="p-1.5 text-gray-600 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                 title="删除"
               >
                 <Trash2 className="w-4 h-4" />
@@ -1443,14 +1449,14 @@ export function PluginManager() {
         <>
           {/* 头部 */}
           <motion.div
-            className="flex-shrink-0 flex items-center justify-between bg-white dark:bg-[#1D2129] p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 mb-4"
+            className="flex-shrink-0 flex items-center justify-between bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-4"
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="flex items-center gap-4">
               <button
                 onClick={() => navigate('/')}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-white/[0.05] rounded-lg transition-colors"
               >
                 <ArrowLeft className="w-5 h-5 text-gray-500" />
               </button>
@@ -1462,23 +1468,23 @@ export function PluginManager() {
 
             <div className="flex items-center gap-4">
               {/* 模式切换 */}
-              <div className="flex bg-gray-100 dark:bg-[#2A2E38] rounded-lg p-1">
+              <div className="flex bg-gray-50 dark:bg-white/[0.03] rounded-lg p-1">
                 <button
                   onClick={() => handleModeSwitch('simple')}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
                     viewMode === 'simple'
-                      ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                      ? 'bg-blue-100 dark:bg-white/[0.08] text-blue-700 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-500 hover:text-[#165DFF] dark:hover:text-gray-300'
                   }`}
                 >
-                  简易模式
+                  可视化模式
                 </button>
                 <button
                   onClick={() => handleModeSwitch('advanced')}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
                     viewMode === 'advanced'
-                      ? 'bg-white dark:bg-[#1D2129] text-[#165DFF] shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                      ? 'bg-blue-100 dark:bg-white/[0.08] text-blue-700 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-500 hover:text-[#165DFF] dark:hover:text-gray-300'
                   }`}
                 >
                   高级模式
@@ -1487,8 +1493,8 @@ export function PluginManager() {
 
               {/* 插件仓库按钮 */}
               <button
-                onClick={() => toast.info('这个功能还没写呢ava')}
-                className="px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors flex items-center gap-2"
+                onClick={() => setShowStore(true)}
+                className="px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors flex items-center gap-2"
               >
                 <FolderOpen className="w-4 h-4" />
                 插件仓库
@@ -1500,31 +1506,31 @@ export function PluginManager() {
           <div className="flex-1 min-h-0 flex gap-4 relative">
           {/* 左侧面板 */}
           <motion.div
-            className="flex-1 bg-white dark:bg-[#1D2129] rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col overflow-hidden"
+            className="flex-1 bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
           >
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2">
-                <FolderOpen className="w-5 h-5 text-yellow-500" />
+                <FolderOpen className="w-5 h-5 text-yellow-500 dark:text-gray-400" />
                 <h2 className="font-bold text-gray-900 dark:text-white">源目录</h2>
                 {leftSelfId === 'template' && (
-                  <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 rounded">
+                  <span className="px-2 py-0.5 text-xs bg-gray-50 dark:bg-white/[0.03] text-gray-500 rounded">
                     模板
                   </span>
                 )}
               </div>
             </div>
-            
+
             <Toolbar
               side="left"
               selfId={leftSelfId}
               onSelfIdChange={setLeftSelfId}
               selectedNode={getSelectedNode('left')}
-              canWrite={leftSelfId !== 'template'}
+              canWrite={isPathWritable('', 'left')}
             />
-            
-            <div 
+
+            <div
               className="flex-1 overflow-auto p-2 relative"
               onContextMenu={(e) => handleContextMenu(e, null, 'left')}
             >
@@ -1539,8 +1545,8 @@ export function PluginManager() {
                 onEmptyContextMenu={(e) => handleContextMenu(e, null, 'left')}
               />
               {/* 底部空白区域用于右键 */}
-              <div 
-                className="h-32 mt-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-center text-gray-400 text-sm"
+              <div
+                className="h-32 mt-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-center text-gray-600 dark:text-gray-400 text-sm"
                 onContextMenu={(e) => handleContextMenu(e, null, 'left')}
               >
                 {/* 可以右键哦OVO */}
@@ -1549,36 +1555,36 @@ export function PluginManager() {
           </motion.div>
 
           {/* 交换按钮 - 当两边都不是模板时显示 */}
-          {leftSelfId !== 'template' && rightSelfId !== 'template' && (
+          {leftSelfId !== rightSelfId && (
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none">
               <button
                 onClick={handleSwapSides}
-                className="pointer-events-auto p-3 bg-white dark:bg-[#1D2129] rounded-full shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="pointer-events-auto p-3 bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-full shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-white/[0.05] transition-colors"
                 title="交换左右目录"
               >
-                <ArrowRightLeft className="w-5 h-5 text-[#165DFF]" />
+                <ArrowRightLeft className="w-5 h-5 text-gray-900 dark:text-white" />
               </button>
             </div>
           )}
 
           {/* 右侧面板 */}
           <motion.div
-            className="flex-1 bg-white dark:bg-[#1D2129] rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col overflow-hidden"
+            className="flex-1 bg-white dark:bg-[#1D2129] dark:backdrop-blur-xl rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
           >
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2">
-                <FolderOpen className="w-5 h-5 text-blue-500" />
+                <FolderOpen className="w-5 h-5 text-blue-500 dark:text-gray-300" />
                 <h2 className="font-bold text-gray-900 dark:text-white">目标目录</h2>
                 {rightSelfId === 'template' && (
-                  <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 rounded">
+                  <span className="px-2 py-0.5 text-xs bg-gray-50 dark:bg-white/[0.03] text-gray-500 rounded">
                     模板
                   </span>
                 )}
               </div>
             </div>
-            
+
             <Toolbar
               side="right"
               selfId={rightSelfId}
@@ -1587,10 +1593,10 @@ export function PluginManager() {
                 loadRightFiles(id);
               }}
               selectedNode={getSelectedNode('right')}
-              canWrite={rightSelfId !== 'template'}
+              canWrite={isPathWritable('', 'right')}
             />
-            
-            <div 
+
+            <div
               className="flex-1 overflow-auto p-2 relative"
               onContextMenu={(e) => handleContextMenu(e, null, 'right')}
             >
@@ -1598,14 +1604,15 @@ export function PluginManager() {
                 <div className="flex flex-col items-center justify-center h-64 text-gray-500">
                   <FolderOpen className="w-12 h-12 mb-4 opacity-50" />
                   <p className="text-sm">暂无插件文件</p>
-                  {rightSelfId !== 'template' && (
-                    <button
-                      onClick={() => setShowCreatePluginDialog(true)}
-                      className="mt-4 px-4 py-2 bg-[#165DFF] text-white rounded-lg hover:bg-[#0047FF] transition-colors text-sm"
-                    >
-                      创建新插件
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      setCreatePluginSide('right');
+                      setShowCreatePluginDialog(true);
+                    }}
+                    className="mt-4 px-4 py-2 bg-[#165DFF] text-white dark:bg-white dark:text-black rounded-lg hover:bg-[#0047FF] dark:hover:bg-gray-200 transition-colors text-sm"
+                  >
+                    创建新插件
+                  </button>
                 </div>
               ) : (
                 <>
@@ -1620,8 +1627,8 @@ export function PluginManager() {
                     onEmptyContextMenu={(e) => handleContextMenu(e, null, 'right')}
                   />
                   {/* 底部空白区域用于右键 */}
-                  <div 
-                    className="h-32 mt-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-center text-gray-400 text-sm"
+                  <div
+                    className="h-32 mt-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-center text-gray-600 dark:text-gray-400 text-sm"
                     onContextMenu={(e) => handleContextMenu(e, null, 'right')}
                   >
                     可以右键哦OVO
@@ -1735,14 +1742,8 @@ export function PluginManager() {
             onRename={() => contextMenu.node && handleRename(contextMenu.node)}
             onDelete={() => contextMenu.node && handleDelete(contextMenu.node)}
             onCreatePlugin={() => {
-              if (contextMenu.side === 'right') {
-                setShowCreatePluginDialog(true);
-              } else if (leftSelfId !== 'template') {
-                setCreateFileSide('left');
-                setCreateFileTargetPath(`/plugins/${leftSelfId}`);
-                setCreateFileIsDirectory(true);
-                setShowCreateFileDialog(true);
-              }
+              setCreatePluginSide(contextMenu.side);
+              setShowCreatePluginDialog(true);
             }}
             onCreateFolder={() => {
               setCreateFileSide(contextMenu.side);
@@ -1782,6 +1783,15 @@ export function PluginManager() {
           />
         )}
       </AnimatePresence>
+
+      <PluginStore
+        isOpen={showStore}
+        onClose={() => setShowStore(false)}
+        onInstallComplete={() => {
+          loadLeftFiles(leftSelfId);
+          loadRightFiles(rightSelfId);
+        }}
+      />
     </div>
   );
 }

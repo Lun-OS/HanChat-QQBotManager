@@ -2243,5 +2243,720 @@
       "file_id": "",
       "new_file_name": ""
     }
+  },
+  "get_group_detail_info": {
+    "PS": "拓展API(NapCat):获取群详细信息",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_info_ex": {
+    "PS": "拓展API(NapCat):获取群详细信息(扩展)",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_unidirectional_friend_list": {
+    "PS": "拓展API(NapCat):获取单向好友列表",
+    "PS_json": {},
+    "json": {}
+  },
+  "set_group_portrait": {
+    "PS": "拓展API(NapCat):设置群头像",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "file": ["string", "图片路径，支持http://, file://, base64://", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "file": ""
+    }
+  },
+  "set_group_add_option": {
+    "PS": "拓展API(NapCat):设置群加群选项",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "option": ["string", "选项", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "option": ""
+    }
+  },
+  "get_clientkey": {
+    "PS": "拓展API(NapCat):获取ClientKey",
+    "PS_json": {},
+    "json": {}
+  },
+  "set_diy_online_status": {
+    "PS": "拓展API(NapCat):设置自定义在线状态",
+    "PS_json": {
+      "face_id": ["integer", "表情ID", ""],
+      "desc": ["string", "描述", ""]
+    },
+    "json": {
+      "face_id": 0,
+      "desc": ""
+    }
+  },
+  "set_input_status": {
+    "PS": "拓展API(NapCat):设置输入状态",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", "必须"],
+      "status": ["integer", "状态(1正在输入)", "必须"]
+    },
+    "json": {
+      "user_id": 0,
+      "status": 1
+    }
+  },
+  "mark_group_msg_as_read": {
+    "PS": "拓展API(NapCat):标记群消息已读",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "mark_private_msg_as_read": {
+    "PS": "拓展API(NapCat):标记私聊消息已读",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", "必须"]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "send_group_ark_share": {
+    "PS": "拓展API(NapCat):分享群(Ark)",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "ark": ["object", "Ark数据", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "ark": {}
+    }
+  },
+  "send_ark_share": {
+    "PS": "拓展API(NapCat):分享用户(Ark)",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", "必须"],
+      "ark": ["object", "Ark数据", "必须"]
+    },
+    "json": {
+      "user_id": 0,
+      "ark": {}
+    }
+  },
+  "get_online_clients": {
+    "PS": "拓展API(NapCat):获取在线客户端",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_recent_contact": {
+    "PS": "拓展API(NapCat):获取最近会话",
+    "PS_json": {
+      "count": ["integer", "数量", "20"]
+    },
+    "json": {
+      "count": 20
+    }
+  },
+  "translate_en2zh": {
+    "PS": "拓展API(NapCat):英文单词翻译",
+    "PS_json": {
+      "words": ["string", "英文单词", "必须"]
+    },
+    "json": {
+      "words": ""
+    }
+  },
+  "set_self_longnick": {
+    "PS": "拓展API(NapCat):设置个性签名",
+    "PS_json": {
+      "nickname": ["string", "签名内容", "必须"]
+    },
+    "json": {
+      "nickname": ""
+    }
+  },
+  "get_guild_list": {
+    "PS": "拓展API(NapCat):获取频道列表",
+    "PS_json": {},
+    "json": {}
+  },
+  "set_group_todo": {
+    "PS": "拓展API(NapCat):设置群待办",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "todo": ["string", "待办内容", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "todo": ""
+    }
+  },
+  "cancel_group_todo": {
+    "PS": "拓展API(NapCat):取消群待办",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "complete_group_todo": {
+    "PS": "拓展API(NapCat):完成群待办",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "set_group_kick_members": {
+    "PS": "拓展API(NapCat):批量踢出群成员",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "user_ids": ["array", "QQ号列表", "必须"],
+      "reject_add_request": ["boolean", "是否拒绝再加", ""]
+    },
+    "json": {
+      "group_id": 0,
+      "user_ids": [],
+      "reject_add_request": false
+    }
+  },
+  "set_group_robot_add_option": {
+    "PS": "拓展API(NapCat):设置群机器人加群选项",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "option": ["string", "选项", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "option": ""
+    }
+  },
+  "set_group_search": {
+    "PS": "拓展API(NapCat):设置群搜索选项",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "option": ["string", "选项", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "option": ""
+    }
+  },
+  "get_group_ignored_notifies": {
+    "PS": "拓展API(NapCat):获取群忽略通知",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "nc_get_packet_status": {
+    "PS": "拓展API(NapCat):获取Packet状态",
+    "PS_json": {},
+    "json": {}
+  },
+  "nc_get_rkey": {
+    "PS": "拓展API(NapCat):获取RKey",
+    "PS_json": {},
+    "json": {}
+  },
+  "nc_get_user_status": {
+    "PS": "拓展API(NapCat):获取用户在线状态",
+    "PS_json": {
+      "user_id": ["integer", "QQ号", "必须"]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "bot_exit": {
+    "PS": "拓展API(NapCat):退出登录",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_rkey_server": {
+    "PS": "拓展API(NapCat):获取RKey服务器",
+    "PS_json": {},
+    "json": {}
+  },
+  "send_packet": {
+    "PS": "拓展API(NapCat):发送原始数据包",
+    "PS_json": {
+      "cmd": ["string", "命令", "必须"],
+      "data": ["object", "数据", "必须"]
+    },
+    "json": {
+      "cmd": "",
+      "data": {}
+    }
+  },
+  "create_flash_task": {
+    "PS": "拓展API(NapCat):创建闪传任务",
+    "PS_json": {
+      "file": ["string", "文件路径", "必须"]
+    },
+    "json": {
+      "file": ""
+    }
+  },
+  "get_flash_file_list": {
+    "PS": "拓展API(NapCat):获取闪传文件列表",
+    "PS_json": {
+      "group_id": ["integer", "群号", ""]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_flash_file_url": {
+    "PS": "拓展API(NapCat):获取闪传文件链接",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "download_file_stream": {
+    "PS": "拓展API(NapCat):下载文件流",
+    "PS_json": {
+      "url": ["string", "链接地址", "必须"],
+      "thread_cnt": ["integer", "线程数", ""],
+      "headers": ["array", "自定义请求头", ""]
+    },
+    "json": {
+      "url": "",
+      "thread_cnt": 0,
+      "headers": []
+    }
+  },
+  "upload_file_stream": {
+    "PS": "拓展API(NapCat):上传文件流",
+    "PS_json": {
+      "file": ["string", "文件路径", "必须"]
+    },
+    "json": {
+      "file": ""
+    }
+  },
+  "upload_image_to_qun_album": {
+    "PS": "拓展API(NapCat):上传图片到群相册",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "file": ["string", "图片路径", "必须"],
+      "album_id": ["string", "相册ID", ""]
+    },
+    "json": {
+      "group_id": 0,
+      "file": "",
+      "album_id": ""
+    }
+  },
+  "ArkShareGroup": {
+    "PS": "拓展API(NapCat):分享群(Ark)",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "ArkSharePeer": {
+    "PS": "拓展API(NapCat):分享用户(Ark)",
+    "PS_json": {
+      "user_id": ["integer", "QQ号", "必须"]
+    },
+    "json": {
+      "user_id": 0
+    }
+  },
+  "get_mini_app_ark": {
+    "PS": "拓展API(NapCat):获取小程序Ark",
+    "PS_json": {
+      "url": ["string", "小程序URL", "必须"]
+    },
+    "json": {
+      "url": ""
+    }
+  },
+  "click_inline_keyboard_button": {
+    "PS": "拓展API(NapCat):点击内联键盘按钮",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "bot_id": ["integer", "机器人ID", "必须"],
+      "seq": ["integer", "序列号", "必须"],
+      "button_id": ["string", "按钮ID", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "bot_id": 0,
+      "seq": 0,
+      "button_id": ""
+    }
+  },
+  "create_collection": {
+    "PS": "拓展API(NapCat):创建收藏",
+    "PS_json": {
+      "content": ["string", "收藏内容", "必须"]
+    },
+    "json": {
+      "content": ""
+    }
+  },
+  "get_collection_list": {
+    "PS": "拓展API(NapCat):获取收藏列表",
+    "PS_json": {
+      "category": ["integer", "分类", ""]
+    },
+    "json": {
+      "category": 0
+    }
+  },
+  "fetch_emoji_like": {
+    "PS": "拓展API(NapCat):获取表情点赞详情",
+    "PS_json": {
+      "message_id": ["integer", "消息ID", "必须"]
+    },
+    "json": {
+      "message_id": 0
+    }
+  },
+  "get_emoji_likes": {
+    "PS": "拓展API(NapCat):获取消息表情点赞列表",
+    "PS_json": {
+      "message_id": ["integer", "消息ID", "必须"],
+      "emoji_id": ["string", "表情ID", ""]
+    },
+    "json": {
+      "message_id": 0,
+      "emoji_id": ""
+    }
+  },
+  "get_ai_record": {
+    "PS": "拓展API(NapCat):获取AI语音",
+    "PS_json": {
+      "character": ["string", "语音声色ID", "必须"],
+      "text": ["string", "语音文本", "必须"],
+      "chat_type": ["integer", "语音类型", "1"]
+    },
+    "json": {
+      "character": "",
+      "text": "",
+      "chat_type": 1
+    }
+  },
+  "send_flash_msg": {
+    "PS": "拓展API(NapCat):发送闪传消息",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", "必须"],
+      "message": ["array", "消息内容", "必须"]
+    },
+    "json": {
+      "user_id": 0,
+      "message": []
+    }
+  },
+  "send_forward_msg": {
+    "PS": "拓展API(NapCat):发送合并转发消息",
+    "PS_json": {
+      "messages": ["array", "消息内容", "必须"]
+    },
+    "json": {
+      "messages": []
+    }
+  },
+  "set_group_album_media_like": {
+    "PS": "拓展API(NapCat):点赞群相册媒体",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "album_id": ["string", "相册ID", "必须"],
+      "media_id": ["string", "媒体ID", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "album_id": "",
+      "media_id": ""
+    }
+  },
+  "del_group_album_media": {
+    "PS": "拓展API(NapCat):删除群相册媒体",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "album_id": ["string", "相册ID", "必须"],
+      "media_id": ["string", "媒体ID", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "album_id": "",
+      "media_id": ""
+    }
+  },
+  "get_qun_album_list": {
+    "PS": "拓展API(NapCat):获取群相册列表",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
+  },
+  "get_group_album_media_list": {
+    "PS": "拓展API(NapCat):获取群相册媒体列表",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "album_id": ["string", "相册ID", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "album_id": ""
+    }
+  },
+  "trans_group_file": {
+    "PS": "拓展API(NapCat):传输群文件",
+    "PS_json": {
+      "group_id": ["integer", "源群号", "必须"],
+      "file_id": ["string", "文件ID", "必须"],
+      "target_group_id": ["integer", "目标群号", "必须"]
+    },
+    "json": {
+      "group_id": 0,
+      "file_id": "",
+      "target_group_id": 0
+    }
+  },
+  "check_url_safely": {
+    "PS": "拓展API(共有):检查URL安全性",
+    "PS_json": {
+      "url": ["string", "URL地址", "必须"]
+    },
+    "json": {
+      "url": ""
+    }
+  },
+  "get_guild_service_profile": {
+    "PS": "拓展API(NapCat):获取频道个人信息",
+    "PS_json": {},
+    "json": {}
+  },
+  "get_online_file_msg": {
+    "PS": "拓展API(NapCat):获取在线文件消息",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "send_online_file": {
+    "PS": "拓展API(NapCat):发送在线文件",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", ""],
+      "group_id": ["integer", "群号", ""],
+      "file": ["string", "文件路径", "必须"]
+    },
+    "json": {
+      "user_id": 0,
+      "group_id": 0,
+      "file": ""
+    }
+  },
+  "send_online_folder": {
+    "PS": "拓展API(NapCat):发送在线文件夹",
+    "PS_json": {
+      "user_id": ["integer", "对方QQ号", ""],
+      "group_id": ["integer", "群号", ""],
+      "folder": ["string", "文件夹路径", "必须"]
+    },
+    "json": {
+      "user_id": 0,
+      "group_id": 0,
+      "folder": ""
+    }
+  },
+  "cancel_online_file": {
+    "PS": "拓展API(NapCat):取消在线文件",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "receive_online_file": {
+    "PS": "拓展API(NapCat):接收在线文件",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "refuse_online_file": {
+    "PS": "拓展API(NapCat):拒绝在线文件",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "clean_stream_temp_file": {
+    "PS": "拓展API(NapCat):清理流式传输临时文件",
+    "PS_json": {},
+    "json": {}
+  },
+  "download_file_image_stream": {
+    "PS": "拓展API(NapCat):下载图片文件流",
+    "PS_json": {
+      "file": ["string", "文件路径", "必须"],
+      "thread_cnt": ["integer", "线程数", ""]
+    },
+    "json": {
+      "file": "",
+      "thread_cnt": 0
+    }
+  },
+  "download_file_record_stream": {
+    "PS": "拓展API(NapCat):下载语音文件流",
+    "PS_json": {
+      "file": ["string", "文件路径", "必须"],
+      "out_format": ["string", "输出格式", "mp3"],
+      "thread_cnt": ["integer", "线程数", ""]
+    },
+    "json": {
+      "file": "",
+      "out_format": "mp3",
+      "thread_cnt": 0
+    }
+  },
+  "download_fileset": {
+    "PS": "拓展API(NapCat):下载文件集",
+    "PS_json": {
+      "file_set_id": ["string", "文件集ID", "必须"]
+    },
+    "json": {
+      "file_set_id": ""
+    }
+  },
+  "get_fileset_id": {
+    "PS": "拓展API(NapCat):获取文件集ID",
+    "PS_json": {
+      "file_set_id": ["string", "文件集ID", "必须"]
+    },
+    "json": {
+      "file_set_id": ""
+    }
+  },
+  "get_fileset_info": {
+    "PS": "拓展API(NapCat):获取文件集信息",
+    "PS_json": {
+      "file_set_id": ["string", "文件集ID", "必须"]
+    },
+    "json": {
+      "file_set_id": ""
+    }
+  },
+  "get_share_link": {
+    "PS": "拓展API(NapCat):获取文件分享链接",
+    "PS_json": {
+      "file_id": ["string", "文件ID", "必须"]
+    },
+    "json": {
+      "file_id": ""
+    }
+  },
+  "test_download_stream": {
+    "PS": "拓展API(NapCat):测试下载流",
+    "PS_json": {
+      "url": ["string", "链接地址", "必须"],
+      "thread_cnt": ["integer", "线程数", ""]
+    },
+    "json": {
+      "url": "",
+      "thread_cnt": 0
+    }
+  },
+  "upload_image_to_qun_album_1": {
+    "PS": "拓展API(NapCat):上传图片到群相册",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"],
+      "file": ["string", "图片路径", "必须"],
+      "album_id": ["string", "相册ID", ""]
+    },
+    "json": {
+      "group_id": 0,
+      "file": "",
+      "album_id": ""
+    }
+  },
+  ".handle_quick_operation": {
+    "PS": "拓展API(NapCat):处理快速操作",
+    "PS_json": {
+      "context": ["object", "事件上下文", "必须"],
+      "operation": ["object", "操作", "必须"]
+    },
+    "json": {
+      "context": {},
+      "operation": {}
+    }
+  },
+  ".ocr_image": {
+    "PS": "拓展API(NapCat):图片OCR识别(内部)",
+    "PS_json": {
+      "image": ["string", "图片路径", "必须"]
+    },
+    "json": {
+      "image": ""
+    }
+  },
+  "_get_model_show": {
+    "PS": "拓展API(NapCat):获取机型显示",
+    "PS_json": {
+      "model": ["string", "机型", "必须"]
+    },
+    "json": {
+      "model": ""
+    }
+  },
+  "_set_model_show": {
+    "PS": "拓展API(NapCat):设置机型",
+    "PS_json": {
+      "model": ["string", "机型", "必须"],
+      "model_show": ["string", "机型显示名", "必须"]
+    },
+    "json": {
+      "model": "",
+      "model_show": ""
+    }
+  },
+  "_mark_all_as_read": {
+    "PS": "拓展API(NapCat):标记所有消息已读",
+    "PS_json": {},
+    "json": {}
+  },
+  "set_group_sign": {
+    "PS": "拓展API(NapCat):群打卡(设置)",
+    "PS_json": {
+      "group_id": ["integer", "群号", "必须"]
+    },
+    "json": {
+      "group_id": 0
+    }
   }
 }

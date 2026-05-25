@@ -9,11 +9,11 @@ import { useTheme } from 'next-themes';
 import { settingsApi, systemApi } from '../services/api';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V26.5.16';
+const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V26.5.26';
 
 function ConfigPageItem({ children }: { children: React.ReactNode }) {
   return (
-    <div className='w-full mx-auto backdrop-blur-sm border border-white/40 dark:border-white/10 shadow-sm rounded-2xl bg-white/60 dark:bg-black/40 max-w-3xl'>
+    <div className='w-full mx-auto backdrop-blur-sm border border-white/40 dark:border-white/10 shadow-sm rounded-2xl bg-white/60 dark:bg-black/40 dark:backdrop-blur-xl max-w-3xl'>
       <div className='py-6 px-4 md:py-8 md:px-12'>
         <div className='w-full flex flex-col gap-5'>
           {children}
@@ -27,15 +27,15 @@ function SectionTitle({ icon: Icon, title, description }: { icon: React.ElementT
   return (
     <div>
       <div className='flex items-center'>
-        <Icon className='w-5 h-5 text-[#165DFF] mr-2' />
+        <Icon className='w-5 h-5 text-[#165DFF] dark:text-white mr-2' />
         <h2 className='text-lg font-semibold text-gray-900 dark:text-white'>{title}</h2>
       </div>
-      {description && <p className='text-sm text-gray-500 mt-1'>{description}</p>}
+      {description && <p className='text-sm text-gray-600 dark:text-gray-400 mt-1'>{description}</p>}
     </div>
   );
 }
 
-const inputClass = 'w-full p-2.5 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] backdrop-blur-sm';
+const inputClass = 'w-full p-2.5 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 backdrop-blur-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500';
 
 export function Settings() {
   const [backendVersion, setBackendVersion] = useState('');
@@ -62,28 +62,28 @@ export function Settings() {
   return (
     <section className='w-full max-w-[1200px] mx-auto py-4 md:py-8 px-2 md:px-6 relative'>
       <Tabs defaultValue='connection' className='w-full flex flex-col items-center'>
-        <TabsList className='bg-white/40 dark:bg-black/20 backdrop-blur-md rounded-2xl p-1.5 shadow-sm border border-white/20 dark:border-white/5 mb-4 md:mb-8 w-full md:w-fit mx-auto overflow-x-auto'>
+        <TabsList className='bg-white/40 dark:bg-black/20 backdrop-blur-sm rounded-2xl p-1.5 border border-white/40 dark:border-white/10 mb-4 md:mb-8 w-full md:w-fit mx-auto overflow-x-auto'>
           <TabsTrigger
             value='connection'
-            className='h-9 px-4 md:px-6 data-[state=active]:bg-white/80 dark:data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-all'
+            className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
           >
             连接配置
           </TabsTrigger>
           <TabsTrigger
             value='appearance'
-            className='h-9 px-4 md:px-6 data-[state=active]:bg-white/80 dark:data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-all'
+            className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
           >
             外观设置
           </TabsTrigger>
           <TabsTrigger
             value='logger'
-            className='h-9 px-4 md:px-6 data-[state=active]:bg-white/80 dark:data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-all'
+            className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
           >
             日志设置
           </TabsTrigger>
           <TabsTrigger
             value='about'
-            className='h-9 px-4 md:px-6 data-[state=active]:bg-white/80 dark:data-[state=active]:bg-white/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-all'
+            className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
           >
             关于
           </TabsTrigger>
@@ -244,16 +244,16 @@ function ConnectionTab() {
         <button
           type='button'
           onClick={() => setShowWebsocketAuth(!showWebsocketAuth)}
-          className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+          className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
         >
           {showWebsocketAuth ? <EyeOff className='w-4 h-4' /> : <Eye className='w-4 h-4' />}
         </button>
       </div>
-      <p className='text-xs text-gray-500'>
+      <p className='text-xs text-gray-600 dark:text-gray-400'>
         修改后正在连接的不受影响，新连接将使用新Token
       </p>
 
-      <div className='border-t border-white/20 dark:border-white/5 my-2' />
+      <div className='border-t border-white/40 dark:border-white/[0.06] my-2' />
 
       {/* <SectionTitle icon={Shield} title='WebSocket端口' description='设置 WebSocket 服务监听端口' />
       <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
@@ -267,9 +267,9 @@ function ConnectionTab() {
         onChange={(e) => setWsPort(Number(e.target.value))}
         className={inputClass}
       />
-      <p className='text-xs text-gray-500'>范围: 1024-65535</p>
+      <p className='text-xs text-gray-600 dark:text-gray-400'>范围: 1024-65535</p>
 
-      <div className='border-t border-white/20 dark:border-white/5 my-2' />
+      <div className='border-t border-white/40 dark:border-white/[0.06] my-2' />
 
       <SectionTitle icon={Shield} title='CORS允许域名' description='设置允许跨域访问的域名，多个域名用逗号分隔' />
       <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
@@ -282,13 +282,13 @@ function ConnectionTab() {
         placeholder='例如: http://localhost:3000,https://example.com'
         className={inputClass}
       />
-      <p className='text-xs text-gray-500'>留空表示不允许跨域，多个域名用英文逗号分隔</p> */}
+      <p className='text-xs text-gray-600 dark:text-gray-400'>留空表示不允许跨域，多个域名用英文逗号分隔</p> */}
 
       <div className='flex justify-end pt-2'>
         <button
           onClick={handleSave}
           disabled={saving}
-          className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 disabled:opacity-50'
+          className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
         >
           {saving ? (
             <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
@@ -302,83 +302,79 @@ function ConnectionTab() {
   );
 }
 
+const APPEARANCE_KEY = 'appearance_settings';
+
+function loadAppearanceFromStorage() {
+  try {
+    const raw = localStorage.getItem(APPEARANCE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveAppearanceToStorage(data: Record<string, unknown>) {
+  try {
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
 function AppearanceTab() {
   const { theme, setTheme } = useTheme();
   const [primary, setPrimary] = useState('#165DFF');
   const [accent, setAccent] = useState('#e9ebef');
   const [destructive, setDestructive] = useState('#d4183d');
   const [fontSize, setFontSize] = useState(16);
-  const [saving, setSaving] = useState(false);
   const [savingCSS, setSavingCSS] = useState(false);
   const [savingFont, setSavingFont] = useState(false);
 
   useEffect(() => {
-    fetchAppearance();
+    const data = loadAppearanceFromStorage();
+    if (data) {
+      if (data.theme) setTheme(data.theme);
+      if (data.fontSize) {
+        setFontSize(data.fontSize);
+        document.documentElement.style.fontSize = data.fontSize + 'px';
+      }
+      if (data.customCSS) {
+        if (data.customCSS.primary) {
+          setPrimary(data.customCSS.primary);
+          document.documentElement.style.setProperty('--primary', data.customCSS.primary);
+        }
+        if (data.customCSS.accent) {
+          setAccent(data.customCSS.accent);
+          document.documentElement.style.setProperty('--accent', data.customCSS.accent);
+        }
+        if (data.customCSS.destructive) {
+          setDestructive(data.customCSS.destructive);
+          document.documentElement.style.setProperty('--destructive', data.customCSS.destructive);
+        }
+      }
+    }
   }, []);
 
-  const fetchAppearance = async () => {
-    try {
-      const res = await settingsApi.getAppearance();
-      if (res.success && res.data) {
-        if (res.data.theme) setTheme(res.data.theme);
-        if (res.data.fontSize) {
-          setFontSize(res.data.fontSize);
-          document.documentElement.style.fontSize = res.data.fontSize + 'px';
-        }
-        if (res.data.customCSS) {
-          if (res.data.customCSS.primary) {
-            setPrimary(res.data.customCSS.primary);
-            document.documentElement.style.setProperty('--primary', res.data.customCSS.primary);
-          }
-          if (res.data.customCSS.accent) {
-            setAccent(res.data.customCSS.accent);
-            document.documentElement.style.setProperty('--accent', res.data.customCSS.accent);
-          }
-          if (res.data.customCSS.destructive) {
-            setDestructive(res.data.customCSS.destructive);
-            document.documentElement.style.setProperty('--destructive', res.data.customCSS.destructive);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('获取外观设置失败:', error);
-    }
-  };
-
-  const handleThemeChange = async (newTheme: string) => {
+  const handleThemeChange = (newTheme: string) => {
     setTheme(newTheme);
-    try {
-      const res = await settingsApi.saveAppearance({ theme: newTheme });
-      if (res.success) {
-        toast.success('主题已切换');
-      }
-    } catch (error) {
-      console.error('保存主题失败:', error);
-      toast.error('保存主题失败');
-    }
+    const data = loadAppearanceFromStorage() || {};
+    data.theme = newTheme;
+    saveAppearanceToStorage(data);
+    toast.success('主题已切换');
   };
 
   const applyColor = (key: string, value: string) => {
     document.documentElement.style.setProperty(`--${key}`, value);
   };
 
-  const handleSaveCSS = async () => {
-    try {
-      setSavingCSS(true);
-      const res = await settingsApi.saveAppearance({
-        customCSS: { primary, accent, destructive },
-      });
-      if (res.success) {
-        toast.success('配色已保存');
-      } else {
-        toast.error('保存失败: ' + (res.message || '未知错误'));
-      }
-    } catch (error) {
-      console.error('保存配色失败:', error);
-      toast.error('保存配色失败');
-    } finally {
-      setSavingCSS(false);
-    }
+  const handleSaveCSS = () => {
+    setSavingCSS(true);
+    const data = loadAppearanceFromStorage() || {};
+    data.customCSS = { primary, accent, destructive };
+    saveAppearanceToStorage(data);
+    toast.success('配色已保存');
+    setTimeout(() => setSavingCSS(false), 300);
   };
 
   const handleFontSizeChange = (value: number) => {
@@ -386,21 +382,13 @@ function AppearanceTab() {
     document.documentElement.style.fontSize = value + 'px';
   };
 
-  const handleSaveFontSize = async () => {
-    try {
-      setSavingFont(true);
-      const res = await settingsApi.saveAppearance({ fontSize });
-      if (res.success) {
-        toast.success('字体大小已保存');
-      } else {
-        toast.error('保存失败: ' + (res.message || '未知错误'));
-      }
-    } catch (error) {
-      console.error('保存字体大小失败:', error);
-      toast.error('保存字体大小失败');
-    } finally {
-      setSavingFont(false);
-    }
+  const handleSaveFontSize = () => {
+    setSavingFont(true);
+    const data = loadAppearanceFromStorage() || {};
+    data.fontSize = fontSize;
+    saveAppearanceToStorage(data);
+    toast.success('字体大小已保存');
+    setTimeout(() => setSavingFont(false), 300);
   };
 
   const currentTheme = theme || 'light';
@@ -414,12 +402,12 @@ function AppearanceTab() {
             onClick={() => handleThemeChange('light')}
             className={`flex flex-col items-center gap-3 p-6 rounded-xl border-2 transition-all backdrop-blur-sm ${
               currentTheme === 'light'
-                ? 'border-[#165DFF] bg-white/60 dark:bg-blue-900/20'
-                : 'border-white/40 dark:border-white/10 bg-white/60 dark:bg-black/40 hover:border-gray-300 dark:hover:border-gray-600'
+                ? 'border-[#165DFF] bg-[#165DFF]/10 text-[#165DFF] dark:border-white dark:bg-white/10 dark:text-white'
+                : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-gray-400 hover:border-gray-300'
             }`}
           >
-            <Sun className={`w-8 h-8 ${currentTheme === 'light' ? 'text-[#165DFF]' : 'text-gray-400'}`} />
-            <span className={`text-sm font-medium ${currentTheme === 'light' ? 'text-[#165DFF]' : 'text-gray-500'}`}>
+            <Sun className={`w-8 h-8 ${currentTheme === 'light' ? 'text-[#165DFF] dark:text-white' : 'text-gray-400 dark:text-gray-500'}`} />
+            <span className={`text-sm font-medium ${currentTheme === 'light' ? 'text-[#165DFF] dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
               亮色模式
             </span>
           </button>
@@ -427,12 +415,12 @@ function AppearanceTab() {
             onClick={() => handleThemeChange('dark')}
             className={`flex flex-col items-center gap-3 p-6 rounded-xl border-2 transition-all backdrop-blur-sm ${
               currentTheme === 'dark'
-                ? 'border-[#165DFF] bg-white/60 dark:bg-blue-900/20'
-                : 'border-white/40 dark:border-white/10 bg-white/60 dark:bg-black/40 hover:border-gray-300 dark:hover:border-gray-600'
+                ? 'border-[#165DFF] bg-[#165DFF]/10 text-[#165DFF] dark:border-white dark:bg-white/10 dark:text-white'
+                : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-gray-400 hover:border-gray-300'
             }`}
           >
-            <Moon className={`w-8 h-8 ${currentTheme === 'dark' ? 'text-[#165DFF]' : 'text-gray-400'}`} />
-            <span className={`text-sm font-medium ${currentTheme === 'dark' ? 'text-[#165DFF]' : 'text-gray-500'}`}>
+            <Moon className={`w-8 h-8 ${currentTheme === 'dark' ? 'text-[#165DFF] dark:text-white' : 'text-gray-400 dark:text-gray-500'}`} />
+            <span className={`text-sm font-medium ${currentTheme === 'dark' ? 'text-[#165DFF] dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
               暗色模式
             </span>
           </button>
@@ -446,12 +434,12 @@ function AppearanceTab() {
           { label: '强调色', key: 'accent', value: accent, setter: setAccent },
           { label: '危险色', key: 'destructive', value: destructive, setter: setDestructive },
         ].map((item) => (
-          <div key={item.key} className='flex items-center gap-4 bg-white/50 dark:bg-white/5 border border-white/20 dark:border-white/5 rounded-lg p-2'>
+          <div key={item.key} className='flex items-center gap-4 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg p-2'>
             <span className='text-sm font-medium text-gray-700 dark:text-gray-300 w-16 shrink-0'>
               {item.label}
             </span>
             <div
-              className='w-8 h-8 rounded-full border border-white/40 dark:border-white/10 shrink-0'
+              className='w-8 h-8 rounded-full border border-white/40 dark:border-white/[0.06] shrink-0'
               style={{ backgroundColor: item.value }}
             />
             <input
@@ -461,7 +449,7 @@ function AppearanceTab() {
                 item.setter(e.target.value);
                 applyColor(item.key, e.target.value);
               }}
-              className='flex-1 p-2 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] backdrop-blur-sm text-sm font-mono'
+              className='flex-1 p-2 bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg outline-none focus:ring-2 focus:ring-[#165DFF] dark:focus:ring-white/20 backdrop-blur-sm text-sm font-mono text-gray-900 dark:text-white'
             />
             <input
               type='color'
@@ -470,7 +458,7 @@ function AppearanceTab() {
                 item.setter(e.target.value);
                 applyColor(item.key, e.target.value);
               }}
-              className='w-10 h-10 rounded-lg border border-white/40 dark:border-white/10 cursor-pointer shrink-0'
+              className='w-10 h-10 rounded-lg border border-white/40 dark:border-white/[0.06] cursor-pointer shrink-0'
             />
           </div>
         ))}
@@ -478,7 +466,7 @@ function AppearanceTab() {
           <button
             onClick={handleSaveCSS}
             disabled={savingCSS}
-            className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 disabled:opacity-50'
+            className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
           >
             {savingCSS ? (
               <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
@@ -499,18 +487,18 @@ function AppearanceTab() {
             max={24}
             value={fontSize}
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
-            className='flex-1 h-2 bg-white/30 dark:bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#165DFF]'
+            className='flex-1 h-2 bg-white/40 dark:bg-white/[0.06] rounded-lg appearance-none cursor-pointer accent-[#165DFF] dark:accent-white'
           />
           <span className='text-sm font-medium text-gray-700 dark:text-gray-300 w-12 text-center'>
             {fontSize}px
           </span>
         </div>
-        <p className='text-xs text-gray-500'>范围: 12px - 24px，默认 16px</p>
+        <p className='text-xs text-gray-600 dark:text-gray-400'>范围: 12px - 24px，默认 16px</p>
         <div className='flex justify-end pt-2'>
           <button
             onClick={handleSaveFontSize}
             disabled={savingFont}
-            className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 disabled:opacity-50'
+            className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
           >
             {savingFont ? (
               <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
@@ -590,11 +578,11 @@ function LoggerTab() {
         <option value='warn'>warn - 警告</option>
         <option value='error'>error - 错误</option>
       </select>
-      <p className='text-xs text-gray-500'>
+      <p className='text-xs text-gray-600 dark:text-gray-400'>
         低于此级别的日志将不会被记录
       </p>
 
-      <div className='border-t border-white/20 dark:border-white/5 my-2' />
+      <div className='border-t border-white/40 dark:border-white/[0.06] my-2' />
 
       <SectionTitle icon={FileText} title='日志保留天数' description='设置日志文件自动清理的保留天数' />
       <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
@@ -608,13 +596,13 @@ function LoggerTab() {
         onChange={(e) => setLogRetentionDays(Number(e.target.value))}
         className={inputClass}
       />
-      <p className='text-xs text-gray-500'>范围: 1-365 天，默认 7 天</p>
+      <p className='text-xs text-gray-600 dark:text-gray-400'>范围: 1-365 天，默认 7 天</p>
 
       <div className='flex justify-end pt-2'>
         <button
           onClick={handleSave}
           disabled={saving}
-          className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 disabled:opacity-50'
+          className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
         >
           {saving ? (
             <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
@@ -678,22 +666,22 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
       <ConfigPageItem>
         <SectionTitle icon={Info} title='软件信息' />
         <div className='flex items-center'>
-          <div className='w-12 h-12 bg-gradient-to-tr from-[#165DFF] to-cyan-400 rounded-full flex items-center justify-center text-white shadow-lg shadow-blue-500/30 mr-4'>
+          <div className='w-12 h-12 bg-gradient-to-tr from-[#165DFF] to-[#69b1ff] dark:from-white dark:to-gray-400 rounded-full flex items-center justify-center text-black dark:text-black shadow-lg shadow-[#165DFF]/30 dark:shadow-black/30 mr-4'>
             <span className='text-lg font-bold'>H</span>
           </div>
           <div>
             <h3 className='font-bold text-gray-900 dark:text-white'>HanChat-QQBotManager</h3>
-            <p className='text-sm text-gray-500'>前端 {FRONTEND_VERSION} / 后端 {loading ? '加载中...' : backendVersion}</p>
+            <p className='text-sm text-gray-600 dark:text-gray-400'>前端 {FRONTEND_VERSION} / 后端 {loading ? '加载中...' : backendVersion}</p>
           </div>
         </div>
 
         <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-          <div className='bg-white/50 dark:bg-white/5 p-3 rounded-lg'>
-            <p className='text-xs text-gray-500 mb-1'>前端版本</p>
+          <div className='bg-white/50 dark:bg-white/[0.03] p-3 rounded-lg border border-white/40 dark:border-white/[0.06]'>
+            <p className='text-xs text-gray-600 dark:text-gray-400 mb-1'>前端版本</p>
             <p className='text-lg font-semibold text-gray-900 dark:text-white'>{FRONTEND_VERSION}</p>
           </div>
-          <div className='bg-white/50 dark:bg-white/5 p-3 rounded-lg'>
-            <p className='text-xs text-gray-500 mb-1'>后端版本</p>
+          <div className='bg-white/50 dark:bg-white/[0.03] p-3 rounded-lg border border-white/40 dark:border-white/[0.06]'>
+            <p className='text-xs text-gray-600 dark:text-gray-400 mb-1'>后端版本</p>
             <p className='text-lg font-semibold text-gray-900 dark:text-white'>{loading ? '-' : backendVersion}</p>
           </div>
         </div>
@@ -706,7 +694,7 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
             href='https://github.com/Lun-OS/HanChat-QQBotManager'
             target='_blank'
             rel='noopener noreferrer'
-            className='flex items-center text-[#165DFF] hover:underline text-sm px-3 py-2 rounded-lg bg-blue-50/60 dark:bg-blue-900/20 backdrop-blur-sm'
+            className='flex items-center text-[#165DFF] hover:text-[#0047FF] dark:text-gray-300 dark:hover:text-white text-sm px-3 py-2 rounded-lg bg-blue-50 dark:bg-white/[0.03]'
           >
             <Github className='w-4 h-4 mr-1' />
             GitHub 仓库
@@ -715,7 +703,7 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
             href='https://github.com/Lun-OS/HanChat-QQBotManager/docs/index.md'
             target='_blank'
             rel='noopener noreferrer'
-            className='flex items-center text-[#165DFF] hover:underline text-sm px-3 py-2 rounded-lg bg-blue-50/60 dark:bg-blue-900/20 backdrop-blur-sm'
+            className='flex items-center text-[#165DFF] hover:text-[#0047FF] dark:text-gray-300 dark:hover:text-white text-sm px-3 py-2 rounded-lg bg-blue-50 dark:bg-white/[0.03]'
           >
             <FileText className='w-4 h-4 mr-1' />
             文档中心
@@ -724,7 +712,7 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
             href='https://github.com/Lun-OS/HanChat-QQBotManager/issues'
             target='_blank'
             rel='noopener noreferrer'
-            className='flex items-center text-[#165DFF] hover:underline text-sm px-3 py-2 rounded-lg bg-blue-50/60 dark:bg-blue-900/20 backdrop-blur-sm'
+            className='flex items-center text-[#165DFF] hover:text-[#0047FF] dark:text-gray-300 dark:hover:text-white text-sm px-3 py-2 rounded-lg bg-blue-50 dark:bg-white/[0.03]'
           >
             <HelpCircle className='w-4 h-4 mr-1' />
             提交反馈
@@ -737,7 +725,7 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
         <div className='flex items-center justify-between'>
           <div>
             <h3 className='text-sm font-medium text-gray-900 dark:text-white'>清除缓存</h3>
-            <p className='text-xs text-gray-500 mt-1'>清除 localStorage、sessionStorage 和缓存的API响应</p>
+            <p className='text-xs text-gray-600 dark:text-gray-400 mt-1'>清除 localStorage、sessionStorage 和缓存的API响应</p>
           </div>
           <button
             onClick={handleClearCache}

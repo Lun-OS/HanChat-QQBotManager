@@ -686,10 +686,28 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 			body.Timestamp = time.Now().Add(1 * time.Hour).Unix()
 		}
 
-		// 获取WebSocket代理密钥（从环境变量或配置文件）
+		// 获取WebSocket代理密钥（从环境变量获取，必须配置）
 		proxyKey := os.Getenv("WEBSOCKET_PROXY_KEY")
 		if proxyKey == "" {
-			proxyKey = "6v4o9820tqTujuklri984li5u8" // 默认密钥
+			logger.Errorw("FATAL: WEBSOCKET_PROXY_KEY环境变量未设置",
+				"error", "为了安全，必须设置WEBSOCKET_PROXY_KEY环境变量")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "服务器配置错误：代理密钥未配置。请联系管理员设置WEBSOCKET_PROXY_KEY环境变量",
+			})
+			return
+		}
+
+		// 验证密钥长度
+		if len(proxyKey) < 16 {
+			logger.Errorw("FATAL: WEBSOCKET_PROXY_KEY长度不足",
+				"key_length", len(proxyKey),
+				"error", "WEBSOCKET_PROXY_KEY长度必须至少为16个字符")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "服务器配置错误：代理密钥长度不足。密钥长度必须至少为16个字符",
+			})
+			return
 		}
 
 		// 加密时间戳
@@ -720,7 +738,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, reverseWS *services.ReverseWebSock
 
 		version := os.Getenv("LLBOT_VERSION")
 		if version == "" {
-			version = "V26.5.16"
+			version = "V26.5.26"
 		}
 
 		c.JSON(http.StatusOK, gin.H{

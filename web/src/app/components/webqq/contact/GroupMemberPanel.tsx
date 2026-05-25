@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { GroupMemberItem } from '../../../types/webqq'
 import { filterMembers } from '../../../services/webqqApi'
 import { useWebQQStore } from '../../../stores/webqqStore'
+import { validateImageUrl, getSafeQQAvatarUrl } from '../../../utils/security'
 
 interface GroupMemberPanelProps {
   groupCode: string
@@ -152,7 +153,7 @@ export function GroupMemberPanel({ groupCode, onClose, onAtMember }: GroupMember
                   >
                     <div className="relative">
                       <img
-                        src={member.avatar || `https://q1.qlogo.cn/g?b=qq&nk=${member.uin}&s=40`}
+                        src={validateImageUrl(member.avatar) || getSafeQQAvatarUrl(member.uin, 40)}
                         alt={member.nickname}
                         className="w-10 h-10 rounded-full object-cover"
                         loading="lazy"
@@ -201,7 +202,7 @@ export function GroupMemberPanel({ groupCode, onClose, onAtMember }: GroupMember
                       onClick={() => onAtMember?.({ uid: member.uid, uin: member.uin, name: member.card || member.nickname })}
                     >
                       <img
-                        src={member.avatar || `https://q1.qlogo.cn/g?b=qq&nk=${member.uin}&s=40`}
+                        src={validateImageUrl(member.avatar) || getSafeQQAvatarUrl(member.uin, 40)}
                         alt={member.nickname}
                         className="w-9 h-9 rounded-full object-cover"
                         loading="lazy"

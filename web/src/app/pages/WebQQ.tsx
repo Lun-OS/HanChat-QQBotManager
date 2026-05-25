@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from '
 import { useBotStore } from '../stores/botStore';
 import { userApi, groupApi, messageApi, aiVoiceApi, accountApi } from '../services/api';
 import { BotStatus } from '../constants';
+import DOMPurify from 'dompurify';
 import { 
   Users, 
   MessageCircle, 
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { validateImageUrl, getSafeQQAvatarUrl, getSafeGroupAvatarUrl } from '../utils/security';
 
 // ==================== 类型定义 ====================
 type TabType = 'recent' | 'friends' | 'groups';
@@ -158,14 +160,24 @@ const cacheSessions = (sessions: ChatSession[]) => {
   }
 };
 
-const escapeHtml = (text: string): string => {
+/**
+ * XSS 防护: 使用 DOMPurify 进行 HTML 消毒
+ * 安全配置: 仅允许文本内容,移除所有 HTML 标签和属性
+ * 符合 REACT-XSS-001 安全规范
+ */
+const sanitizeHtml = (text: string): string => {
   if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  // 使用 DOMPurify 进行标准化消毒
+  // 配置: 仅允许文本内容,移除所有 HTML 标签和属性
+  return DOMPurify.sanitize(text, {
+    ALLOWED_TAGS: [],  // 不允许任何 HTML 标签
+    ALLOWED_ATTR: [],  // 不允许任何属性
+    KEEP_CONTENT: true // 保留文本内容
+  });
 };
+
+/** @deprecated 使用 sanitizeHtml 替代,以符合 REACT-XSS-001 安全规范 */
+const escapeHtml = sanitizeHtml;
 
 const isSafeUrl = (url: string): boolean => {
   if (!url) return false;
@@ -197,10 +209,22 @@ const formatBanDuration = (seconds: number): string => {
 };
 
 // ==================== 自定义 Hooks ====================
+/**
+ * useSSE - 使用 fetch + ReadableStream 实现 SSE 连接
+ *
+ * [安全修复 REACT-AUTH-001 / REACT-NET-001]
+ * 原实现使用 EventSource (GET)，将认证 Token 暴露在 URL 查询参数中，
+ * 导致 Token 可能留存于浏览器历史记录、服务器/代理访问日志中，存在窃取风险。
+ *
+ * 修复方案：改用 fetch + POST + ReadableStream
+ * - Token 通过 Authorization: Bearer <token> Header 传递（不进入 URL）
+ * - 其他参数通过 POST Body JSON 传递
+ * - 保留原有重连机制（指数退避，最多5次）和错误处理逻辑
+ */
 const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: string | null) => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<SSEMessage | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const MAX_RECONNECT_ATTEMPTS = 5;
@@ -210,45 +234,91 @@ const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: stri
 
     const userId = generateUserId();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-    // 从 localStorage 获取 token 并添加到 URL 参数中
+    // [安全] Token 从 localStorage 获取，通过 Authorization Header 传递，不再暴露于 URL
     const token = localStorage.getItem('auth_token') || '';
-    const url = `${baseUrl}/api/webqq/events?self_id=${selfId}&user_id=${userId}&type=${chatType}&target_id=${targetId}&token=${encodeURIComponent(token)}`;
 
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+    // 取消之前的连接（如果有）
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
 
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-    es.onopen = () => {
-      setIsConnected(true);
-      reconnectAttemptsRef.current = 0;
-    };
+    const url = `${baseUrl}/api/webqq/events`;
 
-    es.onmessage = (event) => {
+    let isCleanClose = false;
+
+    (async () => {
       try {
-        const data = JSON.parse(event.data) as SSEMessage;
-        if (data.message_id) {
-          setLastMessage(data);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ self_id: selfId, user_id: userId, type: chatType, target_id: targetId }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          console.error(`SSE 连接失败: HTTP ${response.status}`);
+          setIsConnected(false);
+          return;
+        }
+
+        setIsConnected(true);
+        reconnectAttemptsRef.current = 0;
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (!controller.signal.aborted) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                const dataStr = line.slice(5).trim();
+                if (dataStr) {
+                  try {
+                    const parsedData = JSON.parse(dataStr) as SSEMessage;
+                    if (parsedData.message_id) {
+                      setLastMessage(parsedData);
+                    }
+                  } catch (parseError) {
+                    console.error('解析消息失败:', parseError);
+                  }
+                }
+              }
+            }
+          } catch (readError) {
+            if ((readError as Error).name === 'AbortError') break;
+            throw readError;
+          }
         }
       } catch (error) {
-        console.error('解析消息失败:', error);
-      }
-    };
+        if ((error as Error).name === 'AbortError' || isCleanClose) return;
+        console.error('SSE 连接异常:', error);
+      } finally {
+        setIsConnected(false);
 
-    es.onerror = () => {
-      setIsConnected(false);
-      es.close();
-      
-      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptsRef.current++;
-          connect();
-        }, delay);
+        // 重连机制：指数退避，最多重试 MAX_RECONNECT_ATTEMPTS 次
+        if (!isCleanClose && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current++;
+            connect();
+          }, delay);
+        }
       }
-    };
+    })();
   }, [selfId, chatType, targetId]);
 
   const disconnect = useCallback(() => {
@@ -256,9 +326,9 @@ const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: stri
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
     setIsConnected(false);
   }, []);
@@ -315,16 +385,16 @@ const MessageInput: React.FC<MessageInputProps> = memo(({
   }, [onSend]);
 
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1a1a1a]">
+    <div className="border-t border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-black/20">
       {replyingTo && (
-        <div className="flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 dark:bg-white/[0.03] dark:border-white/[0.06]">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-1 h-8 bg-blue-500 rounded-full" />
+            <div className="w-1 h-8 bg-pink-500 rounded-full" />
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+              <div className="text-xs text-gray-700 font-medium dark:text-gray-300">
                 回复 {replyingTo.sender.nickname}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              <div className="text-xs text-gray-500 truncate dark:text-gray-500">
                 {replyingTo.raw_message.slice(0, 40)}
                 {replyingTo.raw_message.length > 40 && '...'}
               </div>
@@ -332,7 +402,7 @@ const MessageInput: React.FC<MessageInputProps> = memo(({
           </div>
           <button
             onClick={onCancelReply}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded ml-2"
+            className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded ml-2 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-white/[0.06]"
           >
             <X className="w-4 h-4" />
           </button>
@@ -340,13 +410,13 @@ const MessageInput: React.FC<MessageInputProps> = memo(({
       )}
       <div className="px-4 pt-2 pb-1">
         <div className="flex items-center gap-1 mb-2">
-          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/30" title="表情">
+          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/[0.06]" title="表情">
             <Smile className="w-5 h-5" />
           </button>
-          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/30" title="图片">
+          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/[0.06]" title="图片">
             <ImageIcon className="w-5 h-5" />
           </button>
-          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/30" title="@某人">
+          <button className="p-2 rounded-lg transition-colors text-gray-500 hover:text-pink-500 hover:bg-pink-50 dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/[0.06]" title="@某人">
             <AtSign className="w-5 h-5" />
           </button>
         </div>
@@ -360,15 +430,15 @@ const MessageInput: React.FC<MessageInputProps> = memo(({
             onKeyDown={handleKeyDown}
             placeholder={placeholder || '输入消息...'}
             disabled={disabled}
-            className="flex-1 min-h-[80px] max-h-[200px] bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 outline-none resize-none overflow-y-auto text-gray-900 dark:text-gray-100 placeholder-gray-400"
+            className="flex-1 min-h-[80px] max-h-[200px] bg-white text-gray-900 placeholder-gray-400 rounded-xl px-4 py-3 outline-none resize-none overflow-y-auto dark:bg-white/[0.03] dark:text-white dark:placeholder-gray-500"
             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
           />
           <button
             onClick={onSend}
             disabled={!value.trim() || disabled}
-            className="p-3 bg-pink-500 text-white rounded-xl hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 transition-colors"
+            className="p-3 bg-pink-500 text-white rounded-xl hover:bg-pink-600 disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 transition-colors dark:bg-white dark:text-black dark:hover:bg-gray-200"
           >
-            {disabled ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            {disabled ? <Loader2 className="w-5 h-5 animate-spin text-pink-500 dark:text-white/60" /> : <Send className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -411,28 +481,28 @@ const ContextMenu: React.FC<ContextMenuProps> = memo(({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[160px]"
+      className="fixed z-50 bg-white backdrop-blur-xl rounded-lg shadow-lg border border-gray-200 text-gray-800 py-1 min-w-[160px] dark:bg-black/95 dark:backdrop-blur-xl dark:border-white/[0.1] dark:text-white"
       style={{ left: adjustedX, top: adjustedY }}
     >
-      <button onClick={onReply} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+      <button onClick={onReply} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 dark:hover:bg-white/[0.08]">
         <Reply className="w-4 h-4" />
         回复消息
       </button>
-      <button onClick={onCopy} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+      <button onClick={onCopy} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 dark:hover:bg-white/[0.08]">
         <Copy className="w-4 h-4" />
         复制消息ID
       </button>
-      <button onClick={onForward} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+      <button onClick={onForward} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 dark:hover:bg-white/[0.08]">
         <Share2 className="w-4 h-4" />
         转发消息
       </button>
-      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-      <button onClick={onDelete} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 text-red-500 flex items-center gap-2">
+      <div className="border-t border-gray-200 my-1 dark:border-white/[0.06]" />
+      <button onClick={onDelete} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 text-red-400 flex items-center gap-2 dark:hover:bg-white/[0.08]">
         <Trash2 className="w-4 h-4" />
         撤回消息
       </button>
-      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
-      <button onClick={onMultiSelect} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2">
+      <div className="border-t border-gray-200 my-1 dark:border-white/[0.06]" />
+      <button onClick={onMultiSelect} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 dark:hover:bg-white/[0.08]">
         <CheckSquare className="w-4 h-4" />
         多选消息
       </button>
@@ -508,7 +578,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
 
   const renderMessageContent = useCallback((message: MessageSegment[]) => {
     if (!Array.isArray(message)) {
-      const safeText = escapeHtml(String(message || ''));
+      const safeText = sanitizeHtml(String(message || ''));
       return <p className="text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: safeText }} />;
     }
 
@@ -517,7 +587,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
         {message.map((segment, index) => {
           switch (segment.type) {
             case 'text':
-              const safeText = escapeHtml(segment.data?.text || '');
+              const safeText = sanitizeHtml(segment.data?.text || '');
               return <span key={index} className="text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: safeText }} />;
             
             case 'image':
@@ -555,7 +625,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="flex items-center gap-2 my-1">
                   <button 
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-600 rounded-full hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-full hover:bg-gray-100 transition-colors dark:bg-white/[0.06] dark:hover:bg-white/[0.10]"
                     onClick={async () => {
                       try {
                         const audio = new Audio(audioUrl);
@@ -566,7 +636,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
                     }}
                   >
                     <Play className="w-4 h-4" />
-                    <span className="text-sm">语音消息</span>
+                    <span className="text-sm text-gray-800 dark:text-white">语音消息</span>
                   </button>
                 </div>
               );
@@ -583,36 +653,36 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               );
             
             case 'file':
-              const fileName = escapeHtml(segment.data?.name || '文件');
+              const fileName = sanitizeHtml(segment.data?.name || '文件');
               return (
-                <div key={index} className="flex items-center gap-2 my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
-                  <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">FILE</span>
+                <div key={index} className="flex items-center gap-2 my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
+                  <div className="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center dark:bg-white/20">
+                    <span className="text-gray-800 text-xs font-bold dark:text-white">FILE</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm truncate" dangerouslySetInnerHTML={{ __html: fileName }} />
+                    <div className="text-sm text-gray-800 truncate dark:text-white" dangerouslySetInnerHTML={{ __html: fileName }} />
                     <div className="text-xs text-gray-500">{segment.data?.size ? `${(segment.data.size / 1024).toFixed(1)} KB` : ''}</div>
                   </div>
                 </div>
               );
             
             case 'forward':
-              const forwardContent = escapeHtml(segment.data?.content || '[无法查看合并消息]');
+              const forwardContent = sanitizeHtml(segment.data?.content || '[无法查看合并消息]');
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg border-l-4 border-blue-500">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg border-l-4 border-gray-300 dark:bg-white/[0.06] dark:border-white/30">
                   <div className="text-xs text-gray-500 mb-1">转发消息</div>
-                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: forwardContent }} />
+                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: forwardContent }} dark:text-white" />
                 </div>
               );
             
             case 'json':
               try {
                 const jsonData = JSON.parse(segment.data?.data || '{}');
-                const jsonPrompt = escapeHtml(jsonData.prompt || '[JSON内容]');
+                const jsonPrompt = sanitizeHtml(jsonData.prompt || '[JSON内容]');
                 return (
-                  <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                  <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                     <div className="text-xs text-gray-500 mb-1">JSON消息</div>
-                    <div className="text-sm truncate" dangerouslySetInnerHTML={{ __html: jsonPrompt }} />
+                    <div className="text-sm text-gray-800 truncate dangerouslySetInnerHTML={{ __html: jsonPrompt }} dark:text-white" />
                   </div>
                 );
               } catch {
@@ -621,58 +691,58 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
             
             case 'xml':
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500">[XML消息]</div>
                 </div>
               );
             
             case 'markdown':
-              const mdText = escapeHtml(segment.data?.text || '[Markdown内容]');
+              const mdText = sanitizeHtml(segment.data?.text || '[Markdown内容]');
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">Markdown</div>
-                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: mdText }} />
+                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: mdText }} dark:text-white" />
                 </div>
               );
             
             case 'location':
-              const locationTitle = escapeHtml(segment.data?.title || '位置信息');
+              const locationTitle = sanitizeHtml(segment.data?.title || '位置信息');
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">📍 位置</div>
-                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: locationTitle }} />
+                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: locationTitle }} dark:text-white" />
                 </div>
               );
             
             case 'music':
-              const musicTitle = escapeHtml(segment.data?.title || '音乐分享');
+              const musicTitle = sanitizeHtml(segment.data?.title || '音乐分享');
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">🎵 音乐</div>
-                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: musicTitle }} />
+                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: musicTitle }} dark:text-white" />
                 </div>
               );
             
             case 'poke':
               return (
-                <div key={index} className="my-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-600 rounded-full inline-block">
-                  <span className="text-sm">👈 戳了戳</span>
+                <div key={index} className="my-1 px-3 py-1.5 bg-white rounded-full inline-block dark:bg-white/[0.06]">
+                  <span className="text-sm text-gray-800 dark:text-white">👈 戳了戳</span>
                 </div>
               );
             
             case 'share':
               const shareUrl = segment.data?.url;
-              const shareTitle = escapeHtml(segment.data?.title || '链接');
+              const shareTitle = sanitizeHtml(segment.data?.title || '链接');
               if (!isSafeUrl(shareUrl)) {
                 return (
-                  <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg">
+                  <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                     <div className="text-xs text-gray-500 mb-1">🔗 分享</div>
                     <span className="text-sm text-gray-500">[链接不安全]</span>
                   </div>
                 );
               }
               return (
-                <div key={index} className="my-1 p-2 bg-gray-100 dark:bg-gray-600 rounded-lg border border-gray-300 dark:border-gray-500">
+                <div key={index} className="my-1 p-2 bg-white rounded-lg border border-gray-200 dark:bg-white/[0.06] dark:border-white/[0.1]">
                   <div className="text-xs text-gray-500 mb-1">🔗 分享</div>
                   <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline" dangerouslySetInnerHTML={{ __html: shareTitle }} />
                 </div>
@@ -696,30 +766,30 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
     >
       {multiSelectMode && (
         <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center mt-2 ${
-          isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-400'
+          isSelected ? 'bg-pink-500 border-pink-500' : 'border-gray-400'
         }`}>
           {isSelected && <Check className="w-3 h-3 text-white" />}
         </div>
       )}
-      <img 
-        src={`https://q1.qlogo.cn/g?b=qq&nk=${msg.user_id}&s=640`}
+      <img
+        src={getSafeQQAvatarUrl(msg.user_id, 640)}
         alt={msg.sender.nickname}
         className="w-10 h-10 rounded-full object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
         onClick={() => !multiSelectMode && onViewUserProfile(msg.user_id)}
       />
       <div className={`flex flex-col ${isSelf ? 'items-end' : 'items-start'} max-w-[calc(100%-56px)]`}>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs text-gray-500 dark:text-gray-400">{msg.sender.nickname}</span>
-          {isSending && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
-          {isError && <span className="text-xs text-red-500 flex items-center gap-1"><AlertCircle className="w-3 h-3" />发送失败</span>}
+          <span className="text-xs text-gray-500">{msg.sender.nickname}</span>
+          {isSending && <Loader2 className="w-3 h-3 animate-spin text-pink-500 dark:text-white/60" />}
+          {isError && <span className="text-xs text-red-400 flex items-center gap-1"><AlertCircle className="w-3 h-3" />发送失败</span>}
         </div>
         
         {replyMessage && (
           <div 
             className={`mb-1 px-3 py-1.5 rounded-lg text-xs border-l-2 cursor-pointer hover:opacity-80 ${
               isSelf 
-                ? 'bg-blue-400/50 border-blue-300 text-blue-100' 
-                : 'bg-gray-200 dark:bg-gray-600 border-gray-400 text-gray-600 dark:text-gray-300'
+                ? 'bg-blue-100 border-blue-300 text-gray-700 dark:bg-white/20 dark:border-white/30 dark:text-gray-200' 
+                : 'bg-gray-100 border-gray-300 text-gray-600 dark:bg-white/[0.04] dark:border-white/10 dark:text-gray-300'
             }`}
             onClick={() => onReplyClick(replyMessage.message_id)}
           >
@@ -732,18 +802,18 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
           id={`msg-${msg.message_id}`}
           className={`rounded-2xl px-4 py-2.5 break-words shadow-sm ${
             isSelf 
-              ? 'bg-blue-500 text-white rounded-tr-sm' 
-              : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
+              ? 'bg-blue-500 text-white rounded-tr-sm dark:bg-white dark:text-black' 
+              : 'bg-white text-gray-800 rounded-tl-sm dark:bg-white/[0.06] dark:text-white'
           } ${isError ? 'ring-2 ring-red-500' : ''}`}
         >
           {renderMessageContent(msg.message)}
         </div>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs text-gray-400">{formatTime(msg.time)}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{formatTime(msg.time)}</span>
           {!multiSelectMode && !isTemp && (
             <button
               onClick={() => onCopyMessageId(msg.message_id)}
-              className="text-xs text-gray-400 hover:text-blue-500 flex items-center gap-0.5"
+              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-0.5 dark:hover:text-white"
               title="点击复制消息ID"
             >
               <Hash className="w-3 h-3" />
@@ -855,7 +925,7 @@ export function WebQQ() {
           msg_count_today: 0,
           friend_count: 0,
           group_count: 0,
-          avatar: `http://q1.qlogo.cn/g?b=qq&nk=${account.self_id}&s=100`,
+          avatar: getSafeQQAvatarUrl(account.self_id, 100),
           version_info: account.version_info,
           bot_status: account.bot_status,
         }));
@@ -1659,14 +1729,14 @@ export function WebQQ() {
     id: friend.user_id,
     type: 'friend',
     name: friend.remark || friend.nickname,
-    avatar: `https://q1.qlogo.cn/g?b=qq&nk=${friend.user_id}&s=640`,
+    avatar: getSafeQQAvatarUrl(friend.user_id, 640),
   }), []);
 
   const createGroupSession = useCallback((group: Group): ChatSession => ({
     id: group.group_id,
     type: 'group',
     name: group.group_name,
-    avatar: `https://p.qlogo.cn/gh/${group.group_id}/${group.group_id}/640/`,
+    avatar: getSafeGroupAvatarUrl(group.group_id),
   }), []);
 
   // 加载数据
@@ -1701,30 +1771,30 @@ export function WebQQ() {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <div className="w-20 h-20 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Users className="w-10 h-10 text-gray-400" />
+          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 dark:bg-white/[0.03]">
+            <Users className="w-10 h-10 text-gray-500" />
           </div>
-          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">没有在线的机器人</h3>
-          <p className="text-gray-500 dark:text-gray-400">请先启动一个机器人账号</p>
+          <h3 className="text-lg font-semibold text-gray-700 mb-2 dark:text-gray-200">没有在线的机器人</h3>
+          <p className="text-gray-500">请先启动一个机器人账号</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-[calc(100vh-80px)] bg-white dark:bg-[#1a1a1a] rounded-2xl overflow-hidden shadow-xl border border-gray-200 dark:border-gray-700">
+    <div className="flex h-[calc(100vh-80px)] bg-white dark:bg-black/30 dark:backdrop-blur-xl border border-gray-200 dark:border-white/[0.06] rounded-2xl overflow-hidden shadow-xl">
       {/* 左侧列表区 */}
       <div className={`
-        w-full md:w-80 border-r border-gray-200 dark:border-gray-700 flex-shrink-0
+        w-full md:w-80 border-r border-gray-200 dark:border-white/[0.06] flex-shrink-0 bg-gray-50 dark:bg-black/20
         ${selectedChat ? 'hidden md:flex' : 'flex'}
       `}>
         <div className="flex flex-col h-full">
           {/* 头部 */}
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+          <div className="p-3 border-b border-gray-200 dark:border-white/[0.06]">
             <select
               value={selectedBot || ''}
               onChange={(e) => setSelectedBot(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:focus:ring-white/20"
             >
               {onlineBots.map(bot => (
                 <option key={bot.self_id} value={bot.self_id}>
@@ -1735,29 +1805,29 @@ export function WebQQ() {
           </div>
 
           {/* 搜索框 */}
-          <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+          <div className="px-3 py-2 border-b border-gray-200 dark:border-white/[0.06]">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索好友或群组..."
-                className="w-full pl-9 pr-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 text-gray-900 placeholder-gray-400 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:placeholder-gray-500 dark:focus:ring-white/20"
               />
             </div>
           </div>
 
           {/* 类型切换标签 */}
-          <div className="flex border-b border-gray-200 dark:border-gray-700 px-2 pt-2">
+          <div className="flex border-b border-gray-200 dark:border-white/[0.06] px-2 pt-2">
             {(['recent', 'friends', 'groups'] as TabType[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors rounded-t-lg ${
                   activeTab === tab
-                    ? 'text-pink-600 dark:text-pink-400 bg-pink-50/50 dark:bg-pink-900/30'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    ? 'text-pink-500 bg-pink-50 dark:text-white dark:bg-white/[0.08]'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-white/[0.04]'
                 }`}
               >
                 {tab === 'recent' && <Clock className="w-4 h-4" />}
@@ -1776,22 +1846,22 @@ export function WebQQ() {
                   <div
                     key={friend.user_id}
                     onClick={() => handleSelectChat(createFriendSession(friend))}
-                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.04] ${
                       selectedChat?.id === friend.user_id && selectedChat?.type === 'friend'
-                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        ? 'bg-pink-50 dark:bg-white/[0.08]'
                         : ''
                     }`}
                   >
                     <img
-                      src={`https://q1.qlogo.cn/g?b=qq&nk=${friend.user_id}&s=640`}
+                      src={getSafeQQAvatarUrl(friend.user_id, 640)}
                       alt={friend.nickname}
                       className="w-10 h-10 rounded-full object-cover"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="font-medium text-gray-900 truncate dark:text-white">
                         {friend.remark || friend.nickname}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="text-xs text-gray-500 truncate">
                         {friend.user_id}
                       </div>
                     </div>
@@ -1806,22 +1876,22 @@ export function WebQQ() {
                   <div
                     key={group.group_id}
                     onClick={() => handleSelectChat(createGroupSession(group))}
-                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.04] ${
                       selectedChat?.id === group.group_id && selectedChat?.type === 'group'
-                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        ? 'bg-pink-50 dark:bg-white/[0.08]'
                         : ''
                     }`}
                   >
                     <img
-                      src={`https://p.qlogo.cn/gh/${group.group_id}/${group.group_id}/640/`}
+                      src={getSafeGroupAvatarUrl(group.group_id)}
                       alt={group.group_name}
                       className="w-10 h-10 rounded-full object-cover"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="font-medium text-gray-900 truncate dark:text-white">
                         {group.group_name}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="text-xs text-gray-500 truncate">
                         群号: {group.group_id} {group.member_count && `· ${group.member_count}人`}
                       </div>
                     </div>
@@ -1833,7 +1903,7 @@ export function WebQQ() {
             {activeTab === 'recent' && (
               <div className="py-1">
                 {recentSessions.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <div className="text-center py-8 text-gray-500">
                     <Clock className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     <p>暂无最近聊天</p>
                   </div>
@@ -1842,15 +1912,15 @@ export function WebQQ() {
                     <div
                       key={`${session.type}-${session.id}`}
                       onClick={() => handleSelectChat(session)}
-                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.04] ${
                         selectedChat?.id === session.id && selectedChat?.type === session.type
-                          ? 'bg-blue-50 dark:bg-blue-900/20'
+                          ? 'bg-pink-50 dark:bg-white/[0.08]'
                           : ''
                       }`}
                     >
                       <div className="relative flex-shrink-0">
                         <img
-                          src={session.avatar}
+                          src={validateImageUrl(session.avatar)}
                           alt={session.name}
                           className="w-10 h-10 rounded-full object-cover"
                         />
@@ -1861,15 +1931,15 @@ export function WebQQ() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                        <div className="font-medium text-gray-900 truncate dark:text-white">
                           {session.name}
                         </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        <div className="text-xs text-gray-500 truncate">
                           {session.lastMessage || '暂无消息'}
                         </div>
                       </div>
                       {session.lastTime && (
-                        <div className="text-xs text-gray-400">
+                        <div className="text-xs text-gray-500">
                           {formatTime(session.lastTime)}
                         </div>
                       )}
@@ -1887,7 +1957,7 @@ export function WebQQ() {
         {selectedChat ? (
           <div className="flex flex-col h-full relative">
             {/* 头部 */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1a1a1a]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 dark:border-white/[0.06] dark:bg-black/20">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSelectedChat(null)}
@@ -1896,23 +1966,23 @@ export function WebQQ() {
                   <ChevronLeft className="w-5 h-5" />
                 </button>
                 <img
-                  src={selectedChat.avatar}
+                  src={validateImageUrl(selectedChat.avatar)}
                   alt={selectedChat.name}
                   className="w-10 h-10 rounded-full object-cover cursor-pointer"
                   onClick={() => selectedChat.type === 'group' ? viewGroupProfile() : viewUserProfile(selectedChat.id)}
                 />
                 <div>
                   <div 
-                    className="font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-blue-500"
+                    className="font-medium text-gray-900 cursor-pointer hover:text-gray-700 dark:text-white dark:hover:text-gray-200"
                     onClick={() => selectedChat.type === 'group' ? viewGroupProfile() : viewUserProfile(selectedChat.id)}
                   >
                     {selectedChat.name}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
                     {selectedChat.type === 'friend' ? '好友' : '群聊'} {selectedChat.id}
                     {sseConnected && (
                       <span className="flex items-center gap-1 text-green-500">
-                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse dark:bg-white" />
                         实时
                       </span>
                     )}
@@ -1921,7 +1991,7 @@ export function WebQQ() {
               </div>
               <div className="flex items-center gap-2">
                 <button 
-                  className="p-2 text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg" 
+                  className="p-2 text-gray-500 hover:text-pink-500 hover:bg-pink-50 rounded-lg dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/[0.06]" 
                   title="强制刷新"
                   onClick={() => { 
                     if (selectedChat && selectedBot) {
@@ -1935,7 +2005,7 @@ export function WebQQ() {
                 </button>
                 {selectedChat.type === 'group' && (
                   <button 
-                    className="p-2 text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg" 
+                    className="p-2 text-gray-500 hover:text-pink-500 hover:bg-pink-50 rounded-lg dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/[0.06]" 
                     title="AI语音"
                     onClick={() => { setShowAIVoice(true); loadAICharacters(); }}
                   >
@@ -1943,7 +2013,7 @@ export function WebQQ() {
                   </button>
                 )}
                 <button 
-                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" 
+                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-white/[0.04]" 
                   title="查看成员"
                   onClick={() => { setShowMemberList(true); loadGroupMembers(); }}
                 >
@@ -1959,16 +2029,16 @@ export function WebQQ() {
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="flex items-center justify-between px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800 overflow-hidden"
+                  className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200 overflow-hidden dark:bg-white/[0.05] dark:border-white/[0.06]"
                 >
-                  <span className="text-sm text-blue-600 dark:text-blue-400">
+                  <span className="text-sm text-gray-600 dark:text-gray-300">
                     已选择 {selectedMessages.size} 条消息
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={batchForwardMessages}
                       disabled={selectedMessages.size === 0}
-                      className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      className="px-3 py-1.5 text-sm bg-pink-500 text-white rounded-lg hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 dark:bg-white dark:text-black dark:hover:bg-gray-200"
                     >
                       <Share2 className="w-4 h-4" />
                       批量转发
@@ -1995,15 +2065,15 @@ export function WebQQ() {
             <div 
               ref={messagesContainerRef}
               onScroll={handleScroll}
-              className="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-gray-50 dark:bg-[#0f0f0f]"
+              className="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-white dark:bg-black/10"
             >
               <div className="min-h-full flex flex-col">
                 {loading ? (
                   <div className="flex-1 flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                    <Loader2 className="w-8 h-8 animate-spin text-pink-500 dark:text-white/60" />
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
+                  <div className="flex-1 flex items-center justify-center text-gray-500">
                     <div className="text-center">
                       <MessageCircle className="w-12 h-12 mx-auto mb-2 opacity-50" />
                       <p>暂无消息</p>
@@ -2015,14 +2085,14 @@ export function WebQQ() {
                     {hasMoreHistory && (
                       <div className="text-center py-2">
                         {loadingMore ? (
-                          <div className="flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                          <div className="flex items-center justify-center gap-2 text-gray-500">
+                            <Loader2 className="w-4 h-4 animate-spin text-pink-500 dark:text-white/60" />
                             <span className="text-sm">加载更多...</span>
                           </div>
                         ) : (
                           <button
                             onClick={() => debouncedLoadMore()}
-                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                            className="text-sm text-gray-500 hover:text-gray-700 transition-colors dark:hover:text-white"
                           >
                             点击加载更多历史消息
                           </button>
@@ -2030,7 +2100,7 @@ export function WebQQ() {
                       </div>
                     )}
                     {!hasMoreHistory && messages.length > MESSAGES_PER_PAGE && (
-                      <div className="text-center py-2 text-gray-400 dark:text-gray-500 text-sm">
+                      <div className="text-center py-2 text-gray-500 text-sm">
                         没有更多历史消息了
                       </div>
                     )}
@@ -2069,11 +2139,11 @@ export function WebQQ() {
             />
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+          <div className="flex items-center justify-center h-full text-gray-500">
             <div className="text-center">
               <MessageCircle className="w-16 h-16 mx-auto mb-4 opacity-30" />
-              <p className="text-lg">选择一个好友或群组开始聊天</p>
-              <p className="text-lg">该功能为测试版本 存在体验问题和一些未发现bug 请理解QAQ</p>
+              <p className="text-lg text-gray-800 dark:text-white">选择一个好友或群组开始聊天</p>
+              <p className="text-lg text-gray-800 dark:text-white">该功能为测试版本 存在体验问题和一些未发现bug 请理解QAQ</p>
             </div>
           </div>
         )}
@@ -2112,53 +2182,53 @@ export function WebQQ() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-80 max-h-[80vh] flex flex-col"
+              className="bg-white border border-gray-200 rounded-xl shadow-xl w-80 max-h-[80vh] flex flex-col dark:bg-black/90 dark:backdrop-blur-xl dark:border-white/[0.1]"
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="font-semibold">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/[0.06]">
+                <h3 className="font-semibold text-gray-800 dark:text-white">
                   {forwardingMessage ? '转发到' : `批量转发 ${selectedMessages.size} 条消息到`}
                 </h3>
-                <button onClick={() => { setShowForwardDialog(false); setForwardingMessage(null); setForwardTarget(null); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                <button onClick={() => { setShowForwardDialog(false); setForwardingMessage(null); setForwardTarget(null); }} className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 dark:hover:bg-white/[0.08] dark:text-gray-400 dark:hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
-                <div className="text-sm text-gray-500 dark:text-gray-400 mb-2 px-2">好友</div>
+                <div className="text-sm text-gray-500 mb-2 px-2">好友</div>
                 {friends.map(friend => (
                   <button
                     key={friend.user_id}
                     onClick={() => setForwardTarget({ type: 'friend', id: friend.user_id, name: friend.remark || friend.nickname })}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg ${
                       forwardTarget?.id === friend.user_id && forwardTarget?.type === 'friend'
-                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        ? 'bg-pink-50 text-gray-800 dark:bg-white/[0.08] dark:text-white'
+                        : 'hover:bg-gray-100 dark:hover:bg-white/[0.05]'
                     }`}
                   >
-                    <img src={`https://q1.qlogo.cn/g?b=qq&nk=${friend.user_id}&s=640`} className="w-8 h-8 rounded-full" />
-                    <span className="truncate">{friend.remark || friend.nickname}</span>
+                    <img src={getSafeQQAvatarUrl(friend.user_id, 640)} className="w-8 h-8 rounded-full" />
+                    <span className="truncate text-gray-800 dark:text-white">{friend.remark || friend.nickname}</span>
                   </button>
                 ))}
-                <div className="text-sm text-gray-500 dark:text-gray-400 mb-2 mt-4 px-2">群组</div>
+                <div className="text-sm text-gray-500 mb-2 mt-4 px-2">群组</div>
                 {groups.map(group => (
                   <button
                     key={group.group_id}
                     onClick={() => setForwardTarget({ type: 'group', id: group.group_id, name: group.group_name })}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg ${
                       forwardTarget?.id === group.group_id && forwardTarget?.type === 'group'
-                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        ? 'bg-pink-50 text-gray-800 dark:bg-white/[0.08] dark:text-white'
+                        : 'hover:bg-gray-100 dark:hover:bg-white/[0.05]'
                     }`}
                   >
-                    <img src={`https://p.qlogo.cn/gh/${group.group_id}/${group.group_id}/640/`} className="w-8 h-8 rounded-full" />
-                    <span className="truncate">{group.group_name}</span>
+                    <img src={getSafeGroupAvatarUrl(group.group_id)} className="w-8 h-8 rounded-full" />
+                    <span className="truncate text-gray-800 dark:text-white">{group.group_name}</span>
                   </button>
                 ))}
               </div>
-              <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="p-4 border-t border-gray-200 dark:border-white/[0.06]">
                 <button
                   onClick={forwardingMessage ? executeForward : executeBatchForward}
                   disabled={!forwardTarget}
-                  className="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-gray-200"
                 >
                   {forwardingMessage ? '转发' : `批量转发 ${selectedMessages.size} 条消息`}
                 </button>
@@ -2176,25 +2246,25 @@ export function WebQQ() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed inset-y-0 right-0 z-40 w-80 bg-white dark:bg-gray-800 shadow-xl border-l border-gray-200 dark:border-gray-700 flex flex-col"
+            className="fixed inset-y-0 right-0 z-40 w-80 bg-white backdrop-blur-xl border-l border-gray-200 shadow-xl flex flex-col dark:bg-black/90 dark:backdrop-blur-xl dark:border-white/[0.1]"
           >
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-semibold">群成员 ({groupMembers.length})</h3>
-              <button onClick={() => setShowMemberList(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/[0.06]">
+              <h3 className="font-semibold text-gray-800 dark:text-white">群成员 ({groupMembers.length})</h3>
+              <button onClick={() => setShowMemberList(false)} className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 dark:hover:bg-white/[0.08] dark:text-gray-400 dark:hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+            <div className="p-2 border-b border-gray-200 dark:border-white/[0.06]">
               <button
                 onClick={() => setGroupWholeBan(true)}
-                className="w-full py-2 px-3 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2 text-red-500"
+                className="w-full py-2 px-3 text-left text-sm hover:bg-gray-100 rounded-lg flex items-center gap-2 text-red-400 dark:hover:bg-white/[0.08]"
               >
                 <Ban className="w-4 h-4" />
                 开启全员禁言
               </button>
               <button
                 onClick={() => setGroupWholeBan(false)}
-                className="w-full py-2 px-3 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2 text-green-500"
+                className="w-full py-2 px-3 text-left text-sm hover:bg-gray-100 rounded-lg flex items-center gap-2 text-green-400 dark:hover:bg-white/[0.08]"
               >
                 <Check className="w-4 h-4" />
                 关闭全员禁言
@@ -2203,32 +2273,32 @@ export function WebQQ() {
             <div className="flex-1 overflow-y-auto p-2">
               {loadingMembers ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                  <Loader2 className="w-6 h-6 animate-spin text-pink-500 dark:text-white/60" />
                 </div>
               ) : (
                 groupMembers.map(member => (
-                  <div key={member.user_id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg group">
-                    <img 
-                      src={`https://q1.qlogo.cn/g?b=qq&nk=${member.user_id}&s=640`} 
+                  <div key={member.user_id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-100 rounded-lg group dark:hover:bg-white/[0.05]">
+                    <img
+                      src={getSafeQQAvatarUrl(member.user_id, 640)}
                       className="w-8 h-8 rounded-full cursor-pointer"
                       onClick={() => viewUserProfile(member.user_id)}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{member.card || member.nickname}</div>
+                      <div className="text-sm font-medium truncate text-gray-800 dark:text-white">{member.card || member.nickname}</div>
                       <div className="text-xs text-gray-500">{member.user_id}</div>
                     </div>
                     {member.role !== 'owner' && (
                       <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1">
                         <button
                           onClick={() => { setBanTargetUser(member); setShowBanDialog(true); }}
-                          className="p-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-600 rounded hover:bg-red-200"
+                          className="p-1.5 text-xs bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
                           title="禁言"
                         >
                           禁言
                         </button>
                         <button
                           onClick={() => unbanGroupMember(member.user_id)}
-                          className="p-1.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-600 rounded hover:bg-green-200"
+                          className="p-1.5 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30"
                           title="解除禁言"
                         >
                           解禁
@@ -2258,28 +2328,28 @@ export function WebQQ() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-80"
+              className="bg-white border border-gray-200 rounded-xl shadow-xl w-80 dark:bg-black/90 dark:backdrop-blur-xl dark:border-white/[0.1]"
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="font-semibold">禁言设置</h3>
-                <button onClick={() => { setShowBanDialog(false); setBanTargetUser(null); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/[0.06]">
+                <h3 className="font-semibold text-gray-800 dark:text-white">禁言设置</h3>
+                <button onClick={() => { setShowBanDialog(false); setBanTargetUser(null); }} className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 dark:hover:bg-white/[0.08] dark:text-gray-400 dark:hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="p-4">
                 <div className="mb-4">
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">目标用户</div>
+                  <div className="text-sm text-gray-500 mb-2">目标用户</div>
                   <div className="flex items-center gap-2">
-                    <img src={`https://q1.qlogo.cn/g?b=qq&nk=${banTargetUser.user_id}&s=640`} className="w-8 h-8 rounded-full" />
-                    <span className="font-medium">{banTargetUser.card || banTargetUser.nickname}</span>
+                    <img src={getSafeQQAvatarUrl(banTargetUser.user_id, 640)} className="w-8 h-8 rounded-full" />
+                    <span className="font-medium text-gray-800 dark:text-white">{banTargetUser.card || banTargetUser.nickname}</span>
                   </div>
                 </div>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium mb-2">禁言时长</label>
+                  <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">禁言时长</label>
                   <select
                     value={banDuration}
                     onChange={(e) => setBanDuration(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm"
+                    className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white"
                   >
                     <option value={60}>1分钟</option>
                     <option value={300}>5分钟</option>
@@ -2297,7 +2367,7 @@ export function WebQQ() {
                     <option value={2505600}>29天</option>
                   </select>
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                <div className="text-xs text-gray-500 mb-4">
                   禁言时长: {formatBanDuration(banDuration)}
                 </div>
                 <button
@@ -2321,24 +2391,24 @@ export function WebQQ() {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed inset-y-0 right-0 z-40 w-80 bg-white dark:bg-gray-800 shadow-xl border-l border-gray-200 dark:border-gray-700 flex flex-col"
+            className="fixed inset-y-0 right-0 z-40 w-80 bg-white backdrop-blur-xl border-l border-gray-200 shadow-xl flex flex-col dark:bg-black/90 dark:backdrop-blur-xl dark:border-white/[0.1]"
           >
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-semibold flex items-center gap-2">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/[0.06]">
+              <h3 className="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
                 <Volume2 className="w-5 h-5" />
                 AI语音
               </h3>
-              <button onClick={() => setShowAIVoice(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+              <button onClick={() => setShowAIVoice(false)} className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 dark:hover:bg-white/[0.08] dark:text-gray-400 dark:hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-4 flex-1 overflow-y-auto">
               <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">选择声色</label>
+                <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">选择声色</label>
                 <select
                   value={selectedAICharacter}
                   onChange={(e) => setSelectedAICharacter(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white"
                 >
                   {aiCharacters.map(char => (
                     <option key={char.character_id} value={char.character_id}>
@@ -2348,18 +2418,18 @@ export function WebQQ() {
                 </select>
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">语音文本</label>
+                <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">语音文本</label>
                 <textarea
                   value={aiVoiceText}
                   onChange={(e) => setAiVoiceText(e.target.value)}
                   placeholder="输入要转换为语音的文本..."
-                  className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm resize-none h-32"
+                  className="w-full px-3 py-2 bg-white text-gray-900 placeholder-gray-400 rounded-lg text-sm resize-none h-32 dark:bg-white/[0.03] dark:text-white dark:placeholder-gray-500"
                 />
               </div>
               <button
                 onClick={sendAIVoice}
                 disabled={!aiVoiceText.trim() || !selectedAICharacter}
-                className="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 dark:bg-white dark:text-black dark:hover:bg-gray-200"
               >
                 <Mic className="w-4 h-4" />
                 发送AI语音
@@ -2382,11 +2452,11 @@ export function WebQQ() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-96 max-h-[80vh] overflow-y-auto"
+              className="bg-white border border-gray-200 rounded-xl shadow-xl w-96 max-h-[80vh] overflow-y-auto dark:bg-black/90 dark:backdrop-blur-xl dark:border-white/[0.1]"
             >
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="font-semibold">{profileType === 'group' ? '群资料' : '用户资料'}</h3>
-                <button onClick={() => setShowProfile(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-white/[0.06]">
+                <h3 className="font-semibold text-gray-800 dark:text-white">{profileType === 'group' ? '群资料' : '用户资料'}</h3>
+                <button onClick={() => setShowProfile(false)} className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 dark:hover:bg-white/[0.08] dark:text-gray-400 dark:hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -2394,68 +2464,68 @@ export function WebQQ() {
                 {profileType === 'group' ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                      <img 
-                        src={`https://p.qlogo.cn/gh/${profileData.group_id}/${profileData.group_id}/640/`} 
+                      <img
+                        src={getSafeGroupAvatarUrl(profileData.group_id)}
                         className="w-16 h-16 rounded-full"
                       />
                       <div>
-                        <div className="font-semibold text-lg">{profileData.group_name}</div>
+                        <div className="font-semibold text-lg text-gray-800 dark:text-white">{profileData.group_name}</div>
                         <div className="text-sm text-gray-500">群号: {profileData.group_id}</div>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+                      <div className="bg-gray-100 p-3 rounded-lg dark:bg-white/[0.03]">
                         <div className="text-gray-500">成员数</div>
-                        <div className="font-semibold">{profileData.member_count}</div>
+                        <div className="font-semibold text-gray-800 dark:text-white">{profileData.member_count}</div>
                       </div>
-                      <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">
+                      <div className="bg-gray-100 p-3 rounded-lg dark:bg-white/[0.03]">
                         <div className="text-gray-500">最大成员数</div>
-                        <div className="font-semibold">{profileData.max_member_count}</div>
+                        <div className="font-semibold text-gray-800 dark:text-white">{profileData.max_member_count}</div>
                       </div>
                     </div>
                     {profileData.group_memo && (
                       <div>
                         <div className="text-sm text-gray-500 mb-1">群介绍</div>
-                        <div className="text-sm bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">{profileData.group_memo}</div>
+                        <div className="text-sm bg-gray-100 p-3 rounded-lg text-gray-800 dark:bg-white/[0.03] dark:text-white">{profileData.group_memo}</div>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                      <img 
-                        src={`https://q1.qlogo.cn/g?b=qq&nk=${profileData.user_id}&s=640`} 
+                      <img
+                        src={getSafeQQAvatarUrl(profileData.user_id, 640)}
                         className="w-16 h-16 rounded-full"
                       />
                       <div>
-                        <div className="font-semibold text-lg">{profileData.nickname}</div>
+                        <div className="font-semibold text-lg text-gray-800 dark:text-white">{profileData.nickname}</div>
                         <div className="text-sm text-gray-500">QQ: {profileData.user_id}</div>
                       </div>
                     </div>
                     {profileData.qid && (
                       <div className="text-sm">
-                        <span className="text-gray-500">QID:</span> {profileData.qid}
+                        <span className="text-gray-500">QID:</span> <span className="text-gray-800 dark:text-white">{profileData.qid}</span>
                       </div>
                     )}
                     {profileData.sex && (
                       <div className="text-sm">
-                        <span className="text-gray-500">性别:</span> {profileData.sex === 'male' ? '男' : profileData.sex === 'female' ? '女' : '未知'}
+                        <span className="text-gray-500">性别:</span> <span className="text-gray-800 dark:text-white">{profileData.sex === 'male' ? '男' : profileData.sex === 'female' ? '女' : '未知'}</span>
                       </div>
                     )}
                     {profileData.age && (
                       <div className="text-sm">
-                        <span className="text-gray-500">年龄:</span> {profileData.age}
+                        <span className="text-gray-500">年龄:</span> <span className="text-gray-800 dark:text-white">{profileData.age}</span>
                       </div>
                     )}
                     {profileData.sign && (
                       <div>
                         <div className="text-sm text-gray-500 mb-1">个性签名</div>
-                        <div className="text-sm bg-gray-100 dark:bg-gray-700 p-3 rounded-lg">{profileData.sign}</div>
+                        <div className="text-sm bg-gray-100 p-3 rounded-lg text-gray-800 dark:bg-white/[0.03] dark:text-white">{profileData.sign}</div>
                       </div>
                     )}
                     {profileData.level && (
                       <div className="text-sm">
-                        <span className="text-gray-500">等级:</span> {profileData.level}
+                        <span className="text-gray-500">等级:</span> <span className="text-gray-800 dark:text-white">{profileData.level}</span>
                       </div>
                     )}
                   </div>

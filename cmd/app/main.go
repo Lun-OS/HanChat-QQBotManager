@@ -203,9 +203,11 @@ func main() {
 	accountMgr := services.GetBotAccountManager(baseLogger, accountConfig)
 
 	// ========== Web登录系统（替代MySQL） ==========
-	// 初始化新的Web登录服务（基于环境变量）
-	webLoginSvc := services.NewWebLoginService(baseLogger)
-	webLoginHandler := api.NewWebLoginHandler(baseLogger, webLoginSvc)
+	// 初始化验证码服务
+	captchaSvc := services.NewCaptchaService(baseLogger)
+	// 初始化新的Web登录服务（基于环境变量 + 验证码）
+	webLoginSvc := services.NewWebLoginService(baseLogger, captchaSvc)
+	webLoginHandler := api.NewWebLoginHandler(baseLogger, webLoginSvc, captchaSvc)
 	webLoginHandler.RegisterRoutes(r.Group("/api"))
 
 	// ========== 日志管理器 ==========
@@ -247,8 +249,12 @@ func main() {
 	// 创建WebSocket调试服务
 	wsDebugService := services.NewWSDebugService(baseLogger, reverseWS)
 	// 注册调试路由 /debug/{self_id}
-	r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
-	appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
+	if wsDebugService != nil {
+		r.GET("/debug/:self_id", wsDebugService.HandleDebugWebSocket)
+		appLogger.Infow("WebSocket调试服务已启动", "path", "/debug/{self_id}")
+	} else {
+		appLogger.Warn("WebSocket调试服务创建失败，跳过调试路由注册")
+	}
 
 	// 自动启动预配置的插件
 	pm.AutoStartPlugins()
@@ -280,9 +286,16 @@ func main() {
 	pluginManagerHandler := api.NewPluginManagerHandler(baseLogger, reverseWS.GetAccountManager())
 	pluginManagerHandler.RegisterRoutes(apiGroup)
 
+	// ========== 插件仓库API路由 ==========
+	pluginStoreService := services.NewPluginStoreService(baseLogger, cfg)
+	pluginStoreHandler := api.NewPluginStoreHandler(baseLogger, pluginStoreService)
+	pluginStoreHandler.RegisterRoutes(apiGroup)
+
 	// 1. 先注册固定路由（设置、系统等）
 	// 系统路由 /api/system/*
 	api.RegisterSystemRoutes(apiGroup.Group("/system"), reverseWS, baseLogger)
+
+	api.RegisterExpandAPIRoutes(apiGroup.Group("/expand"), reverseWS, baseLogger)
 
 	// 设置路由 /api/settings/* (需要认证)
 	api.RegisterSettingsRoutes(apiGroup.Group("/settings"), baseLogger, accountConfig, reverseWS)
@@ -293,6 +306,9 @@ func main() {
 
 	// 2. 再注册多账号路由 /api/:self_id/*
 	// 注意：这个路由会捕获所有 /api/xxx/yyy，所以要放在最后
+	blocklyConfigHandler := api.NewBlocklyConfigHandler(baseLogger)
+	blocklyConfigHandler.RegisterRoutes(apiGroup)
+
 	multiAccountHandler := api.NewMultiAccountHandler(baseLogger, accountMgr, reverseWS)
 	multiAccountHandler.RegisterRoutes(apiGroup)
 

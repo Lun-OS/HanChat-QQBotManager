@@ -185,17 +185,6 @@ func convertToBase64(v interface{}) string {
 func (m *Manager) luaLogInfo(selfID string, pluginName string) func(*lua.LState) int {
 	return func(L *lua.LState) int {
 		msg := m.formatLogValue(L, 1)
-		instance := m.GetPluginInstance(selfID, pluginName)
-		if instance != nil {
-			timestamp := time.Now().Format("15:04:05")
-			logEntry := fmt.Sprintf("[%s] [INFO] %s", timestamp, msg)
-			instance.logMu.Lock()
-			instance.Logs = append(instance.Logs, logEntry)
-			if len(instance.Logs) > 1000 {
-				instance.Logs = instance.Logs[len(instance.Logs)-1000:]
-			}
-			instance.logMu.Unlock()
-		}
 		m.logger.Infow("插件日志", "plugin", pluginName, "level", "info", "message", msg)
 		m.addPluginLog(selfID, pluginName, "INFO", msg)
 		return 0
@@ -3743,6 +3732,15 @@ func (m *Manager) luaOnMessageSent(instance *LuaPluginInstance) func(*lua.LState
 		fn := L.CheckFunction(1)
 		instance.EventHandlers["message_sent"] = fn
 		m.logger.Infow("注册自己消息发送事件处理器", "plugin", instance.Name)
+		return 0
+	}
+}
+
+func (m *Manager) luaOnMetaEvent(instance *LuaPluginInstance) func(*lua.LState) int {
+	return func(L *lua.LState) int {
+		fn := L.CheckFunction(1)
+		instance.EventHandlers["meta_event"] = fn
+		m.logger.Infow("注册元事件处理器", "plugin", instance.Name)
 		return 0
 	}
 }

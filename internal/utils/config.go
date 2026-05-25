@@ -40,13 +40,21 @@ type WebSocketConfig struct {
 	MaxConnections int    `mapstructure:"maxConnections"` // 最大连接数限制
 }
 
+// PluginStoreConfig 插件仓库配置
+type PluginStoreConfig struct {
+	IndexLuaURL         string `mapstructure:"indexLuaUrl"`
+	IndexBlocklyURL     string `mapstructure:"indexBlocklyUrl"`
+	IndexBlocklyConfigURL string `mapstructure:"indexBlocklyConfigUrl"`
+}
+
 // PluginConfig 插件配置
 type PluginConfig struct {
-	Workers               int  `mapstructure:"workers"`
-	MaxWorkers            int  `mapstructure:"maxWorkers"`
-	QueueSize             int  `mapstructure:"queueSize"`
-	EnableAutoScale       bool `mapstructure:"enableAutoScale"`       // 是否启用动态扩缩容
-	ScaleCheckIntervalSec int  `mapstructure:"scaleCheckIntervalSec"` // 扩缩容检查间隔(秒)
+	Workers               int              `mapstructure:"workers"`
+	MaxWorkers            int              `mapstructure:"maxWorkers"`
+	QueueSize             int              `mapstructure:"queueSize"`
+	EnableAutoScale       bool             `mapstructure:"enableAutoScale"`
+	ScaleCheckIntervalSec int              `mapstructure:"scaleCheckIntervalSec"`
+	Store                 PluginStoreConfig `mapstructure:"store"`
 }
 
 // WebLoginConfig Web登录配置
@@ -99,7 +107,10 @@ func LoadConfig() *Config {
 	v.SetDefault("plugin.maxWorkers", getEnvInt("PLUGIN_MAX_WORKERS", 0)) // 0表示自动计算
 	v.SetDefault("plugin.queueSize", getEnvInt("PLUGIN_QUEUE_SIZE", 1024))
 	v.SetDefault("plugin.enableAutoScale", getEnvBool("PLUGIN_ENABLE_AUTO_SCALE", true)) // 默认启用动态扩缩容
-	v.SetDefault("plugin.scaleCheckIntervalSec", getEnvInt("PLUGIN_SCALE_CHECK_INTERVAL", 30)) // 默认30秒检查间隔
+	v.SetDefault("plugin.scaleCheckIntervalSec", getEnvInt("PLUGIN_SCALE_CHECK_INTERVAL", 30))
+	v.SetDefault("plugin.store.indexLuaUrl", getEnvString("PLUGINS_INDEX_LUA", ""))
+	v.SetDefault("plugin.store.indexBlocklyUrl", getEnvString("PLUGINS_INDEX_BLOCKLY", ""))
+	v.SetDefault("plugin.store.indexBlocklyConfigUrl", getEnvString("PLUGINS_INDEX_BLOCKLY_CONFIG", ""))
 
 	// Web登录配置
 	v.SetDefault("weblogin.username", getEnvString("WEB_LOGIN_USER", "admin"))

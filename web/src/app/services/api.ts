@@ -121,12 +121,27 @@ apiClient.interceptors.response.use(
 
 // 登录相关API
 export const authApi = {
+  // 获取验证码
+  getCaptcha: async () => {
+    const response = await apiClient.get('/api/auth/captcha');
+    return response.data;
+  },
+
+  // 刷新验证码
+  refreshCaptcha: async (captchaId?: string) => {
+    const response = await apiClient.post('/api/auth/captcha/refresh', {
+      captcha_id: captchaId,
+    });
+    return response.data;
+  },
+
   // 登录
-  login: async (username: string, password: string, topo: string) => {
+  login: async (username: string, password: string, captchaId: string, captcha: string) => {
     const response = await apiClient.post('/api/auth/login', {
       username,
       password,
-      topo,
+      captcha_id: captchaId,
+      captcha,
     });
     return response.data;
   },
@@ -1414,6 +1429,29 @@ export interface AccountInfo {
   online: boolean;
 }
 
+export interface PluginStoreEntry {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  index_url: string;
+  sha256_hash: string;
+  update_time: string;
+}
+
+export interface PluginStoreIndex {
+  repo_name: string;
+  description: string;
+  plugins: PluginStoreEntry[];
+}
+
+export interface InstallStatus {
+  plugin_name: string;
+  plugin_type: string;
+  status: 'downloading' | 'verifying' | 'extracting' | 'installing' | 'success' | 'error';
+  message: string;
+}
+
 // 其他实用API
 export const otherApi = {
   // 获取收藏表情
@@ -1488,6 +1526,103 @@ export const pluginManagerApi = {
   // 重命名文件或文件夹
   renameFile: async (path: string, newName: string): Promise<{ success: boolean; message?: string }> => {
     const response = await apiClient.post('/api/plugin-manager/rename', { path, newName });
+    return response.data;
+  },
+};
+
+export interface BlocklyBlockConfig {
+  type: string;
+  message0?: string;
+  args0?: any[];
+  message1?: string;
+  args1?: any[];
+  previousStatement?: string | null;
+  nextStatement?: string | null;
+  output?: string | null;
+  colour?: number;
+  tooltip?: string;
+  helpUrl?: string;
+  inputsInline?: boolean;
+  mutator?: string;
+  extensions?: string[];
+  [key: string]: any;
+}
+
+export interface BlocklyConfigData {
+  blocks: BlocklyBlockConfig[];
+  toolbox: Record<string, any>;
+  colorHue: Record<string, number>;
+  inputTypes: Record<string, any>;
+}
+
+export const blocklyConfigApi = {
+  getBlockConfig: async (): Promise<{ success: boolean; data: BlocklyConfigData }> => {
+    const response = await apiClient.get('/api/blockly/config');
+    return response.data;
+  },
+};
+
+export interface BlocklyConfigStoreEntry {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  index_url: string;
+  sha256_hash: string;
+  update_time: string;
+}
+
+export interface BlocklyConfigStoreIndex {
+  repo_name: string;
+  description: string;
+  configs: BlocklyConfigStoreEntry[];
+}
+
+export interface InstalledPluginInfo {
+  name: string;
+  version: string;
+  type: 'lua' | 'blockly' | 'blockly_config';
+  install_time: string;
+}
+
+export const pluginStoreApi = {
+  getConfig: async (): Promise<{ success: boolean; data: { index_lua_url: string; index_blockly_url: string; index_blockly_config_url: string } }> => {
+    const response = await apiClient.get('/api/plugin-store/config');
+    return response.data;
+  },
+
+  installPlugin: async (params: { type: 'lua' | 'blockly'; name: string; version: string; index_url: string; sha256_hash: string }): Promise<{ success: boolean; message: string; data?: { type: string; name: string } }> => {
+    const response = await apiClient.post('/api/plugin-store/install', params);
+    return response.data;
+  },
+
+  getStatus: async (): Promise<{ success: boolean; data: Record<string, InstallStatus> }> => {
+    const response = await apiClient.get('/api/plugin-store/status');
+    return response.data;
+  },
+
+  getPluginStatus: async (name: string): Promise<{ success: boolean; data: InstallStatus }> => {
+    const response = await apiClient.get(`/api/plugin-store/status/${name}`);
+    return response.data;
+  },
+
+  cleanCache: async (): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.post('/api/plugin-store/cache/clean');
+    return response.data;
+  },
+
+  getCacheInfo: async (): Promise<{ success: boolean; data: { file_count: number; total_size: number; cache_dir: string } }> => {
+    const response = await apiClient.get('/api/plugin-store/cache/info');
+    return response.data;
+  },
+
+  getInstalledPlugins: async (): Promise<{ success: boolean; data: InstalledPluginInfo[] }> => {
+    const response = await apiClient.get('/api/plugin-store/installed');
+    return response.data;
+  },
+
+  uninstallPlugin: async (type: 'lua' | 'blockly' | 'blockly_config', name: string): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.post('/api/plugin-store/uninstall', { type, name });
     return response.data;
   },
 };

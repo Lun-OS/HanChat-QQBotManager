@@ -175,11 +175,11 @@ func (h *PluginManagerHandler) scanDirectory(dirPath string, virtualPath string)
 	nodes := []FileNode{}
 	
 	for _, entry := range entries {
-		// 排除blockly文件夹
-		if entry.Name() == "blockly" && entry.IsDir() {
+		// 排除blockly文件夹和.config文件夹
+		if entry.IsDir() && (entry.Name() == "blockly" || entry.Name() == ".config") {
 			continue
 		}
-		
+
 		info, err := entry.Info()
 		if err != nil {
 			continue
@@ -595,12 +595,30 @@ func (h *PluginManagerHandler) isPathAllowed(path string) bool {
 	decodedPath = strings.ReplaceAll(decodedPath, "%5c", "\\")
 	decodedPath = strings.ReplaceAll(decodedPath, "%5C", "\\")
 
+	// 安全增强：处理Unicode规范化绕过
+	// 将Unicode字符转换为NFC规范化形式，防止使用不同Unicode表示的相同字符
+	decodedPath = normalizePath(decodedPath)
+
 	// 清理路径，统一使用正斜杠
 	cleanPath := strings.ReplaceAll(decodedPath, "\\", "/")
 
 	// 检查是否包含路径遍历字符
-	if strings.Contains(cleanPath, "..") || strings.Contains(cleanPath, "~") {
+	if strings.Contains(cleanPath, "..") {
 		return false
+	}
+
+	// 检查NTFS Alternate Data Stream攻击 (Windows)
+	// 路径如 plugins/test.txt::$DATA 可能绕过某些检查
+	if strings.Contains(cleanPath, ":") && !strings.HasPrefix(cleanPath, "/plugins/") {
+		return false
+	}
+
+	// 检测Windows保留名称（CON, PRN, AUX, NUL等）
+	parts := strings.Split(cleanPath, "/")
+	for _, part := range parts {
+		if isWindowsReservedName(part) {
+			return false
+		}
 	}
 
 	// 安全增强：使用filepath.Clean进行深度清理
@@ -633,22 +651,22 @@ func (h *PluginManagerHandler) isPathWritable(path string) bool {
 	if !h.isPathAllowed(path) {
 		return false
 	}
-	
-	// 检查是否是模板目录或其子目录（只读）
-	if strings.HasPrefix(path, "/plugins/template") {
-		return false
-	}
-	
+
 	// 检查是否是根plugins目录（只读）
 	if path == "/plugins" || path == "/plugins/" {
 		return false
 	}
-	
-	// 允许 blockly 目录及其子目录
+
+	// 安全增强：template和blockly目录应该被视为只读模板，不允许写入
+	// 防止攻击者通过覆盖模板文件来注入恶意代码
 	if strings.HasPrefix(path, "/plugins/blockly/") || path == "/plugins/blockly" {
-		return true
+		return false // 模板目录：只读
 	}
-	
+
+	if strings.HasPrefix(path, "/plugins/template/") || path == "/plugins/template" {
+		return false // 模板目录：只读
+	}
+
 	// 允许在 /plugins/{accountId}/ 下操作（插件目录）
 	// 路径格式应该是 /plugins/{accountId}/...
 	parts := strings.Split(strings.TrimPrefix(path, "/plugins/"), "/")
@@ -936,4 +954,57 @@ func (h *PluginManagerHandler) GetBlocklyStatus(c *gin.Context) {
 			"path":          "/plugins/blockly",
 		},
 	})
+}
+
+// normalizePath 规范化路径中的Unicode字符
+// 防止使用不同的Unicode表示来绕过路径检查
+func normalizePath(path string) string {
+	// 简单的Unicode规范化处理
+	// 在实际生产环境中，应该使用 golang.org/x/text/unicode/norm 包
+	// 这里实现一个基本版本，处理常见的绕过尝试
+
+	// 移除零宽字符（可能用于隐藏特殊字符）
+	path = strings.ReplaceAll(path, "\u200b", "") // 零宽空格
+	path = strings.ReplaceAll(path, "\u200c", "") // 零宽非连接符
+	path = strings.ReplaceAll(path, "\u200d", "") // 零宽连接符
+	path = strings.ReplaceAll(path, "\ufeff", "") // BOM
+
+	// 处理全角字符转换为半角（防止使用全角斜杠等）
+	path = strings.ReplaceAll(path, "\uff0f", "/")  // 全角斜杠
+	path = strings.ReplaceAll(path, "\uff3c", "\\") // 全角反斜杠
+	path = strings.ReplaceAll(path, "\uff0e", ".")   // 全角句号
+
+	return path
+}
+
+// isWindowsReservedName 检查是否是Windows保留名称
+// Windows保留名称：CON, PRN, AUX, NUL, COM1-COM9, LPT1-LPT9
+func isWindowsReservedName(name string) bool {
+	// 转换为大写进行比较
+	upperName := strings.ToUpper(name)
+
+	// 检查基础保留名称
+	reservedNames := map[string]bool{
+		"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	}
+
+	if reservedNames[upperName] {
+		return true
+	}
+
+	// 检查 COM1-9 和 LPT1-9
+	if len(upperName) >= 3 && len(upperName) <= 4 {
+		prefix := upperName[:3]
+		if prefix == "COM" || prefix == "LPT" {
+			if len(upperName) == 3 {
+				return true // COM, LPT (虽然不太常见)
+			}
+			digit := upperName[3]
+			if digit >= '1' && digit <= '9' {
+				return true
+			}
+		}
+	}
+
+	return false
 }

@@ -47,10 +47,12 @@ export function getToolboxCategories(): any {
           block('event_on_message'),
           block('event_on_notice'),
           block('event_on_request'),
+          block('event_on_message_sent'),
         ]),
         subCategory('生命周期', 'event_category', [
           block('event_on_init'),
           block('event_on_destroy'),
+          block('event_on_lifecycle'),
         ]),
         subCategory('群事件', 'event_category', [
           block('event_on_group_admin'),
@@ -73,6 +75,28 @@ export function getToolboxCategories(): any {
           block('event_on_poke'),
           block('event_on_essence'),
         ]),
+        subCategory('扩展事件', 'event_category', [
+          block('event_on_input_status'),
+          block('event_on_profile_like'),
+        ]),
+        subCategory('事件解析', 'event_category', [
+          block('event_get_notice_type'),
+          block('event_get_sub_type'),
+          block('event_get_operator_id'),
+          block('event_get_target_id'),
+          block('event_get_duration'),
+          block('event_get_card_new'),
+          block('event_get_card_old'),
+          block('event_get_title_new'),
+          block('event_get_title_old'),
+          block('event_get_request_flag'),
+          block('event_get_comment'),
+          block('event_get_file_info'),
+          block('event_get_like_times'),
+          block('event_get_like_count'),
+          block('event_get_input_status_text'),
+          block('event_get_self_id'),
+        ]),
         subCategory('机器人状态', 'event_category', [
           block('event_on_bot_status'),
         ]),
@@ -94,6 +118,7 @@ export function getToolboxCategories(): any {
           block('msg_get_reply_id'),
           block('message_get_reply_id'),
           block('message_get_sender_role'),
+          block('msg_get_sender_temp_source'),
         ]),
         subCategory('消息判断', 'message_category', [
           block('msg_contains_text'),
@@ -622,12 +647,113 @@ export function getToolboxCategories(): any {
         block('simple_function_call'),
       ]),
 
+      category('拓展API', 'expand_category', [
+        subCategory('NapCat独有', 'expand_napcat_category', [
+          block('onebot_get_group_detail_info'),
+          block('onebot_get_group_info_ex'),
+          block('onebot_get_unidirectional_friend_list'),
+          block('onebot_set_group_portrait'),
+          block('onebot_set_group_add_option'),
+          block('onebot_get_clientkey'),
+          block('onebot_set_diy_online_status'),
+          block('onebot_set_input_status'),
+          block('onebot_mark_group_msg_as_read'),
+          block('onebot_mark_private_msg_as_read'),
+          block('onebot_send_group_ark_share'),
+          block('onebot_send_ark_share'),
+          block('onebot_get_online_clients'),
+          block('onebot_get_recent_contact'),
+          block('onebot_translate_en2zh'),
+          block('onebot_set_self_longnick'),
+          block('onebot_get_guild_list'),
+          block('onebot_set_group_todo'),
+          block('onebot_cancel_group_todo'),
+          block('onebot_complete_group_todo'),
+          block('onebot_set_group_kick_members'),
+        ]),
+        subCategory('LlBot独有', 'expand_llbot_category', [
+          block('onebot_delete_group_notice'),
+          block('onebot_batch_delete_group_member'),
+          block('onebot_get_group_album_list'),
+          block('onebot_create_group_album'),
+          block('onebot_delete_group_album'),
+          block('onebot_upload_group_album'),
+          block('onebot_get_flash_file_info'),
+          block('onebot_get_profile_like_me'),
+          block('onebot_get_qq_avatar'),
+          block('onebot_get_recommend_face'),
+          block('onebot_rename_group_file_folder'),
+          block('onebot_reshare_flash_file'),
+          block('onebot_scan_qrcode'),
+          block('onebot_send_pb'),
+          block('onebot_set_friend_category'),
+          block('onebot_set_group_file_forever'),
+          block('onebot_set_group_msg_mask'),
+          block('onebot_unset_msg_emoji_like'),
+          block('onebot_voice_msg_to_text'),
+        ]),
+        subCategory('共有拓展', 'expand_shared_category', [
+          block('onebot_get_group_notice'),
+          block('onebot_send_group_notice'),
+          block('onebot_create_group_file_folder'),
+          block('onebot_delete_essence_msg'),
+          block('onebot_delete_friend'),
+          block('onebot_delete_group_file'),
+          block('onebot_delete_group_folder'),
+          block('onebot_download_file'),
+          block('onebot_fetch_custom_face'),
+          block('onebot_forward_group_single_msg'),
+          block('onebot_forward_friend_single_msg'),
+          block('onebot_friend_poke'),
+          block('onebot_get_ai_characters'),
+          block('onebot_get_doubt_friends_add_request'),
+          block('onebot_get_essence_msg_list'),
+          block('onebot_get_file'),
+          block('onebot_get_friend_msg_history'),
+          block('onebot_get_friends_with_category'),
+          block('onebot_get_group_at_all_remain'),
+          block('onebot_get_group_info'),
+          block('onebot_get_group_shut_list'),
+          block('onebot_get_group_system_msg'),
+          block('onebot_get_group_msg_history'),
+          block('onebot_get_group_ignore_add_request'),
+          block('onebot_get_group_file_url'),
+          block('onebot_get_private_file_url'),
+          block('onebot_get_profile_like'),
+          block('onebot_get_rkey'),
+          block('onebot_get_robot_uin_range'),
+          block('onebot_group_poke'),
+          block('onebot_mark_msg_as_read'),
+          block('onebot_move_group_file'),
+          block('onebot_ocr_image'),
+          block('onebot_rename_group_file'),
+          block('onebot_send_group_ai_record'),
+          block('onebot_send_group_forward_msg'),
+          block('onebot_send_group_sign'),
+          block('onebot_send_poke'),
+          block('onebot_send_private_forward_msg'),
+          block('onebot_set_doubt_friends_add_request'),
+          block('onebot_set_essence_msg'),
+          block('onebot_set_friend_remark'),
+          block('onebot_set_group_remark'),
+          block('onebot_set_msg_emoji_like'),
+          block('onebot_set_online_status'),
+          block('onebot_set_qq_avatar'),
+          block('onebot_set_qq_profile'),
+          block('onebot_set_qq_profile_full'),
+          block('onebot_upload_group_file'),
+          block('onebot_upload_private_file'),
+        ]),
+      ]),
+
       category('高级API', 'advanced_category', [
         subCategory('API调用', 'advanced_category', [
           block('api_call_with_result'),
           block('api_call_with_var'),
           block('api_get_retcode'),
           block('api_is_success'),
+          block('api_get_result_field'),
+          block('api_get_result_data'),
         ]),
       ]),
     ],
@@ -637,12 +763,18 @@ export function getToolboxCategories(): any {
 export function searchBlocks(searchTerm: string): any[] {
   const allBlocks = getToolboxCategories().contents;
   const results: any[] = [];
+  const lowerTerm = searchTerm.toLowerCase();
 
   function searchInCategory(category: any) {
     if (category.contents) {
       for (const item of category.contents) {
         if (item.kind === 'block') {
-          if (item.type.toLowerCase().includes(searchTerm.toLowerCase())) {
+          const msgKey = 'BLOCKLY_' + item.type.toUpperCase();
+          const chineseLabel = (Blockly.Msg as any)[msgKey] || '';
+          if (
+            item.type.toLowerCase().includes(lowerTerm) ||
+            chineseLabel.toLowerCase().includes(lowerTerm)
+          ) {
             results.push(item);
           }
         } else if (item.kind === 'category') {
