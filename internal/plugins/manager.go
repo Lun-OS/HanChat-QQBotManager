@@ -395,6 +395,8 @@ type Manager struct {
 	fileCheckStop   chan struct{}
 	// 调度器管理器
 	schedulerManager *SchedulerManager
+	// MCP管理器（MCP客户端连接管理）
+	mcpManager *MCPManager
 }
 
 // NewManager 创建插件管理器
@@ -480,6 +482,9 @@ func NewManager(cfg *utils.Config, llService *services.LLOneBotService) *Manager
 
 	// 初始化调度器管理器
 	m.schedulerManager = NewSchedulerManager(m, m.logger, nil)
+
+	// 初始化MCP管理器
+	m.mcpManager = NewMCPManager(m.logger)
 
 	// 初始化HTTP接口管理器
 	m.httpInterfaceManager = NewHTTPInterfaceManager(m, m.logger)
