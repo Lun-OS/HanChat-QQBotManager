@@ -2667,7 +2667,8 @@ func (m *Manager) validatePluginPath(selfID string, pluginName string, filePath 
 	// 安全清理：统一使用正斜杠进行初步清理
 	// 防止通过编码绕过，如 ..%2f 或 ..\x2f
 	decodedPath := filePath
-	// 解码URL编码
+	// 注意：filePath 来自 Lua 脚本参数，非 HTTP URL 参数，无需 URL 解码。
+	// 手动替换 %2f/%5c 用于处理 Lua 脚本中可能传入的 URL 编码路径片段。
 	decodedPath = strings.ReplaceAll(decodedPath, "%2f", "/")
 	decodedPath = strings.ReplaceAll(decodedPath, "%2F", "/")
 	decodedPath = strings.ReplaceAll(decodedPath, "%5c", "\\")

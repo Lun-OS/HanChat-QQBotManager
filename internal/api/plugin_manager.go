@@ -4,15 +4,43 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"HanChat-QQBotManager/internal/services"
 )
+
+const (
+	// maxFileWriteSize 单次写入文件的最大内容大小（15MB）
+	maxFileWriteSize = 15 * 1024 * 1024
+	// maxFileCopySize 单次复制文件的最大大小（100MB）
+	maxFileCopySize = 100 * 1024 * 1024
+	// maxPathLength 路径最大长度
+	maxPathLength = 4096
+)
+
+// blockedFileExtensions 禁止上传/创建的文件后缀
+var blockedFileExtensions = map[string]bool{
+	".exe": true, ".dll": true, ".com": true, ".bat": true, ".cmd": true,
+	".sh": true, ".bash": true, ".zsh": true, ".ps1": true,
+	".so": true, ".dylib": true,
+	".php": true, ".php3": true, ".php4": true, ".php5": true, ".pht": true, ".phtml": true,
+	".pl": true, ".pm": true, ".py": true, ".pyc": true, ".pyo": true,
+	".rb": true, ".jsp": true, ".asp": true, ".aspx": true, ".cgi": true,
+	".wasm": true,
+	".app": true, ".msi": true, ".scr": true, ".pif": true, ".vbs": true, ".vbe": true,
+	".js": true, ".jse": true, ".wsf": true, ".wsh": true,
+}
+
+// hasBlockedExtension 检查文件路径是否包含被禁止的后缀
+func hasBlockedExtension(filePath string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	return blockedFileExtensions[ext]
+}
 
 // FileNode 文件节点结构
 type FileNode struct {
@@ -84,8 +112,13 @@ func (h *PluginManagerHandler) RegisterRoutes(r *gin.RouterGroup) {
 }
 
 // GetAvailableAccounts 获取可用账号列表（包含昵称和在线状态）
+// 安全说明：该路由已受 AuthMiddleware 保护，仅认证用户可访问。
+// 如果未来需要进一步限制，可在此处添加用户-账号权限映射。
 func (h *PluginManagerHandler) GetAvailableAccounts(c *gin.Context) {
 	accounts := []AccountInfo{}
+	
+	h.logger.Debugw("获取可用账号列表",
+		"client_ip", c.ClientIP())
 	
 	// 读取plugins目录下的所有子目录（排除template）
 	entries, err := os.ReadDir(h.basePath)
@@ -175,8 +208,8 @@ func (h *PluginManagerHandler) scanDirectory(dirPath string, virtualPath string)
 	nodes := []FileNode{}
 	
 	for _, entry := range entries {
-		// 排除blockly文件夹和.config文件夹
-		if entry.IsDir() && (entry.Name() == "blockly" || entry.Name() == ".config") {
+		// 排除 .config 文件夹（内部配置目录）
+		if entry.IsDir() && entry.Name() == ".config" {
 			continue
 		}
 
@@ -190,7 +223,7 @@ func (h *PluginManagerHandler) scanDirectory(dirPath string, virtualPath string)
 			Path:         filepath.Join(virtualPath, entry.Name()),
 			IsDirectory:  entry.IsDir(),
 			Size:         info.Size(),
-			ModifiedTime: info.ModTime().Format("2006-01-02 15:04:05"),
+			ModifiedTime: info.ModTime().UTC().Format("2006-01-02 15:04:05"),
 		}
 		
 		// 统一使用正斜杠
@@ -269,6 +302,19 @@ func (h *PluginManagerHandler) WriteFile(c *gin.Context) {
 		return
 	}
 	
+	// 安全检查：限制内容大小
+	if len(req.Content) > maxFileWriteSize {
+		h.logger.Warnw("写入内容超过大小限制", "size", len(req.Content), "limit", maxFileWriteSize)
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "message": "文件内容超过大小限制"})
+		return
+	}
+
+	// 安全检查：禁止上传可执行文件
+	if hasBlockedExtension(req.Path) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "该文件类型不允许上传"})
+		return
+	}
+
 	// 安全检查：确保路径可写
 	if !h.isPathWritable(req.Path) {
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "该路径为只读，无法写入"})
@@ -296,7 +342,10 @@ func (h *PluginManagerHandler) WriteFile(c *gin.Context) {
 		return
 	}
 	
-	h.logger.Infow("文件已写入", "path", req.Path)
+	h.logger.Infow("文件已写入",
+		"path", req.Path,
+		"client_ip", c.ClientIP(),
+		"size", len(req.Content))
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "文件保存成功"})
 }
 
@@ -331,6 +380,12 @@ func (h *PluginManagerHandler) CreateFile(c *gin.Context) {
 		return
 	}
 
+	// 安全检查：禁止创建可执行文件
+	if hasBlockedExtension(req.Name) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "该文件类型不允许创建"})
+		return
+	}
+
 	realPath := filepath.Join(realParentPath, req.Name)
 
 	// 最终安全检查：确保构建的路径仍在允许的范围内
@@ -339,12 +394,7 @@ func (h *PluginManagerHandler) CreateFile(c *gin.Context) {
 		return
 	}
 
-	// 检查是否已存在
-	if _, err := os.Stat(realPath); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "文件或文件夹已存在"})
-		return
-	}
-	
+	// 创建文件或文件夹（使用原子操作避免 TOCTOU 竞态条件）
 	if req.Type == "folder" {
 		if err := os.MkdirAll(realPath, 0755); err != nil {
 			h.logger.Errorw("创建文件夹失败", "error", err)
@@ -352,11 +402,16 @@ func (h *PluginManagerHandler) CreateFile(c *gin.Context) {
 			return
 		}
 	} else {
-		// 创建空文件
-		file, err := os.Create(realPath)
+		// 使用 O_CREATE|O_EXCL 原子操作创建文件
+		// 如果文件已存在，os.OpenFile 会返回错误，避免 TOCTOU（检查存在性后再创建的时间差）
+		file, err := os.OpenFile(realPath, os.O_RDONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
-			h.logger.Errorw("创建文件失败", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "创建文件失败"})
+			if os.IsExist(err) {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "message": "文件或文件夹已存在"})
+			} else {
+				h.logger.Errorw("创建文件失败", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "创建文件失败"})
+			}
 			return
 		}
 		file.Close()
@@ -399,7 +454,9 @@ func (h *PluginManagerHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	h.logger.Infow("删除成功", "path", path)
+	h.logger.Infow("删除成功",
+		"path", path,
+		"client_ip", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "删除成功"})
 }
 
@@ -440,7 +497,13 @@ func (h *PluginManagerHandler) CopyFile(c *gin.Context) {
 	
 	// 构建最终目标路径
 	finalTargetPath := filepath.Join(realTargetPath, filepath.Base(realSourcePath))
-	
+
+	// 安全检查：禁止复制文件到可执行文件扩展名
+	if !sourceInfo.IsDir() && hasBlockedExtension(finalTargetPath) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "目标文件类型不允许"})
+		return
+	}
+
 	// 检查目标是否已存在
 	if _, err := os.Stat(finalTargetPath); err == nil {
 		// 目标已存在
@@ -477,7 +540,11 @@ func (h *PluginManagerHandler) CopyFile(c *gin.Context) {
 		return
 	}
 	
-	h.logger.Infow("复制成功", "from", req.SourcePath, "to", req.TargetPath, "overwrite", req.Overwrite)
+	h.logger.Infow("复制成功",
+		"from", req.SourcePath,
+		"to", req.TargetPath,
+		"overwrite", req.Overwrite,
+		"client_ip", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "复制成功"})
 }
 
@@ -511,6 +578,12 @@ func (h *PluginManagerHandler) MoveFile(c *gin.Context) {
 	// 构建最终目标路径
 	finalTargetPath := filepath.Join(realTargetPath, filepath.Base(realSourcePath))
 
+	// 安全检查：禁止移动到可执行文件扩展名
+	if hasBlockedExtension(finalTargetPath) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "目标文件类型不允许"})
+		return
+	}
+
 	// 执行移动
 	if err := os.Rename(realSourcePath, finalTargetPath); err != nil {
 		h.logger.Errorw("移动失败", "error", err)
@@ -518,7 +591,10 @@ func (h *PluginManagerHandler) MoveFile(c *gin.Context) {
 		return
 	}
 	
-	h.logger.Infow("移动成功", "from", req.SourcePath, "to", req.TargetPath)
+	h.logger.Infow("移动成功",
+		"from", req.SourcePath,
+		"to", req.TargetPath,
+		"client_ip", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "移动成功"})
 }
 
@@ -552,6 +628,12 @@ func (h *PluginManagerHandler) RenameFile(c *gin.Context) {
 		return
 	}
 
+	// 安全检查：禁止重命名为可执行文件扩展名
+	if hasBlockedExtension(req.NewName) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "该文件类型不允许"})
+		return
+	}
+
 	parentDir := filepath.Dir(realPath)
 	newRealPath := filepath.Join(parentDir, req.NewName)
 
@@ -574,74 +656,19 @@ func (h *PluginManagerHandler) RenameFile(c *gin.Context) {
 		return
 	}
 	
-	h.logger.Infow("重命名成功", "path", req.Path, "newName", req.NewName)
+	h.logger.Infow("重命名成功",
+		"path", req.Path,
+		"newName", req.NewName,
+		"client_ip", c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "重命名成功"})
 }
 
 // 辅助函数：检查路径是否允许访问
 // 安全增强：防止路径遍历攻击
+// 注意：传入的 path 来自 Gin 的 c.Query() 或 JSON Body，Gin 已自动完成 URL 解码，
+// 此处不再重复解码，以避免解码不一致引入的绕过风险。
 func (h *PluginManagerHandler) isPathAllowed(path string) bool {
-	// 安全增强：解码URL编码，防止通过编码绕过路径检查
-	// 使用url.QueryUnescape解码所有URL编码字符（包括中文字符）
-	decodedPath, err := url.QueryUnescape(path)
-	if err != nil {
-		// 如果解码失败，使用原始路径继续处理
-		decodedPath = path
-	}
-
-	// 额外处理斜杠的URL编码（QueryUnescape可能不会解码这些）
-	decodedPath = strings.ReplaceAll(decodedPath, "%2f", "/")
-	decodedPath = strings.ReplaceAll(decodedPath, "%2F", "/")
-	decodedPath = strings.ReplaceAll(decodedPath, "%5c", "\\")
-	decodedPath = strings.ReplaceAll(decodedPath, "%5C", "\\")
-
-	// 安全增强：处理Unicode规范化绕过
-	// 将Unicode字符转换为NFC规范化形式，防止使用不同Unicode表示的相同字符
-	decodedPath = normalizePath(decodedPath)
-
-	// 清理路径，统一使用正斜杠
-	cleanPath := strings.ReplaceAll(decodedPath, "\\", "/")
-
-	// 检查是否包含路径遍历字符
-	if strings.Contains(cleanPath, "..") {
-		return false
-	}
-
-	// 检查NTFS Alternate Data Stream攻击 (Windows)
-	// 路径如 plugins/test.txt::$DATA 可能绕过某些检查
-	if strings.Contains(cleanPath, ":") && !strings.HasPrefix(cleanPath, "/plugins/") {
-		return false
-	}
-
-	// 检测Windows保留名称（CON, PRN, AUX, NUL等）
-	parts := strings.Split(cleanPath, "/")
-	for _, part := range parts {
-		if isWindowsReservedName(part) {
-			return false
-		}
-	}
-
-	// 安全增强：使用filepath.Clean进行深度清理
-	// 移除开头的斜杠以便filepath.Clean正确处理
-	trimmedPath := strings.TrimPrefix(cleanPath, "/")
-	cleanedPath := filepath.Clean(trimmedPath)
-
-	// 清理后再次检查路径遍历
-	if strings.Contains(cleanedPath, "..") {
-		return false
-	}
-
-	// 重建路径，确保以 / 开头
-	// 注意：在Windows上filepath.Clean会使用反斜杠，需要转换回正斜杠
-	cleanPath = "/" + strings.ReplaceAll(cleanedPath, "\\", "/")
-
-	// 只允许访问 /plugins/ 下的路径
-	// 使用严格的前缀检查，防止 /pluginsXXX 这样的绕过
-	if !strings.HasPrefix(cleanPath, "/plugins/") && cleanPath != "/plugins" && cleanPath != "/plugins/" {
-		return false
-	}
-
-	return true
+	return h.toRealPath(path) != ""
 }
 
 // 辅助函数：检查路径是否可写
@@ -657,14 +684,14 @@ func (h *PluginManagerHandler) isPathWritable(path string) bool {
 		return false
 	}
 
-	// 安全增强：template和blockly目录应该被视为只读模板，不允许写入
-	// 防止攻击者通过覆盖模板文件来注入恶意代码
+	// 允许在 /plugins/blockly/ 下操作（blockly 编辑）
 	if strings.HasPrefix(path, "/plugins/blockly/") || path == "/plugins/blockly" {
-		return false // 模板目录：只读
+		return true
 	}
 
+	// 允许在 /plugins/template/ 下操作（模板编辑）
 	if strings.HasPrefix(path, "/plugins/template/") || path == "/plugins/template" {
-		return false // 模板目录：只读
+		return true
 	}
 
 	// 允许在 /plugins/{accountId}/ 下操作（插件目录）
@@ -691,12 +718,6 @@ func (h *PluginManagerHandler) canCreateInPath(parentPath string, name string) b
 
 	// 安全限制：禁止在 /plugins 根目录下创建任何目录
 	if cleanParentPath == "/plugins" || cleanParentPath == "/plugins/" {
-		// blockly 目录由后端自动创建，前端不应该直接创建
-		return false
-	}
-
-	// 安全限制：禁止创建名为 "blockly" 的目录（保留名称）
-	if strings.EqualFold(cleanName, "blockly") {
 		return false
 	}
 
@@ -717,57 +738,51 @@ func (h *PluginManagerHandler) canCreateInPath(parentPath string, name string) b
 }
 
 // 辅助函数：检查字符串是否包含非法控制字符
+// 注意：仅检查底层字符是否非法，不涉及 URL 解码（Gin 已处理）
 func (h *PluginManagerHandler) containsIllegalChars(s string) bool {
 	// 检查空字符串或仅包含空白字符
 	if strings.TrimSpace(s) == "" {
 		return true
 	}
 
-	// 检查非法字符：控制字符、转义序列、特殊符号
-	illegalChars := []rune{
-		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-		0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13,
-		0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
-		0x1E, 0x1F, // C0 控制字符
-		0x7F,       // DEL 字符
-		'<', '>', '"', '|', '?', '*', // Windows 文件名非法字符
+	// 检查路径长度（最长为 4096 字符）
+	if len(s) > 4096 {
+		return true
 	}
 
+	// 检查非法字符：控制字符、Windows 文件名非法字符
+	// 注意：转义序列（如 \x00）在 Go 字符串中与对应的 rune 是等价的，
+	// 因此 rune 级别的检查已覆盖，无需重复检查字符串字面量。
 	for _, char := range s {
-		for _, illegal := range illegalChars {
-			if char == illegal {
-				return true
-			}
-		}
-	}
-
-	// 检查转义序列（如 \x00, \u0000, \n, \r, \t 等）
-	escapeSequences := []string{
-		"\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07",
-		"\x08", "\x09", "\x0A", "\x0B", "\x0C", "\x0D", "\x0E", "\x0F",
-		"\x10", "\x11", "\x12", "\x13", "\x14", "\x15", "\x16", "\x17",
-		"\x18", "\x19", "\x1A", "\x1B", "\x1C", "\x1D", "\x1E", "\x1F",
-		"\x7F",
-	}
-	for _, esc := range escapeSequences {
-		if strings.Contains(s, esc) {
+		// C0 控制字符 (0x00-0x1F) 和 DEL (0x7F)
+		if char <= 0x1F || char == 0x7F {
 			return true
 		}
-	}
-
-	// 检查 Unicode 控制字符和格式化字符
-	for _, r := range s {
 		// C1 控制字符 (U+0080 - U+009F)
-		if r >= 0x80 && r <= 0x9F {
+		if char >= 0x80 && char <= 0x9F {
 			return true
 		}
-		// 方向覆盖字符 (可能用于欺骗文件名显示)
-		if r >= 0x202A && r <= 0x202E {
+		// Windows 文件名非法字符
+		if char == '<' || char == '>' || char == '"' || char == '|' || char == '?' || char == '*' {
+			return true
+		}
+		// 方向覆盖字符（可能用于欺骗文件名显示）
+		if char >= 0x202A && char <= 0x202E {
 			return true
 		}
 		// 双向文本控制字符
-		if r == 0x200E || r == 0x200F || r == 0x061C {
+		if char == 0x200E || char == 0x200F || char == 0x061C {
 			return true
+		}
+	}
+
+	// Windows 下检查文件名末尾点号或空格（Windows 会自动删除，可能导致意外行为）
+	if runtime.GOOS == "windows" {
+		parts := strings.Split(s, "/")
+		for _, part := range parts {
+			if part != "" && (part[len(part)-1] == '.' || part[len(part)-1] == ' ') {
+				return true
+			}
 		}
 	}
 
@@ -775,92 +790,132 @@ func (h *PluginManagerHandler) containsIllegalChars(s string) bool {
 }
 
 // 辅助函数：将虚拟路径转换为真实路径
-// 安全增强：使用filepath.Clean进行深度清理，防止路径遍历攻击
+// 安全增强：不再重复 URL 解码（Gin/JSON 解析已完成），
+// 使用 filepath.Clean + filepath.Rel 进行严格的路径边界检查。
 func (h *PluginManagerHandler) toRealPath(virtualPath string) string {
-	// 检查是否包含非法控制字符
+	// 0. 基本输入校验
+	if virtualPath == "" {
+		return ""
+	}
+
+	// 1. 检查是否包含非法控制字符（在路径清理之前）
 	if h.containsIllegalChars(virtualPath) {
 		return ""
 	}
 
-	// 安全增强：解码URL编码，防止通过编码绕过路径检查
-	// 使用url.QueryUnescape解码所有URL编码字符（包括中文字符）
-	decodedPath, err := url.QueryUnescape(virtualPath)
-	if err != nil {
-		// 如果解码失败，使用原始路径继续处理
-		decodedPath = virtualPath
-	}
+	// 2. Unicode 规范化：处理零宽字符和全角字符绕过
+	cleanPath := sanitizeUnicodePath(virtualPath)
 
-	// 额外处理斜杠的URL编码（QueryUnescape可能不会解码这些）
-	decodedPath = strings.ReplaceAll(decodedPath, "%2f", "/")
-	decodedPath = strings.ReplaceAll(decodedPath, "%2F", "/")
-	decodedPath = strings.ReplaceAll(decodedPath, "%5c", "\\")
-	decodedPath = strings.ReplaceAll(decodedPath, "%5C", "\\")
+	// 3. 统一正斜杠
+	cleanPath = strings.ReplaceAll(cleanPath, "\\", "/")
 
-	// 统一使用正斜杠处理虚拟路径
-	decodedPath = strings.ReplaceAll(decodedPath, "\\", "/")
-
-	// 确保路径以 /plugins 开头（允许 /plugins 或 /plugins/）
-	if !strings.HasPrefix(decodedPath, "/plugins") {
+	// 4. 检查NTFS Alternate Data Stream攻击 (Windows)
+	if strings.Contains(cleanPath, ":") {
 		return ""
 	}
 
-	// 将 /plugins 转换为 /plugins/ 以便统一处理
-	if decodedPath == "/plugins" {
-		decodedPath = "/plugins/"
-	} else if !strings.HasPrefix(decodedPath, "/plugins/") {
-		// 防止 /pluginsXXX 这样的路径
+	// 5. 使用 filepath.Clean 进行深度清理（解析 . 和 ..）
+	//    移除开头的 / 后再 Clean，然后重新添加
+	trimmedPath := strings.TrimPrefix(cleanPath, "/")
+	cleanedPath := filepath.Clean(trimmedPath)
+
+	// 6. 检查清理后是否仍包含 .. 前缀（filepath.Clean 不会消除开头的 ..）
+	if strings.HasPrefix(cleanedPath, "..") {
 		return ""
 	}
 
-	// 安全增强：使用filepath.Clean进行深度路径清理
-	// 这比手动分割更安全，能处理更多边界情况
-	// 先移除开头的 /plugins/ 前缀，清理后再重新组合
-	relPath := strings.TrimPrefix(decodedPath, "/plugins/")
-	if relPath == decodedPath {
-		relPath = strings.TrimPrefix(decodedPath, "/plugins")
-	}
+	// 7. 重建虚拟路径（统一正斜杠）
+	cleanVirtualPath := "/" + strings.ReplaceAll(cleanedPath, "\\", "/")
 
-	// 使用filepath.Clean清理相对路径
-	// 这会规范化路径，解析 .. 和 . 并移除多余的斜杠
-	cleanRelPath := filepath.Clean(relPath)
-
-	// 清理后再次检查是否包含路径遍历
-	// filepath.Clean 会将 ".." 保留，但会规范化 "a/../b" 为 "b"
-	// 我们需要确保清理后的路径不以 ".." 开头
-	if strings.HasPrefix(cleanRelPath, "..") || strings.Contains(cleanRelPath, "../") || strings.Contains(cleanRelPath, "..") {
+	// 8. 必须位于 /plugins/ 下（严格前缀检查，防止 /pluginsXXX 绕过）
+	if cleanVirtualPath != "/plugins" && !strings.HasPrefix(cleanVirtualPath, "/plugins/") {
 		return ""
 	}
 
-	// 构建真实路径
-	realPath := filepath.Join(h.basePath, cleanRelPath)
+	// 9. 检测Windows保留名称
+	for _, part := range strings.Split(cleanVirtualPath, "/") {
+		if isWindowsReservedName(part) {
+			return ""
+		}
+	}
 
-	// 最终安全检查：确保解析后的路径仍在 basePath 内
-	// 使用绝对路径进行比较
-	absBasePath, err := filepath.Abs(h.basePath)
-	if err != nil {
+	// 10. 计算相对路径
+	relPath := strings.TrimPrefix(cleanVirtualPath, "/plugins/")
+	if relPath == "" || relPath == cleanVirtualPath {
+		// 路径就是 /plugins 或 /plugins/（根目录）
+		absBasePath, err := filepath.Abs(h.basePath)
+		if err != nil {
+			return ""
+		}
+		return filepath.Clean(absBasePath)
+	}
+
+	// 11. 路径长度检查
+	if len(relPath) > 4096 {
 		return ""
 	}
+
+	// 12. 构建真实路径用绝对路径验证边界
+	realPath := filepath.Join(h.basePath, relPath)
 	absRealPath, err := filepath.Abs(realPath)
 	if err != nil {
 		return ""
 	}
-
-	// 再次使用filepath.Clean确保路径完全规范化
-	absBasePath = filepath.Clean(absBasePath)
 	absRealPath = filepath.Clean(absRealPath)
 
-	// 确保路径以基础路径开头（防止路径遍历）
-	// Windows 路径比较不区分大小写
-	if !strings.EqualFold(absRealPath, absBasePath) &&
-		!strings.HasPrefix(strings.ToLower(absRealPath), strings.ToLower(absBasePath)+string(filepath.Separator)) {
+	// 13. 使用 filepath.Rel 验证路径归属（最可靠的边界检查）
+	baseAbs, err := filepath.Abs(h.basePath)
+	if err != nil {
+		return ""
+	}
+	baseAbs = filepath.Clean(baseAbs)
+
+	rel, err := filepath.Rel(baseAbs, absRealPath)
+	if err != nil {
+		return ""
+	}
+	if strings.HasPrefix(rel, "..") {
+		return ""
+	}
+
+	// 额外检查：确保相对路径确实在 base 目录下
+	// 用 filepath.Join 重建验证
+	verifiedPath := filepath.Join(baseAbs, rel)
+	if verifiedPath != absRealPath &&
+		!isPathCaseInsensitiveEqual(absRealPath, verifiedPath) {
 		return ""
 	}
 
 	return absRealPath
 }
 
+// isPathCaseInsensitiveEqual 判断两个路径是否"相等"，
+// 在 Windows 上大小写不敏感，在其他系统上大小写敏感。
+func isPathCaseInsensitiveEqual(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // 辅助函数：复制文件
 func (h *PluginManagerHandler) copyFile(src, dst string) error {
+	// 检查目标文件扩展名是否被禁止
+	if hasBlockedExtension(dst) {
+		return fmt.Errorf("目标文件类型不允许: %s", dst)
+	}
+
+	// 检查源文件大小，拒绝过大文件
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if srcInfo.Size() > maxFileCopySize {
+		return fmt.Errorf("文件过大（%d bytes），超过复制大小限制（%d bytes）", srcInfo.Size(), maxFileCopySize)
+	}
+
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -878,8 +933,12 @@ func (h *PluginManagerHandler) copyFile(src, dst string) error {
 	}
 	defer destFile.Close()
 	
-	_, err = io.Copy(destFile, sourceFile)
-	return err
+	// 使用 io.CopyN 限制读取大小，防止读取超大文件
+	_, err = io.CopyN(destFile, sourceFile, srcInfo.Size())
+	if err != nil && err != io.EOF {
+		return err
+	}
+	return nil
 }
 
 // 辅助函数：复制目录
@@ -956,9 +1015,9 @@ func (h *PluginManagerHandler) GetBlocklyStatus(c *gin.Context) {
 	})
 }
 
-// normalizePath 规范化路径中的Unicode字符
+// sanitizeUnicodePath 规范化路径中的Unicode字符
 // 防止使用不同的Unicode表示来绕过路径检查
-func normalizePath(path string) string {
+func sanitizeUnicodePath(path string) string {
 	// 简单的Unicode规范化处理
 	// 在实际生产环境中，应该使用 golang.org/x/text/unicode/norm 包
 	// 这里实现一个基本版本，处理常见的绕过尝试
