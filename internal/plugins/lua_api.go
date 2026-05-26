@@ -3056,7 +3056,7 @@ func (m *Manager) luaHttpRequest(selfID string, pluginName string) func(*lua.LSt
 
 		// 发送请求（带超时）
 		client := &http.Client{
-			Timeout: 2 * time.Second,
+			Timeout: 30 * time.Second,
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -3121,7 +3121,7 @@ func (m *Manager) luaHttpGet(pluginName string) func(*lua.LState) int {
 
 		// 发送请求（带超时）
 		client := &http.Client{
-			Timeout: 2 * time.Second,
+			Timeout: 30 * time.Second,
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -3197,7 +3197,7 @@ func (m *Manager) luaHttpPost(pluginName string) func(*lua.LState) int {
 
 		// 发送请求（带超时）
 		client := &http.Client{
-			Timeout: 2 * time.Second,
+			Timeout: 30 * time.Second,
 		}
 		resp, err := client.Do(req)
 		if err != nil {

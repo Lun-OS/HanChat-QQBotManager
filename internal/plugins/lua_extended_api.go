@@ -444,7 +444,7 @@ func (m *Manager) luaAIChat() func(*lua.LState) int {
 		}
 
 		client := &http.Client{
-			Timeout: 300 * time.Second,
+			Timeout: 120 * time.Second,
 		}
 
 		resp, err := client.Do(req)
