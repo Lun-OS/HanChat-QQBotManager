@@ -16,18 +16,15 @@ function isSafeUrl(url: string): string {
   try {
     const parsed = new URL(trimmed)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      console.warn('[Security] Blocked unsafe URL protocol:', parsed.protocol)
       return ''
     }
   } catch {
     // URL 构造失败说明格式不合法
-    console.warn('[Security] Invalid URL format:', trimmed)
     return ''
   }
 
   // 基本格式验证：防止包含控制字符或 HTML 实体注入
   if (/[\x00-\x1f<>"]/.test(trimmed)) {
-    console.warn('[Security] URL contains invalid characters')
     return ''
   }
 

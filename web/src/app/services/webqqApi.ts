@@ -118,32 +118,27 @@ interface AccountInfo {
 async function getFirstOnlineAccount(): Promise<AccountInfo | null> {
   try {
     const response = await apiClient.get<{ status: string; retcode: number; data?: AccountInfo[]; message?: string }>('/api/accounts')
-    console.log('[WebQQ] 获取账号列表响应:', response.data)
-    
+
     // 检查响应是否存在
     if (!response.data) {
-      console.error('[WebQQ] 获取账号列表失败: 响应为空')
       return null
     }
-    
+
     // 检查状态码，retcode 为 0 表示成功，同时检查 status 字段
     const isSuccess = response.data.retcode === 0 && (response.data.status === 'ok' || response.data.status === 'success')
     if (!isSuccess) {
-      console.error('[WebQQ] 获取账号列表失败:', response.data.message || response.data)
       return null
     }
-    
+
     if (!response.data.data || !Array.isArray(response.data.data)) {
-      console.error('[WebQQ] 获取账号列表失败: 数据格式不正确', response.data)
       return null
     }
-    
+
     const accounts = response.data.data
     // 找到第一个在线账号
     const onlineAccount = accounts.find(acc => acc.is_online)
     return onlineAccount || null
-  } catch (error) {
-    console.error('[WebQQ] 获取账号列表请求失败:', error)
+  } catch {
     return null
   }
 }
@@ -169,28 +164,25 @@ async function callBotAPI<T = any>(apiName: string, params?: Record<string, any>
   }
   
   const url = `/api/bot/${selfId}/${apiName}`
-  console.log(`[WebQQ] 调用API: ${url}`, params)
-  
+
   try {
     const response = await apiClient.post<{ status: string; retcode: number; data?: T; message?: string }>(url, params || {})
-    console.log(`[WebQQ] API响应 [${apiName}]:`, response.data)
-    
+
     // 检查响应是否存在
     if (!response.data) {
       throw new Error(`API调用失败 [${apiName}]: 响应为空`)
     }
-    
+
     // 检查状态码，同时支持 'ok' 和 'success' 作为成功状态
-    const isSuccess = response.data.retcode === 0 && 
+    const isSuccess = response.data.retcode === 0 &&
       (response.data.status === 'ok' || response.data.status === 'success')
-    
+
     if (!isSuccess) {
       throw new Error(response.data.message || `API调用失败 [${apiName}]: status=${response.data.status}, retcode=${response.data.retcode}`)
     }
-    
+
     return response.data.data as T
   } catch (error) {
-    console.error(`[WebQQ] API调用失败 [${apiName}]:`, error)
     throw error
   }
 }
@@ -206,43 +198,40 @@ export async function getLoginInfo(): Promise<LoginInfo> {
   
   // 使用获取到的 self_id 调用 get_login_info
   const url = `/api/bot/${account.self_id}/get_login_info`
-  console.log('[WebQQ] 获取登录信息:', url)
-  
+
   try {
     const response = await apiClient.post<{ status: string; retcode: number; data?: any; message?: string }>(url, {})
-    console.log('[WebQQ] 登录信息响应:', response.data)
-    
+
     // 检查响应是否存在
     if (!response.data) {
       throw new Error('获取登录信息失败: 响应为空')
     }
-    
+
     // 检查状态码，同时支持 'ok' 和 'success' 作为成功状态
-    const isSuccess = response.data.retcode === 0 && 
+    const isSuccess = response.data.retcode === 0 &&
       (response.data.status === 'ok' || response.data.status === 'success')
-    
+
     if (!isSuccess) {
       throw new Error(response.data.message || `获取登录信息失败: status=${response.data.status}, retcode=${response.data.retcode}`)
     }
-    
+
     const data = response.data.data
     if (!data) {
       throw new Error('获取登录信息失败: 数据为空')
     }
-    
+
     if (data.uid || data.user_id) {
       const uid = data.uid || String(data.user_id)
       const uin = data.uin || String(data.user_id)
       setSelfInfo(uid, uin)
     }
-    
+
     return {
       uid: data.uid || String(data.user_id),
       uin: data.uin || String(data.user_id),
       nick: data.nickname || data.nick || '',
     }
   } catch (error) {
-    console.error('[WebQQ] 获取登录信息失败:', error)
     throw error
   }
 }
@@ -601,7 +590,6 @@ export function createEventSource(
   const userId = selfUin || ''
 
   if (!selfId || !userId) {
-    console.warn('[SSE] 未登录，无法建立连接')
     const dummySource = {
       close: () => {},
       readyState: 2,
@@ -631,28 +619,23 @@ export function createEventSource(
       try {
         const data = JSON.parse(event.data)
         onMessage(data)
-      } catch (e) {
-        console.error('[SSE] 解析消息失败:', e)
+      } catch {
+        // 忽略消息解析失败
       }
     })
 
     eventSource.addEventListener('connected', () => {
-      console.log('[SSE] 连接已建立')
       reconnectAttempts = 0
     })
 
     eventSource.onopen = () => {
-      console.log('[SSE] 连接打开')
       if (reconnectAttempts > 0) {
-        console.log('[SSE] 重连成功')
         onReconnect?.()
       }
       reconnectAttempts = 0
     }
 
     eventSource.onerror = (error) => {
-      console.error('[SSE] 连接错误:', error)
-
       if (isClosed) return
 
       eventSource.close()
@@ -660,11 +643,8 @@ export function createEventSource(
       const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
       reconnectAttempts++
 
-      console.log(`[SSE] 将在 ${delay}ms 后尝试第 ${reconnectAttempts} 次重连...`)
-
       reconnectTimer = setTimeout(() => {
         if (!isClosed) {
-          console.log('[SSE] 正在重连...')
           connect()
         }
       }, delay)
@@ -685,7 +665,6 @@ export function createEventSource(
         reconnectTimer = null
       }
       eventSource.close()
-      console.log('[SSE] 连接已关闭')
     },
     get readyState() {
       return eventSource.readyState

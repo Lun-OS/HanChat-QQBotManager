@@ -29,8 +29,7 @@ export async function listBlocklyProjects(): Promise<BlocklyProjectFile[]> {
         .sort((a, b) => a.name.localeCompare(b.name));
     }
     return [];
-  } catch (error) {
-    console.error('Failed to list blockly projects:', error);
+  } catch {
     return [];
   }
 }
@@ -75,7 +74,6 @@ export async function createBlocklyProject(name: string): Promise<{ success: boo
     }
     return { success: false, message: res.message || 'Failed to create project folder' };
   } catch (error: any) {
-    console.error('Create project error:', error);
     // 检查错误消息是否包含已存在
     if (error?.message?.includes('已存在') || error?.message?.includes('exists') || error?.message?.includes('Conflict')) {
       return { success: false, exists: true, message: '项目已存在' };
@@ -93,8 +91,7 @@ export async function loadBlocklyProject(path: string): Promise<BlocklyProject |
       return project;
     }
     return null;
-  } catch (error) {
-    console.error('Failed to load blockly project:', error);
+  } catch {
     return null;
   }
 }
@@ -119,7 +116,6 @@ export async function saveBlocklyProject(project: BlocklyProject): Promise<{ suc
     }
     return { success: false, message: res.message || 'Failed to save project' };
   } catch (error: any) {
-    console.error('Save project error:', error);
     return { success: false, message: error.message || 'Unknown error' };
   }
 }
@@ -184,7 +180,7 @@ export async function exportPlugin(
         await pluginApi.unloadPlugin(targetAccountId, pluginName);
       } catch (e: any) {
         if (e?.status === 400) {
-          console.log(`插件 ${pluginName} 未运行或账号容器不存在，跳过卸载`);
+          // 插件未运行或账号容器不存在，跳过卸载
         }
       }
       // 注意：不再删除整个插件目录，只覆盖 main.lua 和 config.json

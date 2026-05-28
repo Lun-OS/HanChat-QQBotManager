@@ -41,6 +41,9 @@ type LogManager struct {
 	flushInterval time.Duration // 刷新间隔，默认 5秒
 	stopChan chan struct{} // 停止信号
 	wg sync.WaitGroup // 等待 goroutine 退出
+	// 日志写入回调（用于实时推送，如 WebSocket 日志流）
+	onLogWrite func(selfID string, level string, source string, message string, data map[string]interface{})
+	onLogWriteMu sync.RWMutex
 }
 
 // NewLogManager 创建日志管理器
@@ -83,6 +86,14 @@ func NewLogManager(baseLogger *zap.Logger, logsDir string) *LogManager {
 	return m
 }
 
+// SetLogWriteCallback 设置日志写入回调（用于实时推送）
+// 当任何日志通过 writeToFile 写入时，回调会被调用
+func (m *LogManager) SetLogWriteCallback(cb func(selfID string, level string, source string, message string, data map[string]interface{})) {
+	m.onLogWriteMu.Lock()
+	defer m.onLogWriteMu.Unlock()
+	m.onLogWrite = cb
+}
+
 // WriteWSLog 写入 WebSocket 日志
 // direction: "recv" 或 "send"
 // 过滤掉 ping/pong 消息
@@ -106,11 +117,65 @@ func (m *LogManager) WritePluginLog(selfID string, pluginName string, level stri
 	m.writeToFile(selfID, "plugin", logLine)
 }
 
+// WriteProxyLog 写入代理服务日志
+// 用于记录 proxy 模块的连接、API调用、事件处理等操作
+func (m *LogManager) WriteProxyLog(selfID string, adapterName string, level string, message string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [%s] %s\n", timestamp, adapterName, level, message)
+
+	m.writeToFile(selfID, "proxy", logLine)
+}
+
+// WriteLoginLog 写入登录日志
+// 记录登录、登出、Token验证等操作
+func (m *LogManager) WriteLoginLog(action string, username string, ip string, ua string, detail string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [IP:%s] [UA:%s] %s\n", timestamp, action, ip, ua, detail)
+
+	m.writeToFile("system", "login", logLine)
+}
+
+// WriteAPILog 写入接口调试日志
+// 记录插件自定义HTTP接口的请求和响应
+func (m *LogManager) WriteAPILog(selfID string, method string, path string, statusCode int, clientIP string, detail string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [%s] [status:%d] [IP:%s] %s\n", timestamp, method, path, statusCode, clientIP, detail)
+
+	m.writeToFile(selfID, "api", logLine)
+}
+
+// WritePluginOpLog 写入插件操作日志
+// 记录插件的启用、禁用、安装、卸载、配置修改等操作
+func (m *LogManager) WritePluginOpLog(selfID string, action string, pluginName string, operator string, detail string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [plugin:%s] [by:%s] %s\n", timestamp, action, pluginName, operator, detail)
+
+	m.writeToFile(selfID, "plugin_op", logLine)
+}
+
+// WriteFileOpLog 写入文件操作日志
+// 记录插件文件的创建、编辑、删除、复制、移动、重命名等操作
+func (m *LogManager) WriteFileOpLog(selfID string, action string, filePath string, operator string, detail string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [path:%s] [by:%s] %s\n", timestamp, action, filePath, operator, detail)
+
+	m.writeToFile(selfID, "file_op", logLine)
+}
+
+// WriteSettingLog 写入设置修改日志
+// 记录系统设置、外观、高级配置的修改
+func (m *LogManager) WriteSettingLog(category string, action string, operator string, detail string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] [%s] [category:%s] [by:%s] %s\n", timestamp, action, category, operator, detail)
+
+	m.writeToFile("system", "setting", logLine)
+}
+
 // writeToFile 写入日志文件和内存缓存（带缓冲）
 // logType: "ws" 或 "plugin"
 func (m *LogManager) writeToFile(selfID string, logType string, content string) {
 	date := time.Now().Format("2006-01-02")
-	
+
 	// 先写入内存缓存
 	cacheKey := fmt.Sprintf("%s:%s:%s", logType, selfID, date)
 	logLine := content
@@ -126,6 +191,13 @@ func (m *LogManager) writeToFile(selfID string, logType string, content string) 
 	}
 	m.logCache[cacheKey] = cache
 	m.logCacheMu.Unlock()
+
+	// 触发实时推送回调
+	m.onLogWriteMu.RLock()
+	if m.onLogWrite != nil {
+		m.onLogWrite(selfID, "INFO", logType, logLine, nil)
+	}
+	m.onLogWriteMu.RUnlock()
 
 	// 构建文件路径
 	filename := fmt.Sprintf("%s_%s_%s.log", selfID, logType, date)
@@ -435,32 +507,89 @@ func (m *LogManager) closeOldestFileHandles(count int) {
 	}
 }
 
-// GetLogs 获取日志内容（从内存缓存读取，不再读取磁盘文件）
-// logType: "ws" 或 "plugin"
+// GetLogs 获取日志内容（优先内存缓存，缓存不足时从磁盘文件读取）
+// logType: "ws" 或 "plugin" 或 "proxy" 等
 // date: 日期格式 "2006-01-02"，为空则使用今天
 func (m *LogManager) GetLogs(selfID string, logType string, date string, limit int) ([]string, error) {
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	// 如果没有限制，默认取50行
+	// 默认取 100 行
 	if limit <= 0 {
-		limit = 50
+		limit = 100
 	}
 
-	// 从内存缓存读取
+	// 先从内存缓存读取
 	cacheKey := fmt.Sprintf("%s:%s:%s", logType, selfID, date)
 	m.logCacheMu.RLock()
 	cache := m.logCache[cacheKey]
 	m.logCacheMu.RUnlock()
 
-	// 返回副本，避免外部修改
+	// 如果缓存足够，直接返回
+	if len(cache) >= limit {
+		result := make([]string, len(cache))
+		copy(result, cache)
+		if len(result) > limit {
+			result = result[len(result)-limit:]
+		}
+		return result, nil
+	}
+
+	// 缓存不足，从磁盘文件补充读取
 	result := make([]string, len(cache))
 	copy(result, cache)
 
+	// 读取日志文件
+	filename := fmt.Sprintf("%s_%s_%s.log", selfID, logType, date)
+	fileLines, err := m.readLogFileLines(filename)
+	if err != nil {
+		// 文件不存在或读取失败，返回已有缓存
+		if len(result) > limit {
+			result = result[len(result)-limit:]
+		}
+		return result, nil
+	}
+
+	// 合并缓存和文件内容（去重：以文件内容为准，缓存中的行如果在文件中也存在就跳过）
+	fileLineSet := make(map[string]bool, len(fileLines))
+	for _, l := range fileLines {
+		fileLineSet[l] = true
+	}
+
+	// 只保留缓存中不在文件中的行（通常是最近几条还没刷盘的新日志）
+	merged := fileLines
+	for _, l := range cache {
+		if !fileLineSet[l] {
+			merged = append(merged, l)
+		}
+	}
+
 	// 取最后 limit 行
-	if len(result) > limit {
-		result = result[len(result)-limit:]
+	if len(merged) > limit {
+		merged = merged[len(merged)-limit:]
+	}
+
+	return merged, nil
+}
+
+// readLogFileLines 从日志文件读取所有行
+func (m *LogManager) readLogFileLines(filename string) ([]string, error) {
+	filepath := filepath.Join(m.logsDir, filename)
+
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+
+	// 按行分割，去掉空行
+	lines := strings.Split(string(data), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if line != "" {
+			result = append(result, line)
+		}
 	}
 
 	return result, nil

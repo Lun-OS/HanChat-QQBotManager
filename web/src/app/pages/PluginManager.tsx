@@ -42,6 +42,13 @@ import {
 import { pluginManagerApi, type FileNode, type AccountInfo } from '../services/api';
 import { BlocklyEditor } from '../blockly';
 import { PluginStore } from '../components/PluginStore';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 
 loader.config({ monaco });
 
@@ -1280,7 +1287,6 @@ export function PluginManager() {
     setRightSelfId(tempSelfId);
     loadLeftFiles(rightSelfId);
     loadRightFiles(tempSelfId);
-    toast.success('已交换左右目录');
   };
 
   // 工具栏按钮组件
@@ -1296,18 +1302,19 @@ export function PluginManager() {
     return (
       <div className="flex items-center gap-2 p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#2A2E38]">
         {/* 账号选择 */}
-        <select
-          value={selfId}
-          onChange={(e) => onSelfIdChange(e.target.value)}
-          className="px-2 py-1 bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-white/[0.06] rounded text-sm outline-none text-gray-900 dark:text-white"
-        >
-          <option value="template">模板目录</option>
-          {availableAccounts.map(account => (
-            <option key={account.self_id} value={account.self_id}>
-              {account.nickname ? `${account.nickname}:${account.self_id}` : `机器人: ${account.self_id}`}
-            </option>
-          ))}
-        </select>
+        <Select value={selfId} onValueChange={(value) => onSelfIdChange(value)}>
+          <SelectTrigger className="w-[160px] h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="template">模板目录</SelectItem>
+            {availableAccounts.map(account => (
+              <SelectItem key={account.self_id} value={account.self_id}>
+                {account.nickname ? `${account.nickname}:${account.self_id}` : `机器人: ${account.self_id}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <div className="w-px h-4 bg-gray-200 dark:bg-white/[0.1] mx-1" />
 

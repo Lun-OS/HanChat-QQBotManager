@@ -341,7 +341,6 @@ export function ChatWindow({
           setTempMessages(prev => {
             const sendingMsgs = prev.filter(t => t.status === 'sending')
             if (sendingMsgs.length === 0) return prev
-            console.warn(`[SSE] 收到自己的消息时，仍存在 ${sendingMsgs.length} 条临时消息，现已清除`, sendingMsgs)
             return prev.filter(t => t.status !== 'sending')
           })
         }

@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"HanChat-QQBotManager/internal/config"
 	"HanChat-QQBotManager/internal/models"
+	"HanChat-QQBotManager/internal/services/proxy"
 	"HanChat-QQBotManager/internal/utils"
 )
 
@@ -743,6 +744,11 @@ func (s *ReverseWebSocketService) fetchBotInfo(selfID string) {
 			if err == nil {
 				account.SetVersionInfo(versionInfo)
 				s.logger.Infow("获取版本信息成功", "self_id", selfID, "app_name", versionInfo.AppName, "app_version", versionInfo.AppVersion)
+
+				// 同时更新 proxy 模块的 UA 版本信息
+				if versionInfo.AppName != "" || versionInfo.AppVersion != "" {
+					proxy.SetBotVersionInfo(versionInfo.AppName, versionInfo.AppVersion)
+				}
 			}
 		}
 	}
@@ -786,18 +792,9 @@ func (s *ReverseWebSocketService) fetchBotInfo(selfID string) {
 	}
 }
 
-// handleEvent 处理事件上报
-// 将事件分发给注册的处理器
-// 优化：减少内存分配，合并锁获取操作，使用对象池减少GC压力
+// handleEvent 处理事件上报（完整透传，不过滤任何消息包括心跳）
 func (s *ReverseWebSocketService) handleEvent(selfID string, eventData map[string]interface{}, rawData []byte) {
 	postType, _ := eventData["post_type"].(string)
-
-	if postType == "meta_event" {
-		metaEventType, _ := eventData["meta_event_type"].(string)
-		if metaEventType == "heartbeat" {
-			return
-		}
-	}
 
 	if _, ok := eventData["self_id"].(string); !ok {
 		eventData["_self_id"] = selfID
@@ -1314,6 +1311,16 @@ func (s *ReverseWebSocketService) AddRawEventHandler(handler func(selfID string,
 	s.rawEventHandlersMu.Lock()
 	defer s.rawEventHandlersMu.Unlock()
 	s.rawEventHandlers = append(s.rawEventHandlers, handler)
+}
+
+// GetBotVersion 获取任意在线机器人的版本号
+func (s *ReverseWebSocketService) GetBotVersion(_ string) string {
+	for _, account := range s.accountMgr.GetOnlineAccounts() {
+		if account.VersionInfo != nil && account.VersionInfo.AppVersion != "" {
+			return account.VersionInfo.AppVersion
+		}
+	}
+	return ""
 }
 
 // AddDebugResponseHandler 添加调试响应处理器

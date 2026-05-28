@@ -39,11 +39,9 @@ export function validateImageUrl(url: string | null | undefined, fallback: strin
       return trimmed
     }
     // 其他协议（javascript:, data:, vbscript: 等）均视为不安全
-    console.warn('[Security] Blocked unsafe URL protocol:', parsed.protocol)
     return fallback
   } catch {
     // URL 构造失败说明格式不合法
-    console.warn('[Security] Invalid URL format:', trimmed)
     return fallback
   }
 }
@@ -66,7 +64,6 @@ export function getSafeQQAvatarUrl(qqNumber: string | number | null | undefined,
 
   // 验证是否为纯数字（QQ 号码格式）
   if (!/^\d+$/.test(str)) {
-    console.warn('[Security] Invalid QQ number format for avatar:', str)
     return DEFAULT_AVATAR_URL
   }
 
@@ -94,7 +91,6 @@ export function getSafeGroupAvatarUrl(groupId: string | number | null | undefine
 
   // 验证是否为纯数字（群号格式）
   if (!/^\d+$/.test(str)) {
-    console.warn('[Security] Invalid group ID format for avatar:', str)
     return DEFAULT_AVATAR_URL
   }
 

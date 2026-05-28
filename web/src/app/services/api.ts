@@ -48,15 +48,6 @@ apiClient.interceptors.response.use(
         isApiError: true
       };
 
-      // 记录详细错误日志
-      console.error('API请求失败:', {
-        url: error.config?.url,
-        method: error.config?.method,
-        status,
-        responseData: data,
-        errorMessage: detailedError.message
-      });
-
       switch (status) {
         case 400:
           // 400 Bad Request - 让调用方通过 catch 处理业务逻辑
@@ -71,8 +62,8 @@ apiClient.interceptors.response.use(
           toast.error(detailedError.message || '权限不足');
           break;
         case 404:
-          toast.error('请求的资源不存在');
-          break;
+          // 404 可能是账号离线等正常业务状态，让调用方自行处理
+          return Promise.reject(detailedError);
         case 409:
           // 409 Conflict - 资源已存在，统一错误处理
           // 让调用方通过 catch 处理业务逻辑
@@ -103,7 +94,6 @@ apiClient.interceptors.response.use(
         originalError: error
       };
       toast.error(networkError.message);
-      console.error('网络错误:', error.request);
       return Promise.reject(networkError);
     } else {
       // 请求配置错误
@@ -113,7 +103,6 @@ apiClient.interceptors.response.use(
         originalError: error
       };
       toast.error(configError.message);
-      console.error('请求配置错误:', error.message);
       return Promise.reject(configError);
     }
   }
@@ -306,9 +295,9 @@ export const systemApi = {
     return response.data;
   },
 
-  // 获取版本信息
+  // 获取版本信息（HanChat版本）
   getVersion: async () => {
-    const response = await apiClient.get('/api/system/version');
+    const response = await apiClient.get('/api/version');
     return response.data;
   },
 
@@ -504,6 +493,22 @@ export interface AdminOperation {
   created_at: string;
 }
 
+export interface LogCleanupScope {
+  pluginLog: boolean;
+  loginLog: boolean;
+  fileOpLog: boolean;
+  pluginOpLog: boolean;
+  proxyLog: boolean;
+  botConnLog: boolean;
+}
+
+export interface LogCleanupConfig {
+  enabled: boolean;
+  interval: number;
+  retention: number;
+  scope: LogCleanupScope;
+}
+
 export const settingsApi = {
   // 获取系统日志
   getSystemLogs: async (page: number = 1, pageSize: number = 50, level?: string) => {
@@ -557,6 +562,16 @@ export const settingsApi = {
     return response.data;
   },
 
+  getLogCleanup: async (): Promise<{ success: boolean; data: LogCleanupConfig }> => {
+    const response = await apiClient.get('/api/settings/log-cleanup');
+    return response.data;
+  },
+
+  saveLogCleanup: async (config: LogCleanupConfig): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post('/api/settings/log-cleanup', config);
+    return response.data;
+  },
+
   getNetworkSpeed: async (): Promise<{ success: boolean; data: { uploadSpeed: number; downloadSpeed: number } }> => {
     const response = await apiClient.get('/api/system/network-speed');
     return response.data;
@@ -572,11 +587,34 @@ export const logApi = {
     const response = await apiClient.get('/api/logs/ws', { params });
     return response.data;
   },
+
+  // 获取日志流 WebSocket URL
+  // token 需要是 websocket_authorization（从 settingsApi.getSettings() 获取）
+  getLogStreamUrl: (selfId: string, token: string): string => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    return `${protocol}//${host}/api/logs/stream?self_id=${encodeURIComponent(selfId)}&token=${encodeURIComponent(token)}`;
+  },
+
   // 获取插件日志
   getPluginLogs: async (selfId: string, pluginName: string, limit?: number): Promise<{ status: string; retcode: number; data: { self_id: string; plugin_name: string; logs: string[]; total: number } }> => {
     const params: any = { self_id: selfId, plugin_name: pluginName };
     if (limit) params.limit = limit;
     const response = await apiClient.get('/api/logs/plugin', { params });
+    return response.data;
+  },
+  // 获取代理服务日志
+  getProxyLogs: async (selfId: string, limit?: number): Promise<{ status: string; retcode: number; data: { self_id: string; logs: string[]; total: number } }> => {
+    const params: any = { self_id: selfId };
+    if (limit) params.limit = limit;
+    const response = await apiClient.get('/api/logs/proxy', { params });
+    return response.data;
+  },
+  // 获取登录日志
+  getLoginLogs: async (limit?: number): Promise<{ status: string; retcode: number; data: { type: string; logs: string[]; total: number } }> => {
+    const params: any = {};
+    if (limit) params.limit = limit;
+    const response = await apiClient.get('/api/logs/login', { params });
     return response.data;
   },
 };
@@ -1635,6 +1673,89 @@ export const appearanceApi = {
 
   saveAppearance: async (data: { theme: string; fontSize: number; customCSS: Record<string, string> }) => {
     const response = await apiClient.post('/api/settings/appearance', data);
+    return response.data;
+  },
+};
+
+// 事件过滤器类型
+export interface EventFilterRule {
+  field: string;
+  value: string;
+  match_type: 'exact' | 'contain' | 'regex';
+  is_enabled: boolean;
+}
+
+export interface EventFilterConfig {
+  mode: 'whitelist' | 'blacklist';
+  is_enabled: boolean;
+  rules: EventFilterRule[];
+}
+
+// 接口代理API (NapCat多实例模式)
+export const proxyApi = {
+  // 获取完整配置
+  getConfig: async () => {
+    const response = await apiClient.get('/api/admin/proxy/config');
+    return response.data;
+  },
+
+  // 更新配置
+  updateConfig: async (config: any) => {
+    const response = await apiClient.put('/api/admin/proxy/config', config);
+    return response.data;
+  },
+
+  // 重载所有适配器
+  reloadAll: async () => {
+    const response = await apiClient.post('/api/admin/proxy/reload');
+    return response.data;
+  },
+
+  // 获取所有适配器列表
+  getAllAdapters: async () => {
+    const response = await apiClient.get('/api/admin/proxy/adapters');
+    return response.data;
+  },
+
+  // 获取单个适配器详情
+  getAdapter: async (name: string) => {
+    const response = await apiClient.get(`/api/admin/proxy/adapters/${name}`);
+    return response.data;
+  },
+
+  // 新增适配器
+  addAdapter: async (data: { type: string; config: any }) => {
+    const response = await apiClient.post('/api/admin/proxy/adapters', data);
+    return response.data;
+  },
+
+  // 更新适配器
+  updateAdapter: async (name: string, config: any) => {
+    const response = await apiClient.put(`/api/admin/proxy/adapters/${name}`, config);
+    return response.data;
+  },
+
+  // 删除适配器
+  removeAdapter: async (name: string) => {
+    const response = await apiClient.delete(`/api/admin/proxy/adapters/${name}`);
+    return response.data;
+  },
+
+  // 启用适配器
+  enableAdapter: async (name: string) => {
+    const response = await apiClient.post(`/api/admin/proxy/adapters/${name}/enable`);
+    return response.data;
+  },
+
+  // 禁用适配器
+  disableAdapter: async (name: string) => {
+    const response = await apiClient.post(`/api/admin/proxy/adapters/${name}/disable`);
+    return response.data;
+  },
+
+  // 重启适配器
+  restartAdapter: async (name: string) => {
+    const response = await apiClient.post(`/api/admin/proxy/adapters/${name}/restart`);
     return response.data;
   },
 };

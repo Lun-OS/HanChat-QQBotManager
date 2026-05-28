@@ -744,7 +744,6 @@ ${statements}end)
 
   generator.forBlock['msg_get_text_content'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
-    console.log('[Blockly Debug] msg_get_text_content generated:', `msg.get_plain_text(${message})`);
     return [`msg.get_plain_text(${message})`, generator.ORDER_HIGH];
   };
 
@@ -1495,7 +1494,7 @@ ${doCode}until ${condition}
 
   generator.forBlock['time_sleep'] = function(block: Blockly.Block) {
     const seconds = generator.valueToCode(block, 'SECONDS', generator.ORDER_NONE) || '0';
-    return `os.execute("sleep " .. ${seconds})\n`;
+    return `blockly_utils.sleep(${seconds})\n`;
   };
 
   // ========== 增强时间积木代码生成器 ==========
@@ -1671,13 +1670,40 @@ ${doCode}until ${condition}
   };
 
   // ========== 自定义Lua代码积木 ==========
+
+  /**
+   * 安全过滤 Lua 代码，防止执行危险系统命令。
+   * 将危险的函数调用替换为 error() 调用，阻止执行并给出明确提示。
+   */
+  const DANGEROUS_LUA_FUNCTIONS: Array<{ name: string; reason: string }> = [
+    { name: 'os.execute', reason: '禁止执行系统命令' },
+    { name: 'io.popen', reason: '禁止打开系统管道' },
+    { name: 'os.remove', reason: '禁止删除文件' },
+    { name: 'os.rename', reason: '禁止重命名文件' },
+    { name: 'os.exit', reason: '禁止退出进程' },
+    { name: 'os.tmpname', reason: '禁止创建临时文件' },
+    { name: 'dofile', reason: '禁止动态加载文件' },
+    { name: 'loadfile', reason: '禁止动态加载文件' },
+  ];
+
+  function sanitizeLuaCode(code: string): string {
+    if (!code) return code;
+    let sanitized = code;
+    for (const { name, reason } of DANGEROUS_LUA_FUNCTIONS) {
+      // 匹配函数调用: name( 或 name ( 等形式
+      const regex = new RegExp(name.replace('.', '\\.') + '\\s*\\(', 'g');
+      sanitized = sanitized.replace(regex, `error('[安全] ${name}: ${reason}') -- `);
+    }
+    return sanitized;
+  }
+
   generator.forBlock['lua_code'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') || '';
+    const code = sanitizeLuaCode(block.getFieldValue('CODE') || '');
     return code + '\n';
   };
 
   generator.forBlock['lua_code_output'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') || '';
+    const code = sanitizeLuaCode(block.getFieldValue('CODE') || '');
     return [`(function() ${code} end)()`, generator.ORDER_HIGH];
   };
 
@@ -2992,7 +3018,7 @@ ${statements}end
 
   // ========== 自定义Lua代码积木 ==========
   generator.forBlock['lua_code'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') || '';
+    const code = sanitizeLuaCode(block.getFieldValue('CODE') || '');
     // 处理多行代码，确保每行正确缩进
     const lines = code.split('\n');
     const processedLines = lines.map(line => line.trimRight());
@@ -3000,7 +3026,7 @@ ${statements}end
   };
 
   generator.forBlock['lua_code_expression'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') ?? 'nil';
+    const code = sanitizeLuaCode(block.getFieldValue('CODE') ?? 'nil');
     // 移除首尾空白，但保留内部格式
     const trimmedCode = code.trim();
     return [`(${trimmedCode})`, generator.ORDER_HIGH];
@@ -3008,7 +3034,7 @@ ${statements}end
 
   // 新版自定义Lua代码积木（带多行文本输入）
   generator.forBlock['lua_custom_code'] = function(block: Blockly.Block) {
-    const code = block.getFieldValue('CODE') || '';
+    const code = sanitizeLuaCode(block.getFieldValue('CODE') || '');
     // 直接原样输出，保留所有换行和格式
     return code + '\n';
   };

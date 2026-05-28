@@ -318,8 +318,8 @@ export const useWebQQStore = create<WebQQState>()(
             .sort((a, b) => b.time - a.time)
             .slice(0, 200)
           set({ notifications: merged })
-        } catch (e) {
-          console.error('加载通知失败:', e)
+        } catch {
+          // 忽略通知加载失败
         }
       },
 
@@ -501,8 +501,8 @@ export const useWebQQStore = create<WebQQState>()(
             }
           })
           set({ unreadCounts: newUnread })
-        } catch (e) {
-          console.error('Failed to refresh contacts:', e)
+        } catch {
+          // 忽略联系人刷新失败
         }
       },
 
@@ -631,7 +631,6 @@ export const useWebQQStore = create<WebQQState>()(
             return { recentChats: chats }
           })
         } catch (error: any) {
-          console.error('设置置顶失败:', error)
           throw error
         }
       },

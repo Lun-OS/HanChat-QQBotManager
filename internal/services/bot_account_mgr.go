@@ -15,10 +15,11 @@ import (
 // BotAccountManager 多账号管理器单例
 // 负责管理所有机器人账号的生命周期、连接状态和配置持久化
 type BotAccountManager struct {
-	mu       sync.RWMutex
-	accounts map[string]*models.BotAccount // key: self_id
-	logger   *zap.SugaredLogger
-	config   *config.AccountConfig
+	mu                   sync.RWMutex
+	accounts             map[string]*models.BotAccount // key: self_id
+	logger               *zap.SugaredLogger
+	config               *config.AccountConfig
+	onDisconnectCallbacks []func(selfID string)
 }
 
 var (
@@ -224,6 +225,13 @@ func (m *BotAccountManager) GetOnlineAccounts() map[string]*models.BotAccount {
 	return onlineAccounts
 }
 
+// OnDisconnect 注册离线回调
+func (m *BotAccountManager) OnDisconnect(callback func(selfID string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onDisconnectCallbacks = append(m.onDisconnectCallbacks, callback)
+}
+
 // DeleteAccount 删除账号
 func (m *BotAccountManager) DeleteAccount(selfID string) error {
 	m.mu.Lock()
@@ -282,6 +290,11 @@ func (m *BotAccountManager) HandleDisconnect(selfID string, reason error) {
 	}
 
 	m.logger.Infow("账号已标记为离线，保留在缓存中以便重连", "self_id", selfID)
+
+	// 触发离线回调（通知代理管理器断开相关WS连接）
+	for _, callback := range m.onDisconnectCallbacks {
+		go callback(selfID)
+	}
 }
 
 // GetOrCreateAccount 获取或创建账号

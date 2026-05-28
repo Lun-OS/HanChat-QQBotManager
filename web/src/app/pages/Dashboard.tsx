@@ -97,10 +97,7 @@ export function Dashboard() {
 
   const fetchPluginMemory = useCallback(async () => {
     try {
-      console.log('开始获取插件内存...');
       const allPluginsRes = await pluginApi.getAllPluginsWithMemory();
-      console.log('所有插件响应:', allPluginsRes);
-      
       if (!allPluginsRes.success || !Array.isArray(allPluginsRes.data)) return;
 
       const allPlugins: PluginMemoryInfo[] = [];
@@ -117,21 +114,19 @@ export function Dashboard() {
       }
 
       allPlugins.sort((a, b) => b.memory - a.memory);
-      console.log('最终插件列表:', allPlugins);
       setPluginMemories(allPlugins);
       setPluginMemTotal(totalMem);
-    } catch (e) {
-      console.error('获取插件内存失败:', e);
+    } catch {
+      // 忽略插件内存获取失败
     }
   }, []);
 
   const fetchInitialData = useCallback(async () => {
     try {
-      const [statusRes, infoRes, accountsRes, allPluginsRes] = await Promise.all([
+      const [statusRes, accountsRes, verRes] = await Promise.all([
         systemApi.getServerStatus(),
-        systemApi.getSystemInfo(),
         accountApi.getAccounts(),
-        pluginApi.getAllPluginsWithMemory(),
+        systemApi.getVersion(),
       ]);
 
       if (statusRes.success && statusRes.data) {
@@ -140,8 +135,8 @@ export function Dashboard() {
         setPrevDownload(statusRes.data.network.downloadBytes);
       }
 
-      if (infoRes.success && infoRes.data) {
-        setBackendVersion(infoRes.data.version);
+      if (verRes.success) {
+        setBackendVersion(verRes.version);
       }
 
       if ((accountsRes.status === 'ok' || accountsRes.success) && Array.isArray(accountsRes.data)) {
@@ -150,17 +145,10 @@ export function Dashboard() {
           accountsRes.data.filter((a: AccountData) => a.status === BotStatus.ONLINE).length
         );
       }
-
-      if (allPluginsRes.success && Array.isArray(allPluginsRes.data)) {
-        setRunningPluginCount(allPluginsRes.data.length);
-      }
-
-      await fetchPluginMemory();
-    } catch (error) {
-      console.error('获取初始数据失败:', error);
+    } catch {
       toast.error('获取系统信息失败');
     }
-  }, [fetchPluginMemory]);
+  }, []);
 
   const fetchNetworkSpeed = useCallback(async () => {
     try {
@@ -210,7 +198,6 @@ export function Dashboard() {
         });
 
         if (!response.ok || !response.body) {
-          console.warn(`[Dashboard SSE] 连接失败: HTTP ${response.status}，将使用轮询模式`);
           startPolling();
           return;
         }
@@ -271,7 +258,6 @@ export function Dashboard() {
         }
       } catch (error) {
         if ((error as Error).name === 'AbortError' || isCleanClose) return;
-        console.warn('[Dashboard SSE] 连接异常，将使用轮询模式:', error);
         startPolling();
       }
     })();
@@ -309,6 +295,10 @@ export function Dashboard() {
       await fetchInitialData();
       setIsLoading(false);
       connectSSE();
+      
+      setTimeout(() => {
+        fetchPluginMemory();
+      }, 1000);
     };
     init();
 
@@ -353,18 +343,14 @@ export function Dashboard() {
             <div className='px-4 pb-4 pt-2 flex flex-col gap-1'>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
                 <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>OS</div>
-                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.os || '-'}</div>
-              </div>
-              <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>平台</div>
-                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.platformFamily || '-'}</div>
+                <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.platform || os?.os || '-'}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
                 <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>内核版本</div>
                 <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{os?.kernelVersion || '-'}</div>
               </div>
               <div className='flex text-sm gap-3 py-2 items-baseline'>
-                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>后端版本</div>
+                <div className='w-24 font-medium text-gray-600 dark:text-gray-400'>软件版本</div>
                 <div className='text-xs font-mono flex-1 text-gray-900 dark:text-white font-medium'>{backendVersion || '-'}</div>
               </div>
             </div>
@@ -389,8 +375,8 @@ export function Dashboard() {
         </div>
 
         <div className={`${cardCls} lg:col-span-2`}>
-          <div className='overflow-visible md:flex-row gap-4 items-center justify-stretch p-4 flex flex-col md:flex-row'>
-            <div className='flex-1 w-full md:max-w-96'>
+          <div className='overflow-visible md:flex-row gap-8 items-center justify-center p-4 flex flex-col md:flex-row'>
+            <div className='w-full md:w-auto md:max-w-96'>
               <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 text-gray-900 dark:text-white'>
                 <Cpu className='text-xl text-default-500 dark:text-white/60' />
                 <span>CPU</span>
@@ -401,7 +387,7 @@ export function Dashboard() {
                 <StatusItem title='使用率' value={cpu?.usagePercent?.toFixed(1) ?? '-'} unit='%' />
               </div>
 
-              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 mt-4 text-gray-900 dark:text-white'>
+              <h2 className='text-lg font-semibold flex items-center gap-2 mb-2 mt-8 text-gray-900 dark:text-white'>
                 <HardDrive className='text-xl text-default-500 dark:text-white/60' />
                 <span>内存</span>
               </h2>
@@ -455,7 +441,7 @@ export function Dashboard() {
             <MemoryStick className='text-lg text-default-500 dark:text-white/60' />
             <span>Lua插件内存</span>
             <span className='ml-auto text-xs font-normal text-gray-500'>
-              暂不支持
+              预留
             </span>
           </div>
           <div className='px-4 pb-4 pt-2 flex flex-col gap-1 max-h-48 overflow-y-auto'>

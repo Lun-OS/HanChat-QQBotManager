@@ -60,6 +60,13 @@ import Editor from '@monaco-editor/react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { multilineEditorBridge } from './multilineEditorBridge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 
 initChineseLocale();
 initLuaGenerator();
@@ -121,7 +128,6 @@ export const BlocklyEditor: React.FC<BlocklyEditorProps> = ({ onExport, onUnsave
   const setClipboardContent = (content: string | null) => {
     // 如果内容过大，进行截断或清理
     if (content && content.length > CLIPBOARD_MAX_SIZE) {
-      console.warn('剪贴板内容过大，已截断');
       content = content.substring(0, CLIPBOARD_MAX_SIZE);
     }
     setBlockClipboard(content);
@@ -4871,11 +4877,8 @@ CQ 码是 QQ 消息中的特殊格式：
       if (result.config && result.config.blocks.length > 0) {
         reinitializeBlocks(result.config.blocks);
       }
-      if (result.error) {
-        console.warn('Blockly配置加载提示:', result.error);
-      }
-    } catch (error) {
-      console.error('加载Blockly配置失败:', error);
+    } catch {
+      // 忽略配置加载失败
     } finally {
       setConfigReady(true);
     }
@@ -4898,8 +4901,8 @@ CQ 码是 QQ 消息中的特殊格式：
           
           try {
             Blockly.Xml.domToWorkspace(currentXml, workspaceRef.current);
-          } catch (e) {
-            console.error('重新加载工作区失败:', e);
+          } catch {
+            // 忽略工作区重新加载失败
           }
         }
         toast.success('积木配置已更新');
@@ -5040,8 +5043,8 @@ CQ 码是 QQ 消息中的特殊格式：
         setAvailableAccounts(res.data);
         setSelectedAccountId(res.data[0].self_id);
       }
-    } catch (error) {
-      console.error('Failed to load accounts:', error);
+    } catch {
+      // 忽略账号加载失败
     }
   };
 
@@ -5564,8 +5567,7 @@ CQ 码是 QQ 消息中的特殊格式：
       workspace.render();
       toast.success(`成功粘贴 ${blockCount} 个积木`);
       
-    } catch (error) {
-      console.error('粘贴失败:', error);
+    } catch {
       toast.error('粘贴失败，请重试');
       // 出错时也清理剪贴板，避免重复尝试同样的错误内容
       setClipboardContent(null);
@@ -5672,8 +5674,8 @@ CQ 码是 QQ 消息中的特殊格式：
       try {
         const code = generateLuaCode(workspaceRef.current, metadata);
         setGeneratedCode(code.full);
-      } catch (error) {
-        console.error('代码生成失败:', error);
+      } catch {
+        // 忽略代码生成失败
       }
     }, 300);
   }, []);
@@ -5729,13 +5731,13 @@ CQ 码是 QQ 消息中的特殊格式：
           if (project.xmlContent) {
             try {
               let xml = Blockly.utils.xml.textToDom(project.xmlContent);
-              
+
               // 修复旧块
               xml = fixOldBlockXml(xml);
-              
+
               Blockly.Xml.domToWorkspace(xml, workspaceRef.current);
-            } catch (e) {
-              console.error('Failed to load workspace XML:', e);
+            } catch {
+              // 忽略工作区XML加载失败
             }
           }
         }
@@ -5745,8 +5747,7 @@ CQ 码是 QQ 消息中的特殊格式：
       } else {
         toast.error('无法加载项目');
       }
-    } catch (error) {
-      console.error('Load project error:', error);
+    } catch {
       toast.error('加载项目失败');
     } finally {
       setLoading(false);
@@ -5881,8 +5882,7 @@ CQ 码是 QQ 消息中的特殊格式：
       } else {
         toast.error(result.message || '重命名失败');
       }
-    } catch (error) {
-      console.error('Rename project error:', error);
+    } catch {
       toast.error('重命名失败');
     } finally {
       setLoading(false);
@@ -6528,17 +6528,18 @@ CQ 码是 QQ 消息中的特殊格式：
                 
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">目标机器人</label>
-                  <select
-                    value={selectedAccountId}
-                    onChange={(e) => setSelectedAccountId(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#2A2E38] border border-gray-600 rounded-lg text-white outline-none"
-                  >
-                    {availableAccounts.map((account) => (
-                      <option key={account.self_id} value={account.self_id}>
-                        {account.nickname ? `${account.nickname}:${account.self_id}` : account.self_id}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={selectedAccountId} onValueChange={(value) => setSelectedAccountId(value)}>
+                    <SelectTrigger className="w-full bg-[#2A2E38] border-gray-600 text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableAccounts.map((account) => (
+                        <SelectItem key={account.self_id} value={account.self_id}>
+                          {account.nickname ? `${account.nickname}:${account.self_id}` : account.self_id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div>

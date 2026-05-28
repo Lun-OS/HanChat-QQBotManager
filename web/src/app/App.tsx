@@ -1,19 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
 import { AnimatePresence } from 'motion/react';
-import { Login } from './pages/Login';
-import { Dashboard } from './pages/Dashboard';
-import { BotDetail } from './pages/BotDetail';
-import { BotList } from './pages/BotList';
-import { Settings } from './pages/Settings';
-import { PluginManager } from './pages/PluginManager';
-import { WebQQ } from './pages/WebQQ';
 import { MainLayout } from './components/layout/MainLayout';
 import { useAuthStore } from './stores/authStore';
 import { authApi } from './services/api';
 import { Loader2 } from 'lucide-react';
+
+const Login = lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const BotDetail = lazy(() => import('./pages/BotDetail').then(m => ({ default: m.BotDetail })));
+const BotList = lazy(() => import('./pages/BotList').then(m => ({ default: m.BotList })));
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
+const PluginManager = lazy(() => import('./pages/PluginManager').then(m => ({ default: m.PluginManager })));
+const WebQQ = lazy(() => import('./pages/WebQQ').then(m => ({ default: m.WebQQ })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
@@ -76,24 +77,63 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <div className="flex flex-col items-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <span className="text-gray-500">加载中...</span>
+      </div>
+    </div>
+  );
+}
+
 function AnimatedRoutes() {
   const location = useLocation();
 
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={
+          <Suspense fallback={<PageLoader />}>
+            <Login />
+          </Suspense>
+        } />
         <Route element={
           <ProtectedRoute>
             <MainLayout />
           </ProtectedRoute>
         }>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/bots" element={<BotList />} />
-          <Route path="/bot/:selfId" element={<BotDetail />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/plugins" element={<PluginManager />} />
-          <Route path="/webqq" element={<WebQQ />} />
+          <Route path="/" element={
+            <Suspense fallback={<PageLoader />}>
+              <Dashboard />
+            </Suspense>
+          } />
+          <Route path="/bots" element={
+            <Suspense fallback={<PageLoader />}>
+              <BotList />
+            </Suspense>
+          } />
+          <Route path="/bot/:selfId" element={
+            <Suspense fallback={<PageLoader />}>
+              <BotDetail />
+            </Suspense>
+          } />
+          <Route path="/settings" element={
+            <Suspense fallback={<PageLoader />}>
+              <Settings />
+            </Suspense>
+          } />
+          <Route path="/plugins" element={
+            <Suspense fallback={<PageLoader />}>
+              <PluginManager />
+            </Suspense>
+          } />
+          <Route path="/webqq" element={
+            <Suspense fallback={<PageLoader />}>
+              <WebQQ />
+            </Suspense>
+          } />
         </Route>
       </Routes>
     </AnimatePresence>
@@ -111,7 +151,14 @@ export default function App() {
             <div className='absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] rounded-full bg-pink-200/30 blur-[110px]' />
           </div>
           <AnimatedRoutes />
-          <Toaster position="top-center" richColors />
+          <Toaster
+            position="top-right"
+            richColors
+            style={{
+              opacity: 0.8,
+              pointerEvents: 'none',
+            }}
+          />
         </div>
       </HashRouter>
     </ThemeProvider>

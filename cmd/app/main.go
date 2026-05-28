@@ -25,6 +25,7 @@ import (
 	"HanChat-QQBotManager/internal/middleware"
 	"HanChat-QQBotManager/internal/plugins"
 	"HanChat-QQBotManager/internal/services"
+	"HanChat-QQBotManager/internal/services/proxy"
 	"HanChat-QQBotManager/internal/utils"
 )
 
@@ -33,6 +34,10 @@ const (
 	colorRed    = "\033[31m"
 	colorYellow = "\033[33m"
 	colorReset  = "\033[0m"
+
+	// HanChat 版本信息（统一管理）
+	AppName    = "HanChat"
+	AppVersion = "26.5.28"
 )
 
 // LogWriter 日志写入器
@@ -195,6 +200,15 @@ func main() {
 		})
 	})
 
+	// 版本信息API（无需认证）
+	r.GET("/api/version", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"success":  true,
+			"name":    AppName,
+			"version": AppVersion,
+		})
+	})
+
 	// ========== 多账号核心模块初始化 ==========
 	// 初始化账号配置管理器
 	accountConfig := config.NewAccountConfig("config.json")
@@ -203,15 +217,20 @@ func main() {
 	accountMgr := services.GetBotAccountManager(baseLogger, accountConfig)
 
 	// ========== Web登录系统（替代MySQL） ==========
+	// ========== 日志管理器 ==========
+	logManager := services.NewLogManager(baseLogger, "./logs")
+
+	// ========== 日志自动清理服务 ==========
+	logCleanupSvc := services.NewLogCleanupService(baseLogger, accountConfig, "./logs")
+	logCleanupSvc.Start()
+	defer logCleanupSvc.Stop()
+
 	// 初始化验证码服务
 	captchaSvc := services.NewCaptchaService(baseLogger)
 	// 初始化新的Web登录服务（基于环境变量 + 验证码）
 	webLoginSvc := services.NewWebLoginService(baseLogger, captchaSvc)
-	webLoginHandler := api.NewWebLoginHandler(baseLogger, webLoginSvc, captchaSvc)
+	webLoginHandler := api.NewWebLoginHandler(baseLogger, webLoginSvc, captchaSvc, logManager)
 	webLoginHandler.RegisterRoutes(r.Group("/api"))
-
-	// ========== 日志管理器 ==========
-	logManager := services.NewLogManager(baseLogger, "./logs")
 
 	// ========== 反向WebSocket服务端 ==========
 	// 从已经加载的配置获取 Token
@@ -220,6 +239,18 @@ func main() {
 	// 创建反向WebSocket服务
 	reverseWS := services.NewReverseWebSocketService(baseLogger, accountMgr, accountConfig, globalToken)
 	reverseWS.SetLogManager(logManager)
+
+	// 设置日志实时推送回调：所有日志写入时同步广播到 WebSocket 订阅者
+	logManager.SetLogWriteCallback(func(selfID string, level string, source string, message string, data map[string]interface{}) {
+		reverseWS.BroadcastLog(services.LogEntry{
+			SelfID:  selfID,
+			Level:   level,
+			Message: message,
+			Source:  source,
+			Time:    time.Now(),
+			Data:    data,
+		})
+	})
 
 	// ========== 插件系统（多账号隔离）==========
 	// 使用新的反向WebSocket服务
@@ -255,6 +286,11 @@ func main() {
 	} else {
 		appLogger.Warn("WebSocket调试服务创建失败，跳过调试路由注册")
 	}
+
+	// ========== 日志流WebSocket服务 ==========
+	logStreamHandler := api.NewWebSocketLogsHandler(baseLogger, reverseWS, globalToken)
+	logStreamHandler.RegisterRoutes(r)
+	appLogger.Infow("日志流WebSocket服务已启动", "path", "/api/logs/stream")
 
 	// 自动启动预配置的插件
 	pm.AutoStartPlugins()
@@ -312,7 +348,26 @@ func main() {
 	multiAccountHandler := api.NewMultiAccountHandler(baseLogger, accountMgr, reverseWS)
 	multiAccountHandler.RegisterRoutes(apiGroup)
 
-	// 创建SSE客户端
+	// ========== 接口代理管理器 (NapCat多实例模式) ==========
+	proxyManager := proxy.NewProxyManager(reverseWS, baseLogger, "config/proxy.json", cfg.Server.Port, AppVersion, logManager.WriteProxyLog)
+	if err := proxyManager.Start(); err != nil {
+		appLogger.Warnw("接口代理启动失败", "error", err)
+	}
+	defer proxyManager.Stop()
+
+	proxyAdminHandler := api.NewProxyAdminHandler(proxyManager, baseLogger)
+	proxyAdminHandler.RegisterRoutes(apiGroup)
+
+	// 注册机器人离线回调：自动断开代理适配器的WS连接
+	accountMgr.OnDisconnect(func(selfID string) {
+		proxyManager.HandleBotDisconnect(selfID)
+	})
+
+	// 注册WS正向适配器路由到主Web服务（避免端口冲突）
+	proxyManager.RegisterRoutes(r)
+	appLogger.Infow("接口代理管理器已启动 (NapCat多实例模式)")
+
+	// 创建SSEClient
 	sseClient := services.NewSSEClient(reverseWS, baseLogger, pm)
 	sseClient.Start()
 
@@ -327,13 +382,14 @@ func main() {
 	r.GET("/", func(c *gin.Context) { c.File("./web/index.html") })
 
 	// 对于非API路径，返回index.html让前端HashRouter处理（前端使用HashRouter，路径格式为/#/xxx）
-	// 排除 /assets, /api, /ws 等已知路径
+	// 排除 /assets, /api, /ws, /onebot, /health 等已知路径
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
-		// 排除已知路径前缀
+		// 排除已知路径前缀（包括代理适配器路径）
 		if strings.HasPrefix(path, "/assets/") ||
 			strings.HasPrefix(path, "/api/") ||
 			strings.HasPrefix(path, "/ws/") ||
+			strings.HasPrefix(path, "/onebot/") ||
 			strings.HasPrefix(path, "/health") {
 			c.JSON(404, gin.H{"success": false, "message": "Not Found"})
 			return

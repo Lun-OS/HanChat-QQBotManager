@@ -32,6 +32,13 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { validateImageUrl, getSafeQQAvatarUrl, getSafeGroupAvatarUrl } from '../utils/security';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 
 // ==================== 类型定义 ====================
 type TabType = 'recent' | 'friends' | 'groups';
@@ -138,8 +145,8 @@ const cacheMessages = (selfId: string, chatType: ChatType, targetId: string, mes
   const key = `webqq_messages:${selfId}:${chatType}:${targetId}`;
   try {
     localStorage.setItem(key, JSON.stringify(messages.slice(-MAX_CACHED_MESSAGES)));
-  } catch (e) {
-    console.warn('缓存消息失败:', e);
+  } catch {
+    // 忽略缓存失败
   }
 };
 
@@ -155,8 +162,8 @@ const getCachedSessions = (): ChatSession[] => {
 const cacheSessions = (sessions: ChatSession[]) => {
   try {
     localStorage.setItem('webqq_recent_sessions', JSON.stringify(sessions.slice(0, 50)));
-  } catch (e) {
-    console.warn('缓存会话失败:', e);
+  } catch {
+    // 忽略缓存失败
   }
 };
 
@@ -262,7 +269,6 @@ const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: stri
         });
 
         if (!response.ok || !response.body) {
-          console.error(`SSE 连接失败: HTTP ${response.status}`);
           setIsConnected(false);
           return;
         }
@@ -292,8 +298,8 @@ const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: stri
                     if (parsedData.message_id) {
                       setLastMessage(parsedData);
                     }
-                  } catch (parseError) {
-                    console.error('解析消息失败:', parseError);
+                  } catch {
+                    // 忽略消息解析失败
                   }
                 }
               }
@@ -305,7 +311,6 @@ const useSSE = (selfId: string | null, chatType: ChatType | null, targetId: stri
         }
       } catch (error) {
         if ((error as Error).name === 'AbortError' || isCleanClose) return;
-        console.error('SSE 连接异常:', error);
       } finally {
         setIsConnected(false);
 
@@ -579,7 +584,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
   const renderMessageContent = useCallback((message: MessageSegment[]) => {
     if (!Array.isArray(message)) {
       const safeText = sanitizeHtml(String(message || ''));
-      return <p className="text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: safeText }} />;
+      return <p className="text-sm whitespace-pre-wrap">{safeText}</p>;
     }
 
     return (
@@ -588,7 +593,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
           switch (segment.type) {
             case 'text':
               const safeText = sanitizeHtml(segment.data?.text || '');
-              return <span key={index} className="text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: safeText }} />;
+              return <span key={index} className="text-sm whitespace-pre-wrap">{safeText}</span>;
             
             case 'image':
               const imgUrl = segment.data?.url || segment.data?.file;
@@ -660,7 +665,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
                     <span className="text-gray-800 text-xs font-bold dark:text-white">FILE</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-gray-800 truncate dark:text-white" dangerouslySetInnerHTML={{ __html: fileName }} />
+                    <div className="text-sm text-gray-800 truncate dark:text-white">{fileName}</div>
                     <div className="text-xs text-gray-500">{segment.data?.size ? `${(segment.data.size / 1024).toFixed(1)} KB` : ''}</div>
                   </div>
                 </div>
@@ -671,7 +676,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="my-1 p-2 bg-white rounded-lg border-l-4 border-gray-300 dark:bg-white/[0.06] dark:border-white/30">
                   <div className="text-xs text-gray-500 mb-1">转发消息</div>
-                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: forwardContent }} dark:text-white" />
+                  <div className="text-sm text-gray-800 dark:text-white">{forwardContent}</div>
                 </div>
               );
             
@@ -682,7 +687,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
                 return (
                   <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                     <div className="text-xs text-gray-500 mb-1">JSON消息</div>
-                    <div className="text-sm text-gray-800 truncate dangerouslySetInnerHTML={{ __html: jsonPrompt }} dark:text-white" />
+                    <div className="text-sm text-gray-800 truncate dark:text-white">{jsonPrompt}</div>
                   </div>
                 );
               } catch {
@@ -701,7 +706,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">Markdown</div>
-                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: mdText }} dark:text-white" />
+                  <div className="text-sm text-gray-800 dark:text-white">{mdText}</div>
                 </div>
               );
             
@@ -710,7 +715,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">📍 位置</div>
-                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: locationTitle }} dark:text-white" />
+                  <div className="text-sm text-gray-800 dark:text-white">{locationTitle}</div>
                 </div>
               );
             
@@ -719,7 +724,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="my-1 p-2 bg-white rounded-lg dark:bg-white/[0.06]">
                   <div className="text-xs text-gray-500 mb-1">🎵 音乐</div>
-                  <div className="text-sm text-gray-800 dangerouslySetInnerHTML={{ __html: musicTitle }} dark:text-white" />
+                  <div className="text-sm text-gray-800 dark:text-white">{musicTitle}</div>
                 </div>
               );
             
@@ -744,7 +749,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({
               return (
                 <div key={index} className="my-1 p-2 bg-white rounded-lg border border-gray-200 dark:bg-white/[0.06] dark:border-white/[0.1]">
                   <div className="text-xs text-gray-500 mb-1">🔗 分享</div>
-                  <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline" dangerouslySetInnerHTML={{ __html: shareTitle }} />
+                  <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline">{shareTitle}</a>
                 </div>
               );
             
@@ -931,8 +936,7 @@ export function WebQQ() {
         }));
         setBots(botList);
       }
-    } catch (error) {
-      console.error('获取机器人列表失败:', error);
+    } catch {
       toast.error('获取机器人列表失败');
     } finally {
       setIsLoadingBots(false);
@@ -984,7 +988,6 @@ export function WebQQ() {
           remark: f.remark,
         })));
       } else if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('加载好友列表失败:', response.message);
         toast.error('加载好友列表失败: ' + (response.message || `API错误 (${outerRetcode})`));
       }
     } catch (error) {
@@ -1010,11 +1013,9 @@ export function WebQQ() {
           member_count: g.member_count,
         })));
       } else if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('加载群组列表失败:', response.message);
         toast.error('加载群组列表失败: ' + (response.message || `API错误 (${outerRetcode})`));
       }
-    } catch (error) {
-      console.error('加载群组列表失败:', error);
+    } catch {
       toast.error('加载群组列表失败');
     }
   }, [selectedBot]);
@@ -1060,7 +1061,6 @@ export function WebQQ() {
 
       // 首先检查后端的 API 调用是否成功
       if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('加载消息历史失败:', response.message);
         toast.error('加载消息历史失败: ' + (response.message || `API错误 (${outerRetcode})`));
         return;
       }
@@ -1460,7 +1460,6 @@ export function WebQQ() {
 
       // 首先检查后端的 API 调用是否成功
       if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('加载群成员失败:', response.message);
         toast.error('加载群成员失败: ' + (response.message || `API错误 (${outerRetcode})`));
         return;
       }
@@ -1476,11 +1475,9 @@ export function WebQQ() {
           last_sent_time: m.last_sent_time,
         })));
       } else {
-        console.warn('群成员列表格式不正确:', response);
         toast.warning('群成员列表格式不正确');
       }
-    } catch (error) {
-      console.error('加载群成员失败:', error);
+    } catch {
       toast.error('加载群成员失败');
     } finally {
       setLoadingMembers(false);
@@ -1529,7 +1526,6 @@ export function WebQQ() {
 
     try {
       const response = await aiVoiceApi.getAICharacters(selectedBot, selectedChat.id);
-      console.log('AI角色列表响应:', response);
 
       // 后端返回格式：{status: 'ok', retcode: 0, data: [...]}
       // response 是后端包装后的响应，response.data 是 OneBot 的原始响应
@@ -1539,7 +1535,6 @@ export function WebQQ() {
 
       // 首先检查后端的 API 调用是否成功
       if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('加载AI语音角色失败:', response.message);
         toast.error('加载失败: ' + (response.message || `API错误 (${outerRetcode})`));
         return;
       }
@@ -1577,16 +1572,13 @@ export function WebQQ() {
         setAiCharacters(allCharacters);
         if (allCharacters.length > 0) {
           setSelectedAICharacter(allCharacters[0].character_id);
-          console.log(`成功加载 ${allCharacters.length} 个AI语音角色`);
         } else {
           toast.warning('未找到可用的AI语音角色');
         }
       } else {
-        console.warn('AI角色列表为空或格式不正确:', response);
         toast.warning('未找到可用的AI语音角色');
       }
     } catch (error: any) {
-      console.error('加载AI语音角色失败:', error);
       const errorMsg = error.message || error.data?.message || '加载AI语音角色失败';
       toast.error(`加载失败: ${errorMsg}`);
     }
@@ -1600,21 +1592,12 @@ export function WebQQ() {
     }
     
     try {
-      console.log('发送AI语音:', {
-        bot: selectedBot,
-        group: selectedChat.id,
-        character: selectedAICharacter,
-        text: aiVoiceText.trim()
-      });
-      
       const response = await aiVoiceApi.sendGroupAIRecord(
         selectedBot,
         selectedChat.id,
         selectedAICharacter,
         aiVoiceText.trim()
       );
-
-      console.log('AI语音发送响应:', response);
 
       // 后端返回的数据结构是:
       // { status: 'ok', retcode: 0, data: { status: 'ok', retcode: 0, data: null, message: '', wording: '' } }
@@ -1652,7 +1635,6 @@ export function WebQQ() {
         setShowAIVoice(false);
       }
     } catch (error: any) {
-      console.error('发送AI语音失败:', error);
       const errorMsg = error.message || error.data?.message || error.data?.wording || '发送AI语音失败';
       toast.error(`发送失败: ${errorMsg}`);
     }
@@ -1672,7 +1654,6 @@ export function WebQQ() {
 
       // 首先检查后端的 API 调用是否成功
       if (outerStatus !== 'ok' || outerRetcode !== 0) {
-        console.error('获取群资料失败:', response.message);
         toast.error('获取群资料失败: ' + (response.message || `API错误 (${outerRetcode})`));
         return;
       }
@@ -1685,8 +1666,7 @@ export function WebQQ() {
       } else {
         toast.error('获取群资料失败：无数据返回');
       }
-    } catch (error) {
-      console.error('获取群资料失败:', error);
+    } catch {
       toast.error('获取群资料失败');
     }
   }, [selectedBot, selectedChat]);
@@ -1791,17 +1771,21 @@ export function WebQQ() {
         <div className="flex flex-col h-full">
           {/* 头部 */}
           <div className="p-3 border-b border-gray-200 dark:border-white/[0.06]">
-            <select
+            <Select
               value={selectedBot || ''}
-              onChange={(e) => setSelectedBot(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-300 dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white dark:focus:ring-white/20"
+              onValueChange={(value) => setSelectedBot(value)}
             >
-              {onlineBots.map(bot => (
-                <option key={bot.self_id} value={bot.self_id}>
-                  {bot.nickname}:{bot.self_id}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {onlineBots.map(bot => (
+                  <SelectItem key={bot.self_id} value={bot.self_id}>
+                    {bot.nickname}:{bot.self_id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* 搜索框 */}
@@ -2346,26 +2330,30 @@ export function WebQQ() {
                 </div>
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">禁言时长</label>
-                  <select
-                    value={banDuration}
-                    onChange={(e) => setBanDuration(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white"
+                  <Select
+                    value={String(banDuration)}
+                    onValueChange={(value) => setBanDuration(Number(value))}
                   >
-                    <option value={60}>1分钟</option>
-                    <option value={300}>5分钟</option>
-                    <option value={600}>10分钟</option>
-                    <option value={1800}>30分钟</option>
-                    <option value={3600}>1小时</option>
-                    <option value={7200}>2小时</option>
-                    <option value={21600}>6小时</option>
-                    <option value={43200}>12小时</option>
-                    <option value={86400}>1天</option>
-                    <option value={172800}>2天</option>
-                    <option value={259200}>3天</option>
-                    <option value={604800}>7天</option>
-                    <option value={1209600}>14天</option>
-                    <option value={2505600}>29天</option>
-                  </select>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="60">1分钟</SelectItem>
+                      <SelectItem value="300">5分钟</SelectItem>
+                      <SelectItem value="600">10分钟</SelectItem>
+                      <SelectItem value="1800">30分钟</SelectItem>
+                      <SelectItem value="3600">1小时</SelectItem>
+                      <SelectItem value="7200">2小时</SelectItem>
+                      <SelectItem value="21600">6小时</SelectItem>
+                      <SelectItem value="43200">12小时</SelectItem>
+                      <SelectItem value="86400">1天</SelectItem>
+                      <SelectItem value="172800">2天</SelectItem>
+                      <SelectItem value="259200">3天</SelectItem>
+                      <SelectItem value="604800">7天</SelectItem>
+                      <SelectItem value="1209600">14天</SelectItem>
+                      <SelectItem value="2505600">29天</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="text-xs text-gray-500 mb-4">
                   禁言时长: {formatBanDuration(banDuration)}
@@ -2405,17 +2393,21 @@ export function WebQQ() {
             <div className="p-4 flex-1 overflow-y-auto">
               <div className="mb-4">
                 <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">选择声色</label>
-                <select
+                <Select
                   value={selectedAICharacter}
-                  onChange={(e) => setSelectedAICharacter(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-900 rounded-lg text-sm dark:bg-white/[0.03] dark:border-white/[0.06] dark:text-white"
+                  onValueChange={(value) => setSelectedAICharacter(value)}
                 >
-                  {aiCharacters.map(char => (
-                    <option key={char.character_id} value={char.character_id}>
-                      {char.character_name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {aiCharacters.map(char => (
+                      <SelectItem key={char.character_id} value={char.character_id}>
+                        {char.character_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium mb-2 text-gray-800 dark:text-white">语音文本</label>

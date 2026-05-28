@@ -221,8 +221,113 @@ func (h *LogHandler) GetPluginLogsByPath(c *gin.Context) {
 	})
 }
 
+// GetLoginLogs 获取登录日志
+// 路由: GET /api/logs/login?limit={limit}
+func (h *LogHandler) GetLoginLogs(c *gin.Context) {
+	// 获取限制条数，默认 100，最大 500
+	limit := 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			if l > 500 {
+				limit = 500
+			} else {
+				limit = l
+			}
+		}
+	}
+
+	logManager := h.reverseWS.GetLogManager()
+	if logManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "failed",
+			"retcode": -1,
+			"message": "日志管理器未初始化",
+		})
+		return
+	}
+
+	logs, err := logManager.GetLogs("system", "login", "", limit)
+	if err != nil {
+		h.logger.Errorw("获取登录日志失败", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "failed",
+			"retcode": -1,
+			"message": "获取日志失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"retcode": 0,
+		"data": gin.H{
+			"type":  "login",
+			"logs":  logs,
+			"total": len(logs),
+		},
+	})
+}
+
 // RegisterRoutes 注册日志路由
 func (h *LogHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/logs/ws", h.GetWSLogs)
 	r.GET("/logs/plugin", h.GetPluginLogs)
+	r.GET("/logs/proxy", h.GetProxyLogs)
+	r.GET("/logs/login", h.GetLoginLogs)
+}
+
+// GetProxyLogs 获取代理服务日志
+// 路由: GET /api/logs/proxy?self_id={self_id}&limit={limit}
+func (h *LogHandler) GetProxyLogs(c *gin.Context) {
+	selfID := c.Query("self_id")
+	if selfID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "failed",
+			"retcode": -1,
+			"message": "缺少 self_id 参数",
+		})
+		return
+	}
+
+	limit := 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			if l > 500 {
+				limit = 500
+			} else {
+				limit = l
+			}
+		}
+	}
+
+	logManager := h.reverseWS.GetLogManager()
+	if logManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "failed",
+			"retcode": -1,
+			"message": "日志管理器未初始化",
+		})
+		return
+	}
+
+	logs, err := logManager.GetLogs(selfID, "proxy", "", limit)
+	if err != nil {
+		h.logger.Errorw("获取代理服务日志失败", "self_id", selfID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "failed",
+			"retcode": -1,
+			"message": "获取日志失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"retcode": 0,
+		"data": gin.H{
+			"self_id": selfID,
+			"logs":    logs,
+			"total":   len(logs),
+		},
+	})
 }

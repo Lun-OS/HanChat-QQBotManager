@@ -168,6 +168,136 @@ func RegisterSettingsRoutes(r *gin.RouterGroup, base *zap.Logger, accountConfig 
 		})
 	})
 
+	r.GET("/log-cleanup", func(c *gin.Context) {
+		logger.Infow("获取日志清理配置", "requestId", c.GetString("requestId"))
+
+		if accountConfig == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"enabled":   true,
+					"interval":  24,
+					"retention": 7,
+					"scope": gin.H{
+						"pluginLog":   true,
+						"loginLog":    true,
+						"fileOpLog":   true,
+						"pluginOpLog": true,
+						"proxyLog":    true,
+						"botConnLog":  true,
+					},
+				},
+			})
+			return
+		}
+
+		cfg, err := accountConfig.LoadConfig()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "加载配置失败",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"enabled":   cfg.LogCleanup.Enabled,
+				"interval":  cfg.LogCleanup.Interval,
+				"retention": cfg.LogCleanup.Retention,
+				"scope": gin.H{
+					"pluginLog":   cfg.LogCleanup.Scope.PluginLog,
+					"loginLog":    cfg.LogCleanup.Scope.LoginLog,
+					"fileOpLog":   cfg.LogCleanup.Scope.FileOpLog,
+					"pluginOpLog": cfg.LogCleanup.Scope.PluginOpLog,
+					"proxyLog":    cfg.LogCleanup.Scope.ProxyLog,
+					"botConnLog":  cfg.LogCleanup.Scope.BotConnLog,
+				},
+			},
+		})
+	})
+
+	r.POST("/log-cleanup", func(c *gin.Context) {
+		logger.Infow("保存日志清理配置", "requestId", c.GetString("requestId"))
+
+		var body struct {
+			Enabled   bool `json:"enabled"`
+			Interval  int  `json:"interval"`
+			Retention int  `json:"retention"`
+			Scope     struct {
+				PluginLog   bool `json:"pluginLog"`
+				LoginLog    bool `json:"loginLog"`
+				FileOpLog   bool `json:"fileOpLog"`
+				PluginOpLog bool `json:"pluginOpLog"`
+				ProxyLog    bool `json:"proxyLog"`
+				BotConnLog  bool `json:"botConnLog"`
+			} `json:"scope"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "参数错误",
+			})
+			return
+		}
+
+		if body.Interval < 1 || body.Interval > 168 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "interval 必须在 1-168 之间",
+			})
+			return
+		}
+		if body.Retention < 1 || body.Retention > 365 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "retention 必须在 1-365 之间",
+			})
+			return
+		}
+
+		if accountConfig == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "配置服务不可用",
+			})
+			return
+		}
+
+		logCleanup := config.LogCleanupConfig{
+			Enabled:   body.Enabled,
+			Interval:  body.Interval,
+			Retention: body.Retention,
+			Scope: config.LogCleanupScope{
+				PluginLog:   body.Scope.PluginLog,
+				LoginLog:    body.Scope.LoginLog,
+				FileOpLog:   body.Scope.FileOpLog,
+				PluginOpLog: body.Scope.PluginOpLog,
+				ProxyLog:    body.Scope.ProxyLog,
+				BotConnLog:  body.Scope.BotConnLog,
+			},
+		}
+		if err := accountConfig.SaveLogCleanupConfig(logCleanup); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "保存日志清理配置失败",
+			})
+			return
+		}
+
+		logger.Infow("日志清理配置已保存",
+			"enabled", body.Enabled,
+			"interval", body.Interval,
+			"retention", body.Retention,
+		)
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "日志清理配置已保存",
+		})
+	})
+
 	r.GET("/appearance", func(c *gin.Context) {
 		logger.Infow("获取外观配置", "requestId", c.GetString("requestId"))
 

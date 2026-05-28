@@ -26,6 +26,7 @@ type ConfigFile struct {
 	Memory       MemoryConfig             `json:"memory"`
 	Appearance   AppearanceConfig         `json:"appearance"`
 	Advanced     AdvancedConfig           `json:"advanced"`
+	LogCleanup   LogCleanupConfig         `json:"logCleanup"`
 	Accounts     map[string]*models.BotAccount `json:"accounts"` // key: self_id
 }
 
@@ -40,6 +41,24 @@ type AdvancedConfig struct {
 	LogLevel         string   `json:"logLevel"`
 	CorsOrigins      []string `json:"corsOrigins"`
 	LogRetentionDays int      `json:"logRetentionDays"`
+}
+
+// LogCleanupScope 日志自动清理范围配置
+type LogCleanupScope struct {
+	PluginLog       bool `json:"pluginLog"`       // 插件日志
+	LoginLog        bool `json:"loginLog"`        // 登录日志
+	FileOpLog       bool `json:"fileOpLog"`       // 文件操作日志
+	PluginOpLog     bool `json:"pluginOpLog"`     // 插件操作日志
+	ProxyLog        bool `json:"proxyLog"`        // 代理日志
+	BotConnLog      bool `json:"botConnLog"`      // 机器人连接日志
+}
+
+// LogCleanupConfig 日志自动清理配置
+type LogCleanupConfig struct {
+	Enabled    bool            `json:"enabled"`    // 是否启用自动清理
+	Interval   int             `json:"interval"`   // 清理间隔（小时），默认24
+	Retention  int             `json:"retention"`  // 保留天数，默认7
+	Scope      LogCleanupScope `json:"scope"`      // 清理范围
 }
 
 // MemoryConfig 内存管理器配置
@@ -113,14 +132,27 @@ func (ac *AccountConfig) LoadConfig() (*ConfigFile, error) {
 				CustomCSS: make(map[string]string),
 			},
 			Advanced: AdvancedConfig{
-				WSPort:           59178,
-				LogLevel:         "info",
-				CorsOrigins:      []string{"*"},
-				LogRetentionDays: 7,
+			WSPort:           59178,
+			LogLevel:         "info",
+			CorsOrigins:      []string{"*"},
+			LogRetentionDays: 7,
+		},
+		LogCleanup: LogCleanupConfig{
+			Enabled:   true,
+			Interval:  24,
+			Retention: 7,
+			Scope: LogCleanupScope{
+				PluginLog:   true,
+				LoginLog:    true,
+				FileOpLog:   true,
+				PluginOpLog: true,
+				ProxyLog:    true,
+				BotConnLog:  true,
 			},
-			Accounts: make(map[string]*models.BotAccount),
-		}, nil
-	}
+		},
+		Accounts: make(map[string]*models.BotAccount),
+	}, nil
+}
 
 	// 读取配置文件
 	data, err := os.ReadFile(ac.configPath)
@@ -247,14 +279,27 @@ func (ac *AccountConfig) loadConfigUnsafe() (*ConfigFile, error) {
 				CustomCSS: make(map[string]string),
 			},
 			Advanced: AdvancedConfig{
-				WSPort:           59178,
-				LogLevel:         "info",
-				CorsOrigins:      []string{"*"},
-				LogRetentionDays: 7,
+			WSPort:           59178,
+			LogLevel:         "info",
+			CorsOrigins:      []string{"*"},
+			LogRetentionDays: 7,
+		},
+		LogCleanup: LogCleanupConfig{
+			Enabled:   true,
+			Interval:  24,
+			Retention: 7,
+			Scope: LogCleanupScope{
+				PluginLog:   true,
+				LoginLog:    true,
+				FileOpLog:   true,
+				PluginOpLog: true,
+				ProxyLog:    true,
+				BotConnLog:  true,
 			},
-			Accounts: make(map[string]*models.BotAccount),
-		}, nil
-	}
+		},
+		Accounts: make(map[string]*models.BotAccount),
+	}, nil
+}
 
 	data, err := os.ReadFile(ac.configPath)
 	if err != nil {
@@ -360,6 +405,20 @@ func (ac *AccountConfig) SaveAdvancedConfig(advanced AdvancedConfig) error {
 	}
 
 	cfg.Advanced = advanced
+
+	return ac.saveConfigUnsafe(cfg)
+}
+
+func (ac *AccountConfig) SaveLogCleanupConfig(logCleanup LogCleanupConfig) error {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	cfg, err := ac.loadConfigUnsafe()
+	if err != nil {
+		return err
+	}
+
+	cfg.LogCleanup = logCleanup
 
 	return ac.saveConfigUnsafe(cfg)
 }

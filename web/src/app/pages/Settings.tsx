@@ -2,14 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Save, Github, FileText, HelpCircle, Shield, Trash2, Info,
-  RefreshCw, Eye, EyeOff, Palette, Sun, Moon
+  RefreshCw, Eye, EyeOff, Palette, Sun, Moon, Clock, CalendarDays,
+  LogIn, AlertTriangle, CheckCircle, Eraser
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from 'next-themes';
-import { settingsApi, systemApi } from '../services/api';
+import { settingsApi, systemApi, logApi } from '../services/api';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 
-const FRONTEND_VERSION = import.meta.env.VITE_APP_VERSION || 'V26.5.26';
 
 function ConfigPageItem({ children }: { children: React.ReactNode }) {
   return (
@@ -48,12 +55,12 @@ export function Settings() {
   const fetchVersion = async () => {
     try {
       setLoading(true);
-      const versionRes = await systemApi.getSystemInfo();
-      if (versionRes.success && versionRes.data) {
-        setBackendVersion(versionRes.data.version || '未知');
+      const versionRes = await systemApi.getVersion();
+      if (versionRes.success) {
+        setBackendVersion(versionRes.version || '未知');
       }
-    } catch (error) {
-      console.error('获取版本失败:', error);
+    } catch {
+      // 忽略版本获取失败
     } finally {
       setLoading(false);
     }
@@ -80,6 +87,12 @@ export function Settings() {
             className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
           >
             日志设置
+          </TabsTrigger>
+          <TabsTrigger
+            value='security'
+            className='h-9 px-4 md:px-6 data-[state=active]:bg-[#165DFF]/10 data-[state=active]:backdrop-blur-md data-[state=active]:shadow-sm data-[state=active]:rounded-xl data-[state=active]:text-[#165DFF] dark:data-[state=active]:bg-white/10 dark:data-[state=active]:text-white text-gray-600 dark:text-gray-400 hover:text-[#165DFF] dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.04] font-medium transition-all'
+          >
+            安全
           </TabsTrigger>
           <TabsTrigger
             value='about'
@@ -131,6 +144,20 @@ export function Settings() {
           </AnimatePresence>
         </TabsContent>
 
+        <TabsContent value='security' className='w-full relative p-0'>
+          <AnimatePresence mode='wait'>
+            <motion.div
+              key='security'
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <SecurityTab />
+            </motion.div>
+          </AnimatePresence>
+        </TabsContent>
+
         <TabsContent value='about' className='w-full relative p-0'>
           <AnimatePresence mode='wait'>
             <motion.div
@@ -177,8 +204,8 @@ function ConnectionTab() {
             : advancedRes.data.corsOrigins || ''
         );
       }
-    } catch (error) {
-      console.error('获取连接设置失败:', error);
+    } catch {
+      // 忽略连接设置获取失败
     } finally {
       setLoading(false);
     }
@@ -219,8 +246,7 @@ function ConnectionTab() {
       } else {
         toast.error('保存失败: ' + (settingsRes.message || advancedRes.message || '未知错误'));
       }
-    } catch (error) {
-      console.error('保存连接设置失败:', error);
+    } catch {
       toast.error('保存连接设置失败');
     } finally {
       setSaving(false);
@@ -519,8 +545,23 @@ function LoggerTab() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const [cleanupEnabled, setCleanupEnabled] = useState(true);
+  const [cleanupInterval, setCleanupInterval] = useState(24);
+  const [cleanupRetention, setCleanupRetention] = useState(7);
+  const [cleanupScope, setCleanupScope] = useState({
+    pluginLog: true,
+    loginLog: true,
+    fileOpLog: true,
+    pluginOpLog: true,
+    proxyLog: true,
+    botConnLog: true,
+  });
+  const [savingCleanup, setSavingCleanup] = useState(false);
+  const [loadingCleanup, setLoadingCleanup] = useState(false);
+
   useEffect(() => {
     fetchLoggerSettings();
+    fetchCleanupSettings();
   }, []);
 
   const fetchLoggerSettings = async () => {
@@ -531,10 +572,27 @@ function LoggerTab() {
         setLogLevel(res.data.logLevel || 'info');
         setLogRetentionDays(res.data.logRetentionDays || 7);
       }
-    } catch (error) {
-      console.error('获取日志设置失败:', error);
+    } catch {
+      // 忽略日志设置获取失败
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCleanupSettings = async () => {
+    try {
+      setLoadingCleanup(true);
+      const res = await settingsApi.getLogCleanup();
+      if (res.success && res.data) {
+        setCleanupEnabled(res.data.enabled);
+        setCleanupInterval(res.data.interval);
+        setCleanupRetention(res.data.retention);
+        setCleanupScope(res.data.scope);
+      }
+    } catch {
+      // 忽略日志清理设置获取失败
+    } finally {
+      setLoadingCleanup(false);
     }
   };
 
@@ -554,65 +612,315 @@ function LoggerTab() {
       } else {
         toast.error('保存失败: ' + (res.message || '未知错误'));
       }
-    } catch (error) {
-      console.error('保存日志设置失败:', error);
+    } catch {
       toast.error('保存日志设置失败');
     } finally {
       setSaving(false);
     }
   };
 
+  const handleSaveCleanup = async () => {
+    if (cleanupInterval < 1 || cleanupInterval > 168) {
+      toast.error('清理间隔必须在1-168小时之间');
+      return;
+    }
+    if (cleanupRetention < 1 || cleanupRetention > 365) {
+      toast.error('保留天数必须在1-365之间');
+      return;
+    }
+    try {
+      setSavingCleanup(true);
+      const res = await settingsApi.saveLogCleanup({
+        enabled: cleanupEnabled,
+        interval: cleanupInterval,
+        retention: cleanupRetention,
+        scope: cleanupScope,
+      });
+      if (res.success) {
+        toast.success('日志自动清理设置已保存');
+      } else {
+        toast.error('保存失败: ' + (res.message || '未知错误'));
+      }
+    } catch {
+      toast.error('保存日志自动清理设置失败');
+    } finally {
+      setSavingCleanup(false);
+    }
+  };
+
+  const scopeOptions = [
+    { key: 'pluginLog' as const, label: '插件日志', description: '插件运行产生的日志' },
+    { key: 'loginLog' as const, label: '登录日志', description: 'Web登录相关日志' },
+    { key: 'fileOpLog' as const, label: '文件操作日志', description: '插件文件管理操作日志' },
+    { key: 'pluginOpLog' as const, label: '插件操作日志', description: '插件加载/卸载等操作日志' },
+    { key: 'proxyLog' as const, label: '代理日志', description: '接口代理服务相关日志' },
+    { key: 'botConnLog' as const, label: '机器人连接日志', description: 'WebSocket连接相关日志' },
+  ];
+
   return (
-    <ConfigPageItem>
-      <SectionTitle icon={FileText} title='日志级别' description='设置系统日志的最低输出级别' />
-      <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-        级别
-      </label>
-      <select
-        value={logLevel}
-        onChange={(e) => setLogLevel(e.target.value)}
-        className={inputClass}
-      >
-        <option value='debug'>debug - 调试</option>
-        <option value='info'>info - 信息</option>
-        <option value='warn'>warn - 警告</option>
-        <option value='error'>error - 错误</option>
-      </select>
-      <p className='text-xs text-gray-600 dark:text-gray-400'>
-        低于此级别的日志将不会被记录
-      </p>
+    <div className='w-full flex flex-col gap-5'>
+      <ConfigPageItem>
+        <SectionTitle icon={Eraser} title='日志自动清理' description='选择要自动清理的日志类型和清理策略' />
 
-      <div className='border-t border-white/40 dark:border-white/[0.06] my-2' />
+        <div className='flex items-center justify-between bg-white/50 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-lg p-3'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>启用自动清理</h3>
+            <p className='text-xs text-gray-600 dark:text-gray-400 mt-0.5'>按配置的策略自动清理过期日志文件</p>
+          </div>
+          <button
+            type='button'
+            onClick={() => setCleanupEnabled(!cleanupEnabled)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              cleanupEnabled
+                ? 'bg-[#165DFF] dark:bg-white'
+                : 'bg-gray-200 dark:bg-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white dark:bg-black transition-transform ${
+                cleanupEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
 
-      <SectionTitle icon={FileText} title='日志保留天数' description='设置日志文件自动清理的保留天数' />
-      <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-        天数
-      </label>
-      <input
-        type='number'
-        min={1}
-        max={365}
-        value={logRetentionDays}
-        onChange={(e) => setLogRetentionDays(Number(e.target.value))}
-        className={inputClass}
-      />
-      <p className='text-xs text-gray-600 dark:text-gray-400'>范围: 1-365 天，默认 7 天</p>
+        <div className={`transition-opacity ${cleanupEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+          <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+            <div>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2'>
+                <Clock className='w-4 h-4' />
+                清理间隔（小时）
+              </label>
+              <input
+                type='number'
+                min={1}
+                max={168}
+                value={cleanupInterval}
+                onChange={(e) => setCleanupInterval(Number(e.target.value))}
+                className={`${inputClass} mt-1.5`}
+              />
+              <p className='text-xs text-gray-600 dark:text-gray-400 mt-1'>范围: 1-168 小时，默认 24 小时</p>
+            </div>
+            <div>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2'>
+                <CalendarDays className='w-4 h-4' />
+                保留天数
+              </label>
+              <input
+                type='number'
+                min={1}
+                max={365}
+                value={cleanupRetention}
+                onChange={(e) => setCleanupRetention(Number(e.target.value))}
+                className={`${inputClass} mt-1.5`}
+              />
+              <p className='text-xs text-gray-600 dark:text-gray-400 mt-1'>范围: 1-365 天，默认 7 天</p>
+            </div>
+          </div>
 
-      <div className='flex justify-end pt-2'>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
-        >
-          {saving ? (
-            <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
+          <div className='border-t border-white/40 dark:border-white/[0.06] my-3' />
+
+          <label className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block'>
+            清理范围
+          </label>
+          <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+            {scopeOptions.map((option) => (
+              <div
+                key={option.key}
+                className={`flex items-start gap-3 p-3 rounded-lg border transition-all cursor-pointer ${
+                  cleanupScope[option.key]
+                    ? 'bg-[#165DFF]/5 border-[#165DFF]/30 dark:bg-white/5 dark:border-white/20'
+                    : 'bg-white/30 border-white/30 dark:bg-white/[0.02] dark:border-white/[0.06]'
+                }`}
+                onClick={() => setCleanupScope((prev) => ({ ...prev, [option.key]: !prev[option.key] }))}
+              >
+                <div className='mt-0.5'>
+                  <div
+                    className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                      cleanupScope[option.key]
+                        ? 'bg-[#165DFF] border-[#165DFF] dark:bg-white dark:border-white'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  >
+                    {cleanupScope[option.key] && (
+                      <svg className='w-3 h-3 text-white dark:text-black' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth={3}>
+                        <path strokeLinecap='round' strokeLinejoin='round' d='M5 13l4 4L19 7' />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className='text-sm font-medium text-gray-900 dark:text-white'>{option.label}</p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>{option.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className='flex justify-end pt-2'>
+          <button
+            onClick={handleSaveCleanup}
+            disabled={savingCleanup || loadingCleanup}
+            className='flex items-center px-6 py-2 bg-[#165DFF] text-white rounded-xl text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
+          >
+            {savingCleanup ? (
+              <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
+            ) : (
+              <Save className='w-4 h-4 mr-2' />
+            )}
+            {savingCleanup ? '保存中...' : '保存清理设置'}
+          </button>
+        </div>
+      </ConfigPageItem>
+    </div>
+  );
+}
+
+function SecurityTab() {
+  const [loginLogs, setLoginLogs] = useState<string[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  useEffect(() => {
+    fetchLoginLogs();
+  }, []);
+
+  const fetchLoginLogs = async () => {
+    try {
+      setLoadingLogs(true);
+      const res = await logApi.getLoginLogs(200);
+      if (res.status === 'ok' && res.data) {
+        setLoginLogs(res.data.logs || []);
+      }
+    } catch {
+      // 忽略获取失败
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  const parseLogLine = (line: string) => {
+    const match = line.match(/^\[(.*?)\]\s+\[(.*?)\]\s+\[IP:(.*?)\]\s+\[UA:(.*?)\]\s+(.*)$/);
+    if (match) {
+      return {
+        timestamp: match[1],
+        action: match[2],
+        ip: match[3],
+        ua: match[4],
+        detail: match[5],
+      };
+    }
+    return null;
+  };
+
+  const getActionIcon = (action: string) => {
+    switch (action) {
+      case 'LOGIN_SUCCESS':
+        return <CheckCircle className='w-4 h-4 text-green-500' />;
+      case 'LOGIN_FAILED':
+        return <AlertTriangle className='w-4 h-4 text-red-500' />;
+      case 'LOGOUT':
+        return <LogIn className='w-4 h-4 text-blue-500' />;
+      default:
+        return <Shield className='w-4 h-4 text-gray-500' />;
+    }
+  };
+
+  const getActionLabel = (action: string) => {
+    switch (action) {
+      case 'LOGIN_SUCCESS':
+        return '登录成功';
+      case 'LOGIN_FAILED':
+        return '登录失败';
+      case 'LOGOUT':
+        return '登出';
+      default:
+        return action;
+    }
+  };
+
+  const getActionColor = (action: string) => {
+    switch (action) {
+      case 'LOGIN_SUCCESS':
+        return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-500/10';
+      case 'LOGIN_FAILED':
+        return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10';
+      case 'LOGOUT':
+        return 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10';
+      default:
+        return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-500/10';
+    }
+  };
+
+  const parsedLogs = loginLogs.map(parseLogLine).filter(Boolean).reverse();
+
+  return (
+    <div className='w-full flex flex-col gap-5'>
+      <ConfigPageItem>
+        <SectionTitle icon={Shield} title='登录记录' description='查看最近的登录、登出操作记录' />
+
+        <div className='flex justify-end'>
+          <button
+            onClick={fetchLoginLogs}
+            disabled={loadingLogs}
+            className='flex items-center px-4 py-1.5 bg-[#165DFF] text-white rounded-lg text-sm hover:bg-[#0047FF] transition-all shadow-lg shadow-[#165DFF]/20 dark:bg-white dark:text-black dark:hover:bg-gray-200 dark:shadow-black/20 disabled:opacity-50'
+          >
+            {loadingLogs ? (
+              <RefreshCw className='w-4 h-4 mr-2 animate-spin' />
+            ) : (
+              <RefreshCw className='w-4 h-4 mr-2' />
+            )}
+            刷新
+          </button>
+        </div>
+
+        <div className='border border-white/40 dark:border-white/10 rounded-xl overflow-hidden bg-white/30 dark:bg-white/[0.02]'>
+          {parsedLogs.length === 0 ? (
+            <div className='py-8 text-center text-gray-500 dark:text-gray-400 text-sm'>
+              {loadingLogs ? '加载中...' : '暂无登录记录'}
+            </div>
           ) : (
-            <Save className='w-4 h-4 mr-2' />
+            <div className='max-h-[500px] overflow-y-auto'>
+              {parsedLogs.map((log, index) => (
+                <div
+                  key={index}
+                  className='flex items-center gap-3 px-4 py-3 border-b border-white/20 dark:border-white/[0.04] last:border-b-0 hover:bg-white/40 dark:hover:bg-white/[0.04] transition-colors'
+                >
+                  <div className='shrink-0'>{getActionIcon(log!.action)}</div>
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-center gap-2 flex-wrap'>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${getActionColor(log!.action)}`}>
+                        {getActionLabel(log!.action)}
+                      </span>
+                      <span className='text-xs text-gray-500 dark:text-gray-400 font-mono'>
+                        {log!.timestamp}
+                      </span>
+                    </div>
+                    <div className='mt-1 flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400'>
+                      <span>IP: <span className='text-gray-900 dark:text-gray-200'>{log!.ip}</span></span>
+                    </div>
+                    {log!.ua && (
+                      <p className='mt-0.5 text-xs text-gray-500 dark:text-gray-500 truncate' title={log!.ua}>
+                        UA: {log!.ua}
+                      </p>
+                    )}
+                    {log!.detail && (
+                      <p className='mt-0.5 text-xs text-gray-500 dark:text-gray-500 truncate'>
+                        {log!.detail}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          {saving ? '保存中...' : '保存更改'}
-        </button>
-      </div>
-    </ConfigPageItem>
+        </div>
+
+        <p className='text-xs text-gray-500 dark:text-gray-500'>
+          仅显示最近 200 条记录，完整记录请查看服务器 logs/system_login_*.log 文件
+        </p>
+      </ConfigPageItem>
+    </div>
   );
 }
 
@@ -627,8 +935,8 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
           try {
             const cacheNames = await caches.keys();
             await Promise.all(cacheNames.map((name) => caches.delete(name)));
-          } catch (e) {
-            console.log('清除Cache API缓存失败:', e);
+          } catch {
+            // 忽略Cache API清除失败
           }
         }
 
@@ -636,8 +944,8 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
           try {
             const registrations = await navigator.serviceWorker.getRegistrations();
             await Promise.all(registrations.map((reg) => reg.unregister()));
-          } catch (e) {
-            console.log('清除Service Worker失败:', e);
+          } catch {
+            // 忽略Service Worker清除失败
           }
         }
 
@@ -647,15 +955,14 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
             databases.forEach((db) => {
               if (db.name) indexedDB.deleteDatabase(db.name);
             });
-          } catch (e) {
-            console.log('清除IndexedDB失败:', e);
+          } catch {
+            // 忽略IndexedDB清除失败
           }
         }
 
         toast.success('浏览器缓存已清除（包括JS资源）');
         window.location.reload();
-      } catch (error) {
-        console.error('清除缓存失败:', error);
+      } catch {
         toast.error('清除缓存失败');
       }
     }
@@ -671,19 +978,13 @@ function AboutTab({ backendVersion, loading }: { backendVersion: string; loading
           </div>
           <div>
             <h3 className='font-bold text-gray-900 dark:text-white'>HanChat-QQBotManager</h3>
-            <p className='text-sm text-gray-600 dark:text-gray-400'>前端 {FRONTEND_VERSION} / 后端 {loading ? '加载中...' : backendVersion}</p>
+            <p className='text-sm text-gray-600 dark:text-gray-400'>{loading ? '版本加载中...' : backendVersion}</p>
           </div>
         </div>
 
-        <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-          <div className='bg-white/50 dark:bg-white/[0.03] p-3 rounded-lg border border-white/40 dark:border-white/[0.06]'>
-            <p className='text-xs text-gray-600 dark:text-gray-400 mb-1'>前端版本</p>
-            <p className='text-lg font-semibold text-gray-900 dark:text-white'>{FRONTEND_VERSION}</p>
-          </div>
-          <div className='bg-white/50 dark:bg-white/[0.03] p-3 rounded-lg border border-white/40 dark:border-white/[0.06]'>
-            <p className='text-xs text-gray-600 dark:text-gray-400 mb-1'>后端版本</p>
-            <p className='text-lg font-semibold text-gray-900 dark:text-white'>{loading ? '-' : backendVersion}</p>
-          </div>
+        <div className='bg-white/50 dark:bg-white/[0.03] p-3 rounded-lg border border-white/40 dark:border-white/[0.06] w-full md:w-1/2'>
+          <p className='text-xs text-gray-600 dark:text-gray-400 mb-1'>版本</p>
+          <p className='text-lg font-semibold text-gray-900 dark:text-white'>{loading ? '-' : backendVersion}</p>
         </div>
 
         <p className='text-sm text-gray-600 dark:text-gray-400'>

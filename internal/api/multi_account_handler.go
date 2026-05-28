@@ -43,7 +43,7 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 
 	account, err := h.accountMgr.GetAccount(selfID)
 	if err != nil {
-		h.logger.Warnw("API请求失败：账号不存在",
+		h.logger.Debugw("API请求：账号不存在（正常离线）",
 			"self_id", selfID,
 			"api_name", apiName)
 		utils.NotFound(c, fmt.Sprintf("账号不存在: %s", selfID))
@@ -51,7 +51,7 @@ func (h *MultiAccountHandler) HandleAPI(c *gin.Context) {
 	}
 
 	if !account.IsOnline() {
-		h.logger.Warnw("API请求失败：账号离线",
+		h.logger.Debugw("API请求：账号离线",
 			"self_id", selfID,
 			"api_name", apiName)
 		c.JSON(http.StatusServiceUnavailable, utils.APIResponse{

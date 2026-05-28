@@ -15,14 +15,16 @@ type WebLoginHandler struct {
 	logger      *zap.SugaredLogger
 	loginSvc    *services.WebLoginService
 	captchaSvc  *services.CaptchaService
+	logManager  *services.LogManager
 }
 
 // NewWebLoginHandler 创建Web登录处理器
-func NewWebLoginHandler(baseLogger *zap.Logger, loginSvc *services.WebLoginService, captchaSvc *services.CaptchaService) *WebLoginHandler {
+func NewWebLoginHandler(baseLogger *zap.Logger, loginSvc *services.WebLoginService, captchaSvc *services.CaptchaService, logManager *services.LogManager) *WebLoginHandler {
 	return &WebLoginHandler{
 		logger:     utils.NewModuleLogger(baseLogger, "api.web_login"),
 		loginSvc:   loginSvc,
 		captchaSvc: captchaSvc,
+		logManager: logManager,
 	}
 }
 
@@ -38,13 +40,17 @@ func (h *WebLoginHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 获取客户端IP
+	// 获取客户端IP和UA
 	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
 
 	// 执行登录
 	resp := h.loginSvc.Login(&req, clientIP)
 
 	if resp.Success {
+		if h.logManager != nil {
+			h.logManager.WriteLoginLog("LOGIN_SUCCESS", req.Username, clientIP, userAgent, "登录成功")
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data": gin.H{
@@ -54,6 +60,9 @@ func (h *WebLoginHandler) Login(c *gin.Context) {
 			"message": resp.Message,
 		})
 	} else {
+		if h.logManager != nil {
+			h.logManager.WriteLoginLog("LOGIN_FAILED", req.Username, clientIP, userAgent, resp.Message)
+		}
 		// 根据错误类型返回不同状态码
 		if resp.Message == "系统出现严重错误，请联系系统管理员" {
 			c.JSON(http.StatusForbidden, gin.H{
@@ -73,8 +82,13 @@ func (h *WebLoginHandler) Login(c *gin.Context) {
 // POST /api/auth/logout
 func (h *WebLoginHandler) Logout(c *gin.Context) {
 	token := h.extractToken(c)
+	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
 	if token != "" {
 		h.loginSvc.Logout(token)
+	}
+	if h.logManager != nil {
+		h.logManager.WriteLoginLog("LOGOUT", "admin", clientIP, userAgent, "用户主动登出")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -270,12 +284,12 @@ func (h *WebLoginHandler) RegisterRoutes(r *gin.RouterGroup) {
 		auth.POST("/captcha/refresh", h.RefreshCaptcha)
 
 		auth.POST("/login", h.Login)
-		auth.POST("/logout", h.Logout)
 		auth.POST("/verify", h.VerifyToken)
 
 		// 需要认证的路由
 		authWithAuth := auth.Group("", h.AuthMiddleware())
 		{
+			authWithAuth.POST("/logout", h.Logout)
 			authWithAuth.GET("/banip", h.GetBanIPList)
 			authWithAuth.POST("/unbanip", h.UnbanIP)
 		}

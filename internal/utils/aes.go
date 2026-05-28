@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -12,11 +13,11 @@ import (
 
 // AESEncrypt 使用AES-CBC模式加密数据
 func AESEncrypt(key string, data string) (string, error) {
-	// 确保密钥长度为16、24或32字节
-	key = padKey(key)
+	// 使用SHA-256派生32字节AES-256密钥
+	derivedKey := deriveKey(key)
 
 	// 创建AES加密块
-	block, err := aes.NewCipher([]byte(key))
+	block, err := aes.NewCipher(derivedKey)
 	if err != nil {
 		return "", err
 	}
@@ -44,8 +45,8 @@ func AESEncrypt(key string, data string) (string, error) {
 
 // AESDecrypt 使用AES-CBC模式解密数据，支持宽松的填充处理
 func AESDecrypt(key string, encryptedData string) (string, error) {
-	// 确保密钥长度为16、24或32字节
-	key = padKey(key)
+	// 使用SHA-256派生32字节AES-256密钥
+	derivedKey := deriveKey(key)
 
 	// 解码Base64数据
 	data, err := base64.StdEncoding.DecodeString(encryptedData)
@@ -63,7 +64,7 @@ func AESDecrypt(key string, encryptedData string) (string, error) {
 	encrypted := data[aes.BlockSize:]
 
 	// 创建AES解密块
-	block, err := aes.NewCipher([]byte(key))
+	block, err := aes.NewCipher(derivedKey)
 	if err != nil {
 		return "", err
 	}
@@ -105,26 +106,11 @@ func AESDecrypt(key string, encryptedData string) (string, error) {
 	return string(decrypted), nil
 }
 
-// padKey 确保密钥长度为16、24或32字节
-func padKey(key string) string {
-	// AES密钥长度只能是16、24或32字节
-	keyLen := len(key)
-	switch {
-	case keyLen == 16, keyLen == 24, keyLen == 32:
-		return key
-	case keyLen < 16:
-		// 填充到16字节
-		return key + string(make([]byte, 16-keyLen))
-	case keyLen < 24:
-		// 填充到24字节
-		return key + string(make([]byte, 24-keyLen))
-	default:
-		// 截断或填充到32字节
-		if keyLen > 32 {
-			return key[:32]
-		}
-		return key + string(make([]byte, 32-keyLen))
-	}
+// deriveKey 使用SHA-256从任意长度密钥派生32字节AES-256密钥
+// 替代原来 null 字节填充的不安全做法
+func deriveKey(password string) []byte {
+	hash := sha256.Sum256([]byte(password))
+	return hash[:]
 }
 
 // padData 使用PKCS#7填充数据

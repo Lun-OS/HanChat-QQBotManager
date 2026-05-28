@@ -10,5 +10,8 @@ cache/
 .claude/
 .trae/
 .kiro/
+.workbuddy/
 .vs/
 .workbuddy/
+*.exe
+.env

@@ -87,8 +87,7 @@ function loadCachedConfig(): BlocklyConfigData | null {
         return parsed as BlocklyConfigData;
       }
     }
-  } catch (e) {
-    console.error('Failed to load cached Blockly config:', e);
+  } catch {
     localStorage.removeItem(BLOCKLY_CONFIG_STORAGE_KEY);
     localStorage.removeItem(BLOCKLY_CONFIG_TIMESTAMP_KEY);
   }
@@ -100,15 +99,14 @@ function saveConfigToCache(config: BlocklyConfigData): void {
     localStorage.setItem(BLOCKLY_CONFIG_STORAGE_KEY, JSON.stringify(config));
     localStorage.setItem(BLOCKLY_CONFIG_TIMESTAMP_KEY, new Date().toISOString());
   } catch (e) {
-    console.error('Failed to save Blockly config to localStorage:', e);
     if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
       try {
         localStorage.removeItem(BLOCKLY_CONFIG_STORAGE_KEY);
         localStorage.removeItem(BLOCKLY_CONFIG_TIMESTAMP_KEY);
         localStorage.setItem(BLOCKLY_CONFIG_STORAGE_KEY, JSON.stringify(config));
         localStorage.setItem(BLOCKLY_CONFIG_TIMESTAMP_KEY, new Date().toISOString());
-      } catch (e2) {
-        console.error('Failed to save Blockly config even after clearing cache:', e2);
+      } catch {
+        // 忽略二次保存失败
       }
     }
   }
@@ -142,9 +140,7 @@ export async function fetchBlockConfig(forceRefresh: boolean = false): Promise<{
     }
 
     return { config: null, fromCache: false, error: '无法获取积木配置' };
-  } catch (error: any) {
-    console.error('Failed to fetch Blockly config:', error);
-
+  } catch {
     const cached = loadCachedConfig();
     if (cached) {
       currentConfig = cached;

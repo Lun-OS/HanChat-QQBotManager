@@ -23,7 +23,7 @@ const findTitle = (pathname: string): string[] => {
 };
 
 function StarFieldBackground() {
-  const stars = [...Array(100)].map((_, i) => {
+  const stars = useMemo(() => [...Array(50)].map((_, i) => {
     const type = Math.random();
     const baseOpacity = 0.25 + Math.random() * 0.5;
     return {
@@ -36,7 +36,7 @@ function StarFieldBackground() {
       duration: type > 0.8 ? 0.8 + Math.random() * 1 : 2 + Math.random() * 4,
       delay: Math.random() * 6,
     };
-  });
+  }), []);
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none dark:block hidden">
@@ -58,26 +58,35 @@ function StarFieldBackground() {
 
       <div className="absolute inset-0 bg-gradient-to-b from-[#050810] via-[#0a0f18] to-[#050810]" />
 
-      <motion.div
+      <div
         className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full blur-[130px]"
         style={{
           background: 'radial-gradient(circle, rgba(20,25,35,0.7) 0%, transparent 70%)',
+          animation: 'pulse-glow 14s ease-in-out infinite',
         }}
-        animate={{ scale: [1, 1.12, 1], opacity: [0.4, 0.8, 0.4] }}
-        transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      <motion.div
+      <div
         className="absolute bottom-[-10%] right-[-10%] w-[450px] h-[450px] rounded-full blur-[130px]"
         style={{
           background: 'radial-gradient(circle, rgba(15,20,28,0.65) 0%, transparent 70%)',
+          animation: 'pulse-glow-reverse 18s ease-in-out infinite',
         }}
-        animate={{ scale: [1.1, 1, 1.1], opacity: [0.5, 0.85, 0.5] }}
-        transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut' }}
       />
 
+      <style>{`
+        @keyframes pulse-glow {
+          0%, 100% { transform: scale(1); opacity: 0.4; }
+          50% { transform: scale(1.12); opacity: 0.8; }
+        }
+        @keyframes pulse-glow-reverse {
+          0%, 100% { transform: scale(1.1); opacity: 0.5; }
+          50% { transform: scale(1); opacity: 0.85; }
+        }
+      `}</style>
+
       {stars.map((star) => (
-        <motion.div
+        <div
           key={star.id}
           className="absolute rounded-full bg-white"
           style={{
@@ -98,24 +107,7 @@ function StarFieldBackground() {
             animationDelay: `${star.delay}s`,
             animationTimingFunction: 'ease-in-out',
             animationIterationCount: 'infinite',
-            willChange: 'opacity, transform' as any,
-          }}
-          animate={{
-            opacity: [
-              star.baseOpacity,
-              star.type > 0.8 ? 0.02 : star.type > 0.5 ? 0.95 : star.baseOpacity * 0.2,
-              star.type > 0.8 ? star.baseOpacity : star.type > 0.5 ? star.baseOpacity * 0.3 : star.baseOpacity * 0.5,
-              star.baseOpacity
-            ],
-            scale: star.type > 0.5
-              ? [1, star.type > 0.8 ? 0.5 : 1.4, star.type > 0.8 ? 1 : 1.2, 1]
-              : undefined,
-          }}
-          transition={{
-            duration: star.duration,
-            repeat: Infinity,
-            delay: star.delay,
-            ease: 'easeInOut',
+            willChange: 'opacity, transform',
           }}
         />
       ))}

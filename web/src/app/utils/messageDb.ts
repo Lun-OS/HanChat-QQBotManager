@@ -74,8 +74,8 @@ export async function setCachedMessages(chatType: number, peerId: string, messag
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })
-  } catch (e) {
-    console.error('Failed to cache messages:', e)
+  } catch {
+    // 忽略缓存失败
   }
 }
 
@@ -86,8 +86,8 @@ export async function appendCachedMessage(chatType: number, peerId: string, mess
       const messages = [...existing.slice(-(CACHE_MAX_MESSAGES - 1)), message]
       await setCachedMessages(chatType, peerId, messages)
     }
-  } catch (e) {
-    console.error('Failed to append message:', e)
+  } catch {
+    // 忽略追加失败
   }
 }
 
@@ -98,8 +98,8 @@ export async function removeCachedMessage(chatType: number, peerId: string, msgI
       const messages = existing.filter(m => m.msgId !== msgId)
       await setCachedMessages(chatType, peerId, messages)
     }
-  } catch (e) {
-    console.error('Failed to remove message:', e)
+  } catch {
+    // 忽略移除失败
   }
 }
 
@@ -150,8 +150,8 @@ export async function updateCachedMessageEmojiReaction(
     })
 
     await setCachedMessages(chatType, peerId, messages)
-  } catch (e) {
-    console.error('Failed to update emoji reaction:', e)
+  } catch {
+    // 忽略表情反应更新失败
   }
 }
 
@@ -178,8 +178,7 @@ export async function markCachedMessageAsRecalled(
       await setCachedMessages(chatType, peerId, messages)
     }
     return found
-  } catch (e) {
-    console.error('Failed to mark message as recalled:', e)
+  } catch {
     return false
   }
 }
@@ -195,7 +194,7 @@ export async function clearAllMessages(): Promise<void> {
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })
-  } catch (e) {
-    console.error('Failed to clear messages:', e)
+  } catch {
+    // 忽略清除失败
   }
 }

@@ -346,7 +346,6 @@ function RecentList({ items, unreadCounts, selectedPeerId, onSelect, onEnterGrou
       try {
         await togglePinChat(contextMenu.item.chatType, contextMenu.item.peerId)
       } catch (error: any) {
-        console.error('置顶失败:', error)
         alert(`置顶失败: ${error.message || '未知错误'}`)
       }
       closeContextMenu()
