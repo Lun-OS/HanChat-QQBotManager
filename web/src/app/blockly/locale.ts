@@ -1,0 +1,1 @@
+export { initChineseLocale } from './msg';

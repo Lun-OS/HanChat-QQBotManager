@@ -1,0 +1,147 @@
+序号	API名称	NapCat	LlBot	归属	功能分类	NapCat说明	LlBot说明
+1	.handle_quick_operation	✅	❌	仅NapCat	其他	处理快速操作	
+2	.ocr_image	✅	❌	仅NapCat	系统扩展	图片 OCR 识别 (内部)	
+3	ArkShareGroup	✅	❌	仅NapCat	Ark/小程序/表情	分享群 (Ark)	
+4	ArkSharePeer	✅	❌	仅NapCat	Ark/小程序/表情	分享用户 (Ark)	
+5	_del_group_notice	✅	❌	仅NapCat	群组扩展	删除群公告	
+6	_delete_group_notice	❌	✅	仅LlBot	群组扩展		群组:删除群公告
+7	_get_group_notice	✅	✅	共有	群组扩展	获取群公告	群组:获取群公告
+8	_get_model_show	✅	❌	仅NapCat	系统扩展	获取机型显示	
+9	_mark_all_as_read	✅	❌	仅NapCat	Ark/小程序/表情	标记所有消息已读	
+10	_send_group_notice	✅	✅	共有	群组扩展	发送群公告	群组:发送群公告
+11	_set_model_show	✅	❌	仅NapCat	系统扩展	设置机型	
+12	batch_delete_group_member	❌	✅	仅LlBot	群组扩展		群组:批量踢出群成员
+13	bot_exit	✅	❌	仅NapCat	系统扩展	退出登录	
+14	cancel_group_todo	✅	❌	仅NapCat	群组扩展	取消群待办	
+15	cancel_online_file	✅	❌	仅NapCat	文件扩展	取消在线文件	
+16	check_url_safely	✅	❌	仅NapCat	系统扩展	检查URL安全性	
+17	clean_stream_temp_file	✅	❌	仅NapCat	文件扩展	清理流式传输临时文件	
+18	click_inline_keyboard_button	✅	❌	仅NapCat	Ark/小程序/表情	点击内联键盘按钮	
+19	complete_group_todo	✅	❌	仅NapCat	群组扩展	完成群待办	
+20	create_collection	✅	❌	仅NapCat	Ark/小程序/表情	创建收藏	
+21	create_flash_task	✅	❌	仅NapCat	消息扩展	创建闪传任务	
+22	create_group_album	❌	✅	仅LlBot	群组扩展		群组:创建群相册
+23	create_group_file_folder	✅	✅	共有	文件扩展	创建群文件目录	文件:创建群文件文件夹
+24	del_group_album_media	✅	❌	仅NapCat	群组扩展	删除群相册媒体	
+25	delete_essence_msg	✅	✅	共有	消息扩展	移出精华消息	群组:删除群精华消息
+26	delete_friend	✅	✅	共有	用户扩展	删除好友	用户:删除好友
+27	delete_group_album	❌	✅	仅LlBot	群组扩展		群组:删除群相册
+28	delete_group_file	✅	✅	共有	文件扩展	删除群文件	文件:删除群文件
+29	delete_group_folder	✅	✅	共有	文件扩展	删除群文件目录	文件:删除群文件文件夹
+30	do_group_album_comment	✅	❌	仅NapCat	群组扩展	发表群相册评论	
+31	download_file	✅	✅	共有	文件扩展	下载文件	文件:下载文件到缓存目录
+32	download_file_image_stream	✅	❌	仅NapCat	文件扩展	下载图片文件流	
+33	download_file_record_stream	✅	❌	仅NapCat	文件扩展	下载语音文件流	
+34	download_file_stream	✅	❌	仅NapCat	文件扩展	下载文件流	
+35	download_fileset	✅	❌	仅NapCat	文件扩展	下载文件集	
+36	fetch_custom_face	✅	✅	共有	Ark/小程序/表情	获取自定义表情	其他:获取收藏表情
+37	fetch_emoji_like	✅	❌	仅NapCat	消息扩展	获取表情点赞详情	
+38	forward_friend_single_msg	✅	✅	共有	消息扩展	转发单条消息	消息:转发单条好友消息
+39	forward_group_single_msg	✅	✅	共有	消息扩展	转发单条消息	消息:转发单条群消息
+40	friend_poke	✅	✅	共有	消息扩展	发送戳一戳	用户:好友戳一戳（双击头像）
+41	get_ai_characters	✅	✅	共有	消息扩展	获取AI角色列表	消息:获取群 Ai 语音可用声色列表
+42	get_ai_record	✅	❌	仅NapCat	消息扩展	获取 AI 语音	
+43	get_clientkey	✅	❌	仅NapCat	系统扩展	获取ClientKey	
+44	get_collection_list	✅	❌	仅NapCat	Ark/小程序/表情	获取收藏列表	
+45	get_doubt_friends_add_request	✅	✅	共有	用户扩展	获取可疑好友申请	用户:获取被过滤好友请求
+46	get_emoji_likes	✅	❌	仅NapCat	消息扩展	获取消息表情点赞列表	
+47	get_essence_msg_list	✅	✅	共有	消息扩展	获取群精华消息	群组:获取群精华消息
+48	get_file	✅	✅	共有	文件扩展	获取文件	消息:获取消息文件详情
+49	get_fileset_id	✅	❌	仅NapCat	文件扩展	获取文件集 ID	
+50	get_fileset_info	✅	❌	仅NapCat	文件扩展	获取文件集信息	
+51	get_flash_file_info	❌	✅	仅LlBot	消息扩展		文件:获取闪传文件详情
+52	get_flash_file_list	✅	❌	仅NapCat	消息扩展	获取闪传文件列表	
+53	get_flash_file_url	✅	❌	仅NapCat	消息扩展	获取闪传文件链接	
+54	get_friend_msg_history	✅	✅	共有	消息扩展	获取好友历史消息	消息:获取好友历史消息记录
+55	get_friends_with_category	✅	✅	共有	用户扩展	获取带分组的好友列表	用户:好友列表（带分组）
+56	get_group_album_list	❌	✅	仅LlBot	群组扩展		群组:获取群相册列表
+57	get_group_album_media_list	✅	❌	仅NapCat	群组扩展	获取群相册媒体列表	
+58	get_group_at_all_remain	✅	✅	共有	群组扩展	获取群艾特全体剩余次数	群组:获取群 @全体成员 剩余次数
+59	get_group_detail_info	✅	❌	仅NapCat	群组扩展	获取群详细信息	
+60	get_group_file_system_info	✅	✅	共有	文件扩展	获取群文件系统信息	文件:获取群文件系统信息
+61	get_group_file_url	✅	✅	共有	文件扩展	获取群文件URL	文件:获取群文件资源链接
+62	get_group_files_by_folder	✅	✅	共有	文件扩展	获取群文件夹文件列表	文件:获取群子目录文件列表
+63	get_group_ignore_add_request	✅	✅	共有	群组扩展	获取群被忽略的加群请求	群组:获取已过滤的加群通知
+64	get_group_ignored_notifies	✅	❌	仅NapCat	群组扩展	获取群忽略通知	
+65	get_group_info_ex	✅	❌	仅NapCat	群组扩展	获取群详细信息 (扩展)	
+66	get_group_msg_history	✅	✅	共有	消息扩展	获取群历史消息	消息:获取群历史消息
+67	get_group_root_files	✅	✅	共有	文件扩展	获取群根目录文件列表	文件:获取群根目录文件列表
+68	get_group_shut_list	✅	✅	共有	群组扩展	获取群禁言列表	群组:获取被禁言群员列表
+69	get_group_system_msg	✅	✅	共有	消息扩展	获取群系统消息	群组:获取群系统消息
+70	get_guild_list	✅	❌	仅NapCat	群组扩展	获取频道列表	
+71	get_guild_service_profile	✅	❌	仅NapCat	文件扩展	获取频道个人信息	
+72	get_mini_app_ark	✅	❌	仅NapCat	Ark/小程序/表情	获取小程序 Ark	
+73	get_online_clients	✅	❌	仅NapCat	系统扩展	获取在线客户端	
+74	get_online_file_msg	✅	❌	仅NapCat	消息扩展	获取在线文件消息	
+75	get_private_file_url	✅	✅	共有	文件扩展	获取私聊文件URL	文件:获取私聊文件资源链接
+76	get_profile_like	✅	✅	共有	文件扩展	获取资料点赞	用户:获取我赞过谁列表
+77	get_profile_like_me	❌	✅	仅LlBot	文件扩展		用户:获取谁赞过我列表
+78	get_qq_avatar	❌	✅	仅LlBot	用户扩展		用户:获取QQ或QQ群头像
+79	get_qun_album_list	✅	❌	仅NapCat	群组扩展	获取群相册列表	
+80	get_recent_contact	✅	❌	仅NapCat	系统扩展	获取最近会话	
+81	get_recommend_face	❌	✅	仅LlBot	Ark/小程序/表情		其他:获取推荐表情
+82	get_rkey	✅	✅	共有	系统扩展	获取扩展 RKey	其他:获取图片rkey
+83	get_rkey_server	✅	❌	仅NapCat	系统扩展	获取 RKey 服务器	
+84	get_robot_uin_range	✅	✅	共有	用户扩展	获取机器人 UIN 范围	用户:获取官方机器人QQ号范围
+85	get_share_link	✅	❌	仅NapCat	文件扩展	获取文件分享链接	
+86	get_unidirectional_friend_list	✅	❌	仅NapCat	用户扩展	获取单向好友列表	
+87	group_poke	✅	✅	共有	消息扩展	发送戳一戳	群组:群员戳一戳（双击头像）
+88	mark_group_msg_as_read	✅	❌	仅NapCat	Ark/小程序/表情	标记群聊已读	
+89	mark_msg_as_read	✅	✅	共有	Ark/小程序/表情	标记消息已读 (Go-CQHTTP)	消息:标记消息已读
+90	mark_private_msg_as_read	✅	❌	仅NapCat	Ark/小程序/表情	标记私聊已读	
+91	move_group_file	✅	✅	共有	文件扩展	移动群文件	文件:移动群文件
+92	nc_get_packet_status	✅	❌	仅NapCat	系统扩展	获取Packet状态	
+93	nc_get_rkey	✅	❌	仅NapCat	系统扩展	获取 RKey	
+94	nc_get_user_status	✅	❌	仅NapCat	系统扩展	获取用户在线状态	
+95	ocr_image	✅	✅	共有	系统扩展	图片 OCR 识别	其他:图片 OCR
+96	receive_online_file	✅	❌	仅NapCat	文件扩展	接收在线文件	
+97	refuse_online_file	✅	❌	仅NapCat	文件扩展	拒绝在线文件	
+98	rename_group_file	✅	✅	共有	文件扩展	重命名群文件	文件:重命名群文件
+99	rename_group_file_folder	❌	✅	仅LlBot	文件扩展		文件:重命名群文件文件夹名
+100	reshare_flash_file	❌	✅	仅LlBot	消息扩展		文件:重新分享闪传文件
+101	scan_qrcode	❌	✅	仅LlBot	系统扩展		系统:扫描二维码
+102	send_ark_share	✅	❌	仅NapCat	Ark/小程序/表情	分享用户 (Ark)	
+103	send_flash_msg	✅	❌	仅NapCat	消息扩展	发送闪传消息	
+104	send_forward_msg	✅	❌	仅NapCat	消息扩展	发送合并转发消息	
+105	send_group_ai_record	✅	✅	共有	消息扩展	发送群 AI 语音	消息:发送群 Ai 语音
+106	send_group_ark_share	✅	❌	仅NapCat	Ark/小程序/表情	分享群 (Ark)	
+107	send_group_forward_msg	✅	✅	共有	消息扩展	发送群合并转发消息	消息:发送群聊合并转发消息
+108	send_group_sign	✅	✅	共有	群组扩展	群打卡	群组:群打卡
+109	send_online_file	✅	❌	仅NapCat	文件扩展	发送在线文件	
+110	send_online_folder	✅	❌	仅NapCat	文件扩展	发送在线文件夹	
+111	send_packet	✅	❌	仅NapCat	系统扩展	发送原始数据包	
+112	send_pb	❌	✅	仅LlBot	其他		其他:发送Protobuf数据包
+113	send_poke	✅	✅	共有	消息扩展	发送戳一戳	消息:发送戳一戳
+114	send_private_forward_msg	✅	✅	共有	消息扩展	发送私聊合并转发消息	消息:发送私聊合并转发消息
+115	set_diy_online_status	✅	❌	仅NapCat	系统扩展	设置自定义在线状态	
+116	set_doubt_friends_add_request	✅	✅	共有	用户扩展	处理可疑好友申请	用户:处理被过滤好友请求
+117	set_essence_msg	✅	✅	共有	消息扩展	设置精华消息	群组:设置群精华消息
+118	set_friend_category	❌	✅	仅LlBot	用户扩展		用户:移动好友分组
+119	set_friend_remark	✅	✅	共有	Ark/小程序/表情	设置好友备注	用户:设置好友备注
+120	set_group_add_option	✅	❌	仅NapCat	群组扩展	设置群加群选项	
+121	set_group_album_media_like	✅	❌	仅NapCat	群组扩展	点赞群相册媒体	
+122	set_group_file_forever	❌	✅	仅LlBot	文件扩展		文件:群文件转永久
+123	set_group_kick_members	✅	❌	仅NapCat	群组扩展	批量踢出群成员	
+124	set_group_msg_mask	❌	✅	仅LlBot	消息扩展		群组:设置群消息接收方式
+125	set_group_portrait	✅	❌	仅NapCat	群组扩展	设置群头像	
+126	set_group_remark	✅	✅	共有	Ark/小程序/表情	设置群备注	群组:设置群备注
+127	set_group_robot_add_option	✅	❌	仅NapCat	群组扩展	设置群机器人加群选项	
+128	set_group_search	✅	❌	仅NapCat	群组扩展	设置群搜索选项	
+129	set_group_sign	✅	❌	仅NapCat	群组扩展	群打卡	
+130	set_group_todo	✅	❌	仅NapCat	群组扩展	设置群待办	
+131	set_input_status	✅	❌	仅NapCat	系统扩展	设置输入状态	
+132	set_msg_emoji_like	✅	✅	共有	消息扩展	设置消息表情点赞	消息:表情回应消息（支持取消）
+133	set_online_status	✅	✅	共有	系统扩展	设置在线状态	系统:设置在线状态
+134	set_qq_avatar	✅	✅	共有	用户扩展	设置QQ头像	用户:设置个人头像
+135	set_qq_profile	✅	✅	共有	文件扩展	设置QQ资料	用户:设置登录号资料
+136	set_self_longnick	✅	❌	仅NapCat	其他	设置个性签名	
+137	test_download_stream	✅	❌	仅NapCat	文件扩展	测试下载流	
+138	trans_group_file	✅	❌	仅NapCat	文件扩展	传输群文件	
+139	translate_en2zh	✅	❌	仅NapCat	系统扩展	英文单词翻译	
+140	unset_msg_emoji_like	❌	✅	仅LlBot	消息扩展		消息:取消消息表情回应
+141	upload_file_stream	✅	❌	仅NapCat	文件扩展	上传文件流	
+142	upload_group_album	❌	✅	仅LlBot	文件扩展		群组:上传群相册
+143	upload_group_file	✅	✅	共有	文件扩展	上传群文件	文件:上传群文件
+144	upload_image_to_qun_album	✅	❌	仅NapCat	文件扩展	上传图片到群相册	
+145	upload_private_file	✅	✅	共有	文件扩展	上传私聊文件	文件:上传私聊文件
+146	voice_msg_to_text	❌	✅	仅LlBot	消息扩展		消息:语音消息转文字

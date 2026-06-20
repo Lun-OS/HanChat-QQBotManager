@@ -1,0 +1,82 @@
+package utils
+
+import (
+	"os"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
+)
+
+// InitLogger 初始化基础 zap.Logger
+func InitLogger(cfg LoggerConfig) *zap.Logger {
+	level := zap.InfoLevel
+	switch strings.ToLower(cfg.Level) {
+	case "debug":
+		level = zap.DebugLevel
+	case "warn":
+		level = zap.WarnLevel
+	case "error":
+		level = zap.ErrorLevel
+	}
+
+	encoderCfg := zapcore.EncoderConfig{
+		TimeKey:       "timestamp",
+		LevelKey:      "level",
+		NameKey:       "logger",
+		CallerKey:     "caller",
+		MessageKey:    "message",
+		StacktraceKey: "stack",
+		LineEnding:    zapcore.DefaultLineEnding,
+		EncodeLevel:   zapcore.LowercaseLevelEncoder,
+		EncodeTime: func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
+		},
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	var encoder zapcore.Encoder
+	if strings.ToLower(cfg.Format) == "json" {
+		encoder = zapcore.NewJSONEncoder(encoderCfg)
+	} else {
+		encoder = zapcore.NewConsoleEncoder(encoderCfg)
+	}
+
+	// 文件输出（滚动）
+	lj := &lumberjack.Logger{
+		Filename:   cfg.Dir + "/combined.log",
+		MaxSize:    20, // MB
+		MaxBackups: 0,
+		MaxAge:     14, // days
+		Compress:   false,
+	}
+
+	fileWS := zapcore.AddSync(lj)
+	consoleWS := zapcore.AddSync(os.Stdout)
+
+	asyncFileWS := NewAsyncWriter(fileWS, 1000)
+
+	fileCore := zapcore.NewCore(encoder, zapcore.AddSync(asyncFileWS), level)
+	consoleCore := zapcore.NewCore(encoder, consoleWS, zap.WarnLevel)
+
+	core := zapcore.NewTee(
+		consoleCore,
+		fileCore,
+	)
+
+	logger := zap.New(core, zap.AddCaller())
+
+	// 注册 cleanup 函数，确保程序退出时刷新日志缓冲区
+	// 注意：这里不直接调用 Close()，而是由调用者负责在 Shutdown 时关闭
+	_ = asyncFileWS // 避免未使用变量警告（实际使用通过 fileCore）
+
+	return logger
+}
+
+// NewModuleLogger 返回带 module 字段的 SugaredLogger
+func NewModuleLogger(base *zap.Logger, module string) *zap.SugaredLogger {
+	return base.With(zap.String("module", module)).Sugar()
+}

@@ -1,0 +1,17 @@
+
+web/node_modules/
+web/dist/
+build/
+plugins/
+test/
+log/
+logs/
+cache/
+.claude/
+.trae/
+.kiro/
+.workbuddy/
+.vs/
+.workbuddy/
+*.exe
+.env

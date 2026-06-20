@@ -1,0 +1,65 @@
+/* 性能模式（减少动画）样式
+ * 当 <html> 标记了 data-performance-mode="true" 时启用
+ * 由 usePerformanceMode hook 控制
+ *
+ * 目标：完全禁用过渡/动画/滤镜，最大化低端设备性能
+ */
+
+html[data-performance-mode='true'] *,
+html[data-performance-mode='true'] *::before,
+html[data-performance-mode='true'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 性能模式下，移除耗时的 will-change 提示 */
+html[data-performance-mode='true'] * {
+  will-change: auto !important;
+}
+
+/* 性能模式下，禁用 StarField 等自定义 keyframe 动画 */
+html[data-performance-mode='true'] .star-twinkle,
+html[data-performance-mode='true'] [class*='twinkle'],
+html[data-performance-mode='true'] [class*='pulse'] {
+  animation: none !important;
+}
+
+/* 性能模式下，禁用 Tailwind 的 animate-spin / animate-ping / animate-pulse / animate-bounce */
+html[data-performance-mode='true'] .animate-spin,
+html[data-performance-mode='true'] .animate-ping,
+html[data-performance-mode='true'] .animate-pulse,
+html[data-performance-mode='true'] .animate-bounce {
+  animation: none !important;
+}
+
+/* 性能模式下，关闭耗时的 backdrop-filter（毛玻璃）效果
+   保留视觉占位，仅关闭滤镜实现，显著降低移动端 GPU 占用 */
+html[data-performance-mode='true'] .backdrop-blur-sm,
+html[data-performance-mode='true'] .backdrop-blur,
+html[data-performance-mode='true'] .backdrop-blur-md,
+html[data-performance-mode='true'] .backdrop-blur-lg,
+html[data-performance-mode='true'] .backdrop-blur-xl,
+html[data-performance-mode='true'] .backdrop-blur-2xl,
+html[data-performance-mode='true'] .backdrop-blur-3xl,
+html[data-performance-mode='true'] [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* 性能模式下，关闭大模糊半径的视觉滤镜 */
+html[data-performance-mode='true'] .blur-\[100px\],
+html[data-performance-mode='true'] .blur-\[110px\],
+html[data-performance-mode='true'] .blur-\[130px\],
+html[data-performance-mode='true'] .blur-\[90px\],
+html[data-performance-mode='true'] [class*='blur-['] {
+  filter: none !important;
+}
+
+/* 性能模式下，禁用平滑滚动 */
+html[data-performance-mode='true'] {
+  scroll-behavior: auto !important;
+}
