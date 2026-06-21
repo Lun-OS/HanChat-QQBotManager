@@ -28,7 +28,7 @@ interface BlockGeneratorConfig {
 }
 
 function resolveTemplate(template: string, block: Blockly.Block, gen: any): string {
-  return template.replace(/\$\{(\w+):([^}]+)\}/g, (_match, kind: string, expr: string) => {
+  return template.replace(/\$\{(\w+):((?:[^}]|\}(?!\$))+)\}/g, (_match, kind: string, expr: string) => {
     switch (kind) {
       case 'field':
         return block.getFieldValue(expr) || '';
@@ -126,14 +126,31 @@ function registerTemplateGenerator(gen: any, blockType: string, config: BlockGen
   }
 }
 
+const configGeneratorTypes = new WeakMap<any, string[]>();
+
 function registerConfigGenerators(gen: any): void {
   const config = getCurrentConfig();
-  if (!config || !config.blocks) return;
+  // 清理该生成器实例之前动态注册的生成器，避免旧配置残留
+  const prevTypes = configGeneratorTypes.get(gen);
+  if (prevTypes) {
+    for (const type of prevTypes) {
+      if (gen.forBlock[type]) {
+        delete gen.forBlock[type];
+      }
+    }
+  }
+  const registeredTypes: string[] = [];
+  if (!config || !config.blocks) {
+    configGeneratorTypes.set(gen, registeredTypes);
+    return;
+  }
   for (const block of config.blocks) {
     if (block.generator && block.generator.type !== 'custom') {
       registerTemplateGenerator(gen, block.type, block.generator as BlockGeneratorConfig);
+      registeredTypes.push(block.type);
     }
   }
+  configGeneratorTypes.set(gen, registeredTypes);
 }
 
 // 生成器实例存储（按工作空间ID隔离，避免多实例冲突）
@@ -299,7 +316,10 @@ export function generateLuaCode(workspace: Blockly.Workspace, metadata: PluginMe
   if (!generator) {
     generator = createLuaGenerator(workspaceId);
   }
-  
+
+  // 每次生成代码前重新注册配置生成器，确保配置更新后旧的模板生成器被清理
+  registerConfigGenerators(generator);
+
   // 生成代码前重置计数器和运行时库追踪
   arrayCounters.set(generator, 1);
   runtimeLibraryUsage.set(generator, new Set());

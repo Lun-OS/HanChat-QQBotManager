@@ -47,6 +47,7 @@ Blockly.fieldRegistry.register('field_multilinetext', FieldMultilineText);
 let registered = false;
 let currentBlocks: any[] = [];
 let currentConfig: BlocklyConfigData | null = null;
+let registeredBlockTypes: string[] = [];
 
 const BLOCKLY_CONFIG_STORAGE_KEY = 'blockly_config_data';
 const BLOCKLY_CONFIG_TIMESTAMP_KEY = 'blockly_config_timestamp';
@@ -59,6 +60,13 @@ export function defineCustomBlocks(blocks?: any[]): void {
   if (blocksToRegister.length === 0) {
     return;
   }
+  // 清理所有之前注册的自定义积木，避免旧配置残留
+  for (const type of registeredBlockTypes) {
+    if (Blockly.Blocks[type]) {
+      delete Blockly.Blocks[type];
+    }
+  }
+  registeredBlockTypes = [];
   for (const block of blocksToRegister) {
     if (block.type && Blockly.Blocks[block.type]) {
       delete Blockly.Blocks[block.type];
@@ -73,6 +81,13 @@ export function defineCustomBlocks(blocks?: any[]): void {
       originalInit.call(this);
       this.setOutput(true, 'Boolean');
     };
+  }
+
+  // 记录本次注册的所有积木类型，以便下次重新初始化时清理
+  for (const block of blocksToRegister) {
+    if (block.type) {
+      registeredBlockTypes.push(block.type);
+    }
   }
 
   registered = true;
