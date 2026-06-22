@@ -301,20 +301,31 @@ func (a *WSClientAdapter) OnEvent(selfID string, rawData []byte) {
 	eventType := extractEventType(rawData)
 	eventPreview := truncateString(string(rawData), 300)
 
+	// 关键修复: 先在 RLock 内快速快照客户端列表，释放锁后再做网络 I/O，
+	// 避免 WriteMessage 期间 GetHandler 的 defer 写锁被长时间阻塞。
+	a.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(a.clients))
+	for conn := range a.clients {
+		conns = append(conns, conn)
+	}
+	clientCount := len(conns)
+	a.mu.RUnlock()
+
+	if clientCount == 0 {
+		return
+	}
+
 	a.logger.Infow("转发事件到客户端",
 		"name", a.Name(),
 		"event_type", eventType,
 		"data_length", len(rawData),
-		"connected_clients", len(a.clients),
+		"connected_clients", clientCount,
 		"event_preview", eventPreview,
 	)
 
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
+	// 锁外执行网络写入，避免持锁 I/O 导致断连清理延迟。
 	disconnected := make([]*websocket.Conn, 0)
-
-	for conn := range a.clients {
+	for _, conn := range conns {
 		if err := conn.WriteMessage(websocket.TextMessage, rawData); err != nil {
 			a.logger.Warnw("发送事件失败-客户端可能已断开",
 				"name", a.Name(),
@@ -329,12 +340,27 @@ func (a *WSClientAdapter) OnEvent(selfID string, rawData []byte) {
 		}
 	}
 
+	// 清理死连接（写锁短暂持有，不涉及网络 I/O）
 	if len(disconnected) > 0 {
-		a.UpdateMetrics(func(m *models.AdapterMetrics) { m.EventsFailed += int64(len(disconnected)) })
+		a.mu.Lock()
+		for _, conn := range disconnected {
+			// 二次校验：可能 GetHandler 的 defer 已经把它从 map 删了
+			if _, ok := a.clients[conn]; ok {
+				delete(a.clients, conn)
+				conn.Close()
+			}
+		}
+		remaining := len(a.clients)
+		a.mu.Unlock()
+
+		a.UpdateMetrics(func(m *models.AdapterMetrics) {
+			m.ClientsCount = remaining
+			m.EventsFailed += int64(len(disconnected))
+		})
 		a.logger.Warnw("部分客户端发送失败",
 			"name", a.Name(),
 			"failed_count", len(disconnected),
-			"total_clients", len(a.clients),
+			"total_clients", remaining,
 		)
 	}
 

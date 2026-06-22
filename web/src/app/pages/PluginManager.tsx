@@ -645,6 +645,10 @@ const QuickImportDialog: React.FC<QuickImportDialogProps> = ({ isOpen, onConfirm
                   automaticLayout: true,
                   tabSize: 2,
                   wordWrap: 'on',
+                  // 关闭自动格式化,保留用户原始排版
+                  formatOnPaste: false,
+                  formatOnType: false,
+                  formatOnSave: false,
                 }}
               />
             </div>
@@ -937,6 +941,10 @@ const FileEditor: React.FC<FileEditorProps> = ({
                 automaticLayout: true,
                 tabSize: 2,
                 wordWrap: 'on',
+                // 关闭自动格式化,保留用户原始排版
+                formatOnPaste: false,
+                formatOnType: false,
+                formatOnSave: false,
               }}
               theme="vs-dark"
             />
@@ -1553,9 +1561,8 @@ export function PluginManager() {
     try {
       const res = await pluginManagerApi.writeFile(editingFile.path, content);
       if (res.success) {
+        setFileContent(content);
         toast.success('保存成功');
-        setShowEditor(false);
-        setEditingFile(null);
       }
     } catch (error) {
       toast.error('保存失败');

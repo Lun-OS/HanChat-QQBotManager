@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -12,9 +13,13 @@ import (
 // HTTPClientAdapter HTTP客户端/WebHook适配器
 type HTTPClientAdapter struct {
 	*BaseAdapter
-	config models.HTTPClientConfig
-	client *http.Client
-	filter *EventFilter
+	config  models.HTTPClientConfig
+	client  *http.Client
+	filter  *EventFilter
+	// 关键修复: 限流器 + 全局超时上下文，避免下游故障时 OnEvent 长时间阻塞。
+	// 每个事件的最坏耗时 = 串行重试 maxRetries 次。
+	// 引入 workerSem 控制并发数，sendCtx 控制单次 OnEvent 整体上限。
+	workerSem chan struct{}
 }
 
 // NewHTTPClientAdapter 创建HTTP客户端适配器
@@ -40,6 +45,9 @@ func NewHTTPClientAdapter(config models.HTTPClientConfig, logger Logger) *HTTPCl
 			Timeout: timeout,
 		},
 		filter: NewEventFilter(config.EventFilter, logger),
+		// 关键修复: 限制单个 WebHook 同时只有 4 个事件在处理，避免下游慢/故障时
+		// OnEvent goroutine 无限堆积。
+		workerSem: make(chan struct{}, 4),
 	}
 }
 
@@ -107,6 +115,39 @@ func (a *HTTPClientAdapter) OnEvent(selfID string, rawData []byte) {
 		return
 	}
 
+	// 关键修复: 限流器满则丢弃，避免 goroutine 无限堆积。
+	// 这里采用非阻塞获取令牌的方式，丢弃而非排队等待。
+	select {
+	case a.workerSem <- struct{}{}:
+	default:
+		a.logger.Warnw("WebHook并发已饱和，丢弃事件",
+			"name", a.Name(),
+			"event_preview", truncateString(string(rawData), 100),
+		)
+		a.UpdateMetrics(func(m *models.AdapterMetrics) { m.EventsFailed++ })
+		return
+	}
+	defer func() { <-a.workerSem }()
+
+	// 关键修复: 给整个发送流程一个总超时上下文，避免 maxRetries * (sleep+request) 失控。
+	maxRetries := a.config.MaxRetries
+	if maxRetries > 20 {
+		maxRetries = 20
+	}
+	// 总超时 = (maxRetries + 1) * 单次超时 + 累计重试退避（线性），并留 30% 余量。
+	totalBudget := time.Duration(maxRetries+1) * a.client.Timeout
+	backoffBudget := time.Duration(0)
+	for i := 1; i <= maxRetries; i++ {
+		backoffBudget += time.Duration(i*200) * time.Millisecond
+	}
+	totalBudget += backoffBudget
+	totalBudget = totalBudget * 13 / 10 // +30% 缓冲
+	if totalBudget > 2*time.Minute {
+		totalBudget = 2 * time.Minute // 硬上限
+	}
+	sendCtx, cancel := context.WithTimeout(context.Background(), totalBudget)
+	defer cancel()
+
 	eventType := extractEventType(rawData)
 
 	a.logger.Infow("发送WebHook事件",
@@ -115,15 +156,22 @@ func (a *HTTPClientAdapter) OnEvent(selfID string, rawData []byte) {
 		"data_length", len(rawData),
 		"target_url", a.config.URL,
 		"event_preview", truncateString(string(rawData), 300),
+		"total_budget_ms", totalBudget.Milliseconds(),
 	)
-
-	maxRetries := a.config.MaxRetries
-	if maxRetries > 20 {
-		maxRetries = 20
-	}
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// 关键修复: 检查 sendCtx.Done() 提前退出可中断重试循环。
+		if sendCtx.Err() != nil {
+			a.logger.Warnw("WebHook发送被总超时上下文取消",
+				"name", a.Name(),
+				"attempt", attempt,
+				"error", sendCtx.Err(),
+			)
+			lastErr = sendCtx.Err()
+			break
+		}
+
 		if attempt > 0 {
 			a.logger.Infow("WebHook重试发送",
 				"name", a.Name(),
@@ -133,7 +181,16 @@ func (a *HTTPClientAdapter) OnEvent(selfID string, rawData []byte) {
 				"last_error", lastErr,
 				"retry_delay_ms", attempt*200,
 			)
-			time.Sleep(time.Duration(attempt*200) * time.Millisecond)
+			// 关键修复: 用 select 让 sleep 可被 sendCtx 取消。
+			select {
+			case <-time.After(time.Duration(attempt*200) * time.Millisecond):
+			case <-sendCtx.Done():
+				lastErr = sendCtx.Err()
+				attempt = maxRetries + 1 // 跳出外层 for
+			}
+			if attempt > maxRetries {
+				break
+			}
 		}
 
 		lastErr = a.doSend(selfID, rawData)

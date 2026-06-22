@@ -29,22 +29,26 @@ type WSDebugService struct {
 	logger         *zap.SugaredLogger
 	reverseWS      *ReverseWebSocketService
 	debugToken     string
-	
+
 	// 调试客户端管理
 	clients        map[string]*WSDebugClient // self_id -> client
 	clientsMu      sync.RWMutex
+
+	// 关键修复: 防止 NewWSDebugService 被多次调用时重复注册事件处理器，
+	// 否则 ReverseWebSocketService 的处理器切片会被无限追加，事件被广播 N 次。
+	once           sync.Once
 }
 
 // NewWSDebugService 创建WebSocket调试服务
 func NewWSDebugService(baseLogger *zap.Logger, reverseWS *ReverseWebSocketService) *WSDebugService {
 	logger := utils.NewModuleLogger(baseLogger, "service.ws_debug")
-	
+
 	// 从环境变量读取调试Token
 	debugToken := os.Getenv("WEBSOCKET_DEBUG_TOKEN")
 	if debugToken == "" {
 		debugToken = "debug_default_token"
 	}
-	
+
 	service := &WSDebugService{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -58,10 +62,10 @@ func NewWSDebugService(baseLogger *zap.Logger, reverseWS *ReverseWebSocketServic
 		debugToken: debugToken,
 		clients:    make(map[string]*WSDebugClient),
 	}
-	
-	// 注册消息拦截器 - 直接透传原始消息
-	service.registerInterceptors()
-	
+
+	// 关键修复: 用 sync.Once 守护注册，避免重复实例化导致处理器重复追加。
+	service.once.Do(service.registerInterceptors)
+
 	return service
 }
 
@@ -164,8 +168,16 @@ func (c *WSDebugClient) writeLoop() {
 
 // readLoop 读取循环 - 处理从调试客户端发来的消息（API调用）
 func (c *WSDebugClient) readLoop(service *WSDebugService) {
-	defer c.Close()
-	
+	// 关键修复: defer 中先从 service 的 clients map 移除自己，再关闭资源。
+	// 之前只有 c.Close()，导致 map 中残留死对象，新客户端接入前都会触发对死对象的 safeSend。
+	defer func() {
+		if service != nil {
+			service.RemoveClient(c.selfID)
+		} else {
+			c.Close()
+		}
+	}()
+
 	for {
 		messageType, data, err := c.conn.ReadMessage()
 		if err != nil {
@@ -176,11 +188,11 @@ func (c *WSDebugClient) readLoop(service *WSDebugService) {
 			}
 			return
 		}
-		
+
 		if messageType != websocket.TextMessage {
 			continue
 		}
-		
+
 		// 直接透传原始数据到LLBot，不做任何解析和修改
 		service.forwardToBot(c, data)
 	}

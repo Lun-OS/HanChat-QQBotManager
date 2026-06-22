@@ -28,7 +28,8 @@ interface BlockGeneratorConfig {
 }
 
 function resolveTemplate(template: string, block: Blockly.Block, gen: any): string {
-  return template.replace(/\$\{(\w+):((?:[^}]|\}(?!\$))+)\}/g, (_match, kind: string, expr: string) => {
+  // 使用 [^{}]* 严格禁止 content 中出现 { 或 }，避免贪婪匹配跨越多个占位符
+  return template.replace(/\$\{(\w+):([^{}]*)\}/g, (_match, kind: string, expr: string) => {
     switch (kind) {
       case 'field':
         return block.getFieldValue(expr) || '';
@@ -385,20 +386,22 @@ function registerLuaGenerators(generator: any) {
   generator.forBlock['message_send_group'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `message.send_group(${groupId}, ${content})\n`;
+    // content 必须是 string
+    return `message.send_group(${groupId}, tostring(${content}))\n`;
   };
 
   generator.forBlock['message_send_private'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `message.send_private(${userId}, ${content})\n`;
+    return `message.send_private(${userId}, tostring(${content}))\n`;
   };
 
   generator.forBlock['message_reply_private'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `message.reply_private(${userId}, ${messageId}, ${content})
+    // messageId 应该是 number
+    return `message.reply_private(${userId}, tonumber(${messageId}) or 0, tostring(${content}))
 `;
   };
 
@@ -406,14 +409,15 @@ function registerLuaGenerators(generator: any) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `message.reply_group(${groupId}, ${messageId}, ${content})
+    // messageId 应该是 number
+    return `message.reply_group(${groupId}, tonumber(${messageId}) or 0, tostring(${content}))
 `;
   };
 
   generator.forBlock['message_reply'] = function(block: Blockly.Block) {
     const event = generator.valueToCode(block, 'EVENT', generator.ORDER_NONE) ?? 'nil';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `message.reply(${event}, ${content})
+    return `message.reply(${event}, tostring(${content}))
 `;
   };
 
@@ -423,7 +427,7 @@ function registerLuaGenerators(generator: any) {
     const onSuccess = generator.statementToCode(block, 'ON_SUCCESS') || '';
     const onError = generator.statementToCode(block, 'ON_ERROR') || '';
 
-    return `local _ok, _result = pcall(message.send_private, ${userId}, ${content})
+    return `local _ok, _result = pcall(message.send_private, ${userId}, tostring(${content}))
 if _ok then
 ${onSuccess}else
 ${onError}end
@@ -436,7 +440,7 @@ ${onError}end
     const onSuccess = generator.statementToCode(block, 'ON_SUCCESS') || '';
     const onError = generator.statementToCode(block, 'ON_ERROR') || '';
 
-    return `local _ok, _result = pcall(message.send_group, ${groupId}, ${content})
+    return `local _ok, _result = pcall(message.send_group, ${groupId}, tostring(${content}))
 if _ok then
 ${onSuccess}else
 ${onError}end
@@ -449,7 +453,7 @@ ${onError}end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'result';
 
     // 后端统一返回表类型，包含 success 字段
-    return `_G["${varName}"] = message.send_group(${groupId}, ${content})
+    return `_G["${varName}"] = message.send_group(${groupId}, tostring(${content}))
 -- 确保返回的是表类型
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
@@ -463,7 +467,7 @@ end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'result';
 
     // 后端统一返回表类型，包含 success 字段
-    return `_G["${varName}"] = message.send_private(${userId}, ${content})
+    return `_G["${varName}"] = message.send_private(${userId}, tostring(${content}))
 -- 确保返回的是表类型
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
@@ -472,10 +476,62 @@ end
   };
 
   // ========== 事件处理积木 ==========
+
+  // 工具函数：根据积木的过滤字段生成 Lua filter 表（不含大括号）
+  // 返回 null 表示无需过滤（保持原行为）
+  function buildEventFilter(block: Blockly.Block): string | null {
+    const rawType = (block.getFieldValue('TYPE_FILTER') || '').trim();
+    const includeKw = (block.getFieldValue('INCLUDE_KW') || '').trim();
+    const excludeKw = (block.getFieldValue('EXCLUDE_KW') || '').trim();
+
+    const lines: string[] = [];
+    if (rawType) {
+      // 兼容 "type1|type2" 形式（多选用竖线分隔）
+      const types = rawType.split('|').map(s => s.trim()).filter(s => s);
+      if (types.length > 0) {
+        const items = types.map(t => `"${t.replace(/"/g, '\\"')}"`).join(', ');
+        lines.push(`whitelistTypes = { ${items} }`);
+      }
+    }
+    if (includeKw) {
+      const kws = includeKw.split(',').map(s => s.trim()).filter(s => s);
+      if (kws.length > 0) {
+        const items = kws.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ');
+        lines.push(`whitelistKeywords = { ${items} }`);
+      }
+    }
+    if (excludeKw) {
+      const kws = excludeKw.split(',').map(s => s.trim()).filter(s => s);
+      if (kws.length > 0) {
+        const items = kws.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ');
+        lines.push(`blacklistKeywords = { ${items} }`);
+      }
+    }
+
+    if (lines.length === 0) {
+      return null;
+    }
+    return '\n    ' + lines.join(',\n    ') + ',\n  ';
+  }
+
+  // 生成带可选 filter 的事件 handler 包装
+  function genEventHandlerCode(handlerName: string, varName: string, statements: string, block: Blockly.Block): string {
+    const filter = buildEventFilter(block);
+    const filterArg = filter ? `, {${filter}}` : '';
+    return `${handlerName}(function(${varName})${filterArg}
+  if type(${varName}) ~= "table" then
+    ${varName} = {}
+  end
+  _G["${varName}"] = ${varName}
+${statements}end)
+
+`;
+  }
+
+  // 原版（不带筛选） - 保持原有行为不变
   generator.forBlock['event_on_message'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_message(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
@@ -489,7 +545,6 @@ ${statements}end)
   generator.forBlock['event_on_notice'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_notice(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
@@ -503,7 +558,6 @@ ${statements}end)
   generator.forBlock['event_on_request'] = function(block: Blockly.Block) {
     const statements = generator.statementToCode(block, 'HANDLER');
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
-    // 使用与 variables_get/variables_set 一致的键名，确保跨函数共享
     return `on_request(function(${varName})
   if type(${varName}) ~= "table" then
     ${varName} = {}
@@ -512,6 +566,25 @@ ${statements}end)
 ${statements}end)
 
 `;
+  };
+
+  // 带筛选的版本
+  generator.forBlock['event_on_message_filtered'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return genEventHandlerCode('on_message', varName, statements, block);
+  };
+
+  generator.forBlock['event_on_notice_filtered'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return genEventHandlerCode('on_notice', varName, statements, block);
+  };
+
+  generator.forBlock['event_on_request_filtered'] = function(block: Blockly.Block) {
+    const statements = generator.statementToCode(block, 'HANDLER');
+    const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'blockly_v__event';
+    return genEventHandlerCode('on_request', varName, statements, block);
   };
 
   generator.forBlock['event_on_init'] = function(block: Blockly.Block) {
@@ -770,13 +843,15 @@ ${statements}end)
   generator.forBlock['msg_contains_text'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`msg.contains_keyword(${message}, ${text})`, generator.ORDER_HIGH];
+    // text 必须是 string
+    return [`msg.contains_keyword(${message}, tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['msg_contains_keyword'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
     const keyword = generator.valueToCode(block, 'KEYWORD', generator.ORDER_NONE) || '""';
-    return [`msg.contains_keyword(${message}, ${keyword})`, generator.ORDER_HIGH];
+    // keyword 必须是 string
+    return [`msg.contains_keyword(${message}, tostring(${keyword}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['msg_is_group'] = function(block: Blockly.Block) {
@@ -799,7 +874,8 @@ ${statements}end)
   generator.forBlock['msg_get_images'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
     const index = generator.valueToCode(block, 'INDEX', generator.ORDER_NONE) || '0';
-    return [`msg.get_images(${message}, ${index})`, generator.ORDER_HIGH];
+    // index 应该是 number
+    return [`msg.get_images(${message}, tonumber(${index}) or 1)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['msg_get_first_image'] = function(block: Blockly.Block) {
@@ -810,7 +886,8 @@ ${statements}end)
   generator.forBlock['msg_get_at_users'] = function(block: Blockly.Block) {
     const message = generator.valueToCode(block, 'MESSAGE', generator.ORDER_NONE) || 'event';
     const index = generator.valueToCode(block, 'INDEX', generator.ORDER_NONE) || '0';
-    return [`msg.get_at_users(${message}, ${index})`, generator.ORDER_HIGH];
+    // index 应该是 number
+    return [`msg.get_at_users(${message}, tonumber(${index}) or 1)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['msg_get_reply_info'] = function(block: Blockly.Block) {
@@ -1015,7 +1092,7 @@ ${statements}end)
     const items: string[] = [];
     for (let i = 0; i < itemCount; i++) {
       const item = generator.valueToCode(block, `ADD${i}`, generator.ORDER_CONCATENATION) || '""';
-      items.push(item);
+      items.push(`tostring(${item})`);
     }
     if (items.length === 1) {
       return [items[0], generator.ORDER_CONCATENATION];
@@ -1026,58 +1103,59 @@ ${statements}end)
   generator.forBlock['text_concat'] = function(block: Blockly.Block) {
     const text1 = generator.valueToCode(block, 'TEXT1', generator.ORDER_CONCATENATION) || '""';
     const text2 = generator.valueToCode(block, 'TEXT2', generator.ORDER_CONCATENATION) || '""';
-    return [`${text1} .. ${text2}`, generator.ORDER_CONCATENATION];
+    return [`tostring(${text1}) .. tostring(${text2})`, generator.ORDER_CONCATENATION];
   };
 
   generator.forBlock['text_substring'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const start = generator.valueToCode(block, 'START', generator.ORDER_NONE) || '1';
     const end = generator.valueToCode(block, 'END', generator.ORDER_NONE) || '1';
-    return [`string.sub(${text}, tonumber(${start}), tonumber(${end}))`, generator.ORDER_HIGH];
+    return [`string.sub(tostring(${text}), tonumber(${start}), tonumber(${end}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_left'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const length = generator.valueToCode(block, 'LENGTH', generator.ORDER_NONE) || '1';
-    return [`string.sub(${text}, 1, ${length})`, generator.ORDER_HIGH];
+    return [`string.sub(tostring(${text}), 1, tonumber(${length}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_right'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const length = generator.valueToCode(block, 'LENGTH', generator.ORDER_NONE) || '1';
-    return [`string.sub(${text}, -${length})`, generator.ORDER_HIGH];
+    return [`string.sub(tostring(${text}), -tonumber(${length}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_between'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const startText = generator.valueToCode(block, 'START_TEXT', generator.ORDER_NONE) || '""';
     const endText = generator.valueToCode(block, 'END_TEXT', generator.ORDER_NONE) || '""';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.get_between(${text}, ${startText}, ${endText})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 string.find 实现 get_between，避免依赖 blockly_text_utils
+    return [`tostring(string.match(tostring(${text}), tostring(${startText}) .. ".-" .. tostring(${endText})) or "")`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_index_of'] = function(block: Blockly.Block) {
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const occurrence = generator.valueToCode(block, 'OCCURRENCE', generator.ORDER_NONE) || '1';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.index_of(${text}, ${search}, ${occurrence})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 string.find 实现 index_of，避免依赖 blockly_text_utils
+    return [`((function() local s,t,o=tostring(${search}),tostring(${text}),tonumber(${occurrence}) or 1; local pos=1; for i=1,o do local p,e=string.find(t,s,pos,true); if not p then return 0 end; if i==o then return p end; pos=e+1 end return 0 end)())`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_count_occurrences'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
-    // 标记使用文本工具库
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.count_occurrences(${text}, ${search})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 gsub 的第二个返回值来计数，避免依赖 blockly_text_utils
+    // 内层 gsub 用于转义 search 中的 % 字符(因为 % 在 gsub 中是特殊字符)，需要 tostring 包裹
+    return [`((select(2, tostring(${text}):gsub(tostring(${search}):gsub("%%","%%%%"), ""))) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_replace_custom'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     const replace = generator.valueToCode(block, 'REPLACE', generator.ORDER_NONE) || '""';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.replace(${text}, ${search}, ${replace})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 string.gsub 替换占位符，不再依赖 blockly_text_utils 模块
+    // 外层 ((...)) 用于把 gsub 的多返回值（替换后字符串 + 替换次数）调整为单一字符串
+    return [`((string.gsub(tostring(${text}), tostring(${search}), tostring(${replace}))))`, generator.ORDER_HIGH];
   };
 
   // Handle old "text_replace" block from Blockly built-in (uses different input names)
@@ -1089,72 +1167,72 @@ ${statements}end)
     const hasStrInput = !!block.getInput('STR');
     const hasFromInput = !!block.getInput('FROM');
     const hasToInput = !!block.getInput('TO');
-    
+
     // Get values using the correct input names
     let text = '""';
     let search = '""';
     let replace = '""';
-    
+
     if (hasTextInput) {
       text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     } else if (hasStrInput) {
       text = generator.valueToCode(block, 'STR', generator.ORDER_NONE) || '""';
     }
-    
+
     if (hasSearchInput) {
       search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
     } else if (hasFromInput) {
       search = generator.valueToCode(block, 'FROM', generator.ORDER_NONE) || '""';
     }
-    
+
     if (hasReplaceInput) {
       replace = generator.valueToCode(block, 'REPLACE', generator.ORDER_NONE) || '""';
     } else if (hasToInput) {
       replace = generator.valueToCode(block, 'TO', generator.ORDER_NONE) || '""';
     }
-    
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.replace(${text}, ${search}, ${replace})`, generator.ORDER_HIGH];
+
+    // 使用 Lua 内置 string.gsub 替换占位符，不再依赖 blockly_text_utils 模块
+    return [`((string.gsub(tostring(${text}), tostring(${search}), tostring(${replace}))))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_contains'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const search = generator.valueToCode(block, 'SEARCH', generator.ORDER_NONE) || '""';
-    return [`(string.find(${text}, ${search}, 1, true) ~= nil)`, generator.ORDER_HIGH];
+    return [`(string.find(tostring(${text}), tostring(${search}), 1, true) ~= nil)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_count_lines'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.count_lines(${text})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 gsub 计数换行符，避免依赖 blockly_text_utils
+    return [`((function(t) local s=tostring(t); if s=="" then return 0 end; return (select(2,s:gsub("\\n","")) or 0)+1 end)(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_split'] = function(block: Blockly.Block) {
     const delimiter = generator.valueToCode(block, 'DELIMITER', generator.ORDER_NONE) || '""';
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.split(${text}, ${delimiter})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 gmatch 实现 split，避免依赖 blockly_text_utils
+    return [`((function(t,d) local r={} local s=tostring(t) local p=tostring(d) if p=="" then return {s} end; for w in s:gmatch("([^"..p.."]+)") do r[#r+1]=w end; return r end)(${text},${delimiter}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_match'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const pattern = generator.valueToCode(block, 'PATTERN', generator.ORDER_NONE) || '""';
-    return [`string.match(${text}, ${pattern})`, generator.ORDER_HIGH];
+    return [`string.match(tostring(${text}), tostring(${pattern}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_trim'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    markRuntimeLibraryUsed(generator, RuntimeLibraryType.TEXT_UTILS);
-    return [`blockly_text_utils.trim(${text})`, generator.ORDER_HIGH];
+    // 使用 Lua 内置 gsub 去除首尾空白，避免依赖 blockly_text_utils
+    return [`((tostring(${text}):gsub("^%s*(.-)%s*$", "%1")))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['text_change_case'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const caseType = block.getFieldValue('CASE') || 'upper';
     if (caseType === 'upper') {
-      return [`string.upper(${text})`, generator.ORDER_HIGH];
+      return [`string.upper(tostring(${text}))`, generator.ORDER_HIGH];
     } else {
-      return [`string.lower(${text})`, generator.ORDER_HIGH];
+      return [`string.lower(tostring(${text}))`, generator.ORDER_HIGH];
     }
   };
 
@@ -1192,7 +1270,8 @@ ${elseBranch}end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const card = generator.valueToCode(block, 'CARD', generator.ORDER_NONE) || '""';
-    return `group.set_card(${groupId}, ${userId}, ${card})\n`;
+    // card 必须是 string
+    return `group.set_card(${groupId}, ${userId}, tostring(${card}))\n`;
   };
 
   generator.forBlock['group_kick'] = function(block: Blockly.Block) {
@@ -1206,13 +1285,15 @@ ${elseBranch}end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const duration = generator.valueToCode(block, 'DURATION', generator.ORDER_NONE) || '0';
-    return `group.set_ban(${groupId}, ${userId}, ${duration})\n`;
+    // duration 应该是 number
+    return `group.set_ban(${groupId}, ${userId}, tonumber(${duration}) or 0)\n`;
   };
 
   generator.forBlock['group_set_name'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
-    return `group.set_name(${groupId}, ${name})\n`;
+    // name 必须是 string
+    return `group.set_name(${groupId}, tostring(${name}))\n`;
   };
 
   generator.forBlock['group_poke'] = function(block: Blockly.Block) {
@@ -1238,7 +1319,8 @@ ${elseBranch}end
   generator.forBlock['user_set_remark'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
-    return `user.set_remark(${userId}, ${remark})\n`;
+    // remark 必须是 string
+    return `user.set_remark(${userId}, tostring(${remark}))\n`;
   };
 
   generator.forBlock['user_poke'] = function(block: Blockly.Block) {
@@ -1249,12 +1331,14 @@ ${elseBranch}end
   // ========== 消息操作积木 ==========
   generator.forBlock['message_delete'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return `message.delete_msg(${messageId})\n`;
+    // messageId 应该是 number
+    return `message.delete_msg(tonumber(${messageId}) or 0)\n`;
   };
 
   generator.forBlock['message_set_essence'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return `message.set_essence(${messageId})\n`;
+    // messageId 应该是 number
+    return `message.set_essence(tonumber(${messageId}) or 0)\n`;
   };
 
   generator.forBlock['message_get_essence_list'] = function(block: Blockly.Block) {
@@ -1265,7 +1349,8 @@ ${elseBranch}end
   generator.forBlock['message_send_like'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const times = generator.valueToCode(block, 'TIMES', generator.ORDER_NONE) || '1';
-    return `message.send_like(${userId}, ${times})\n`;
+    // times 应该是 number
+    return `message.send_like(${userId}, tonumber(${times}) or 1)\n`;
   };
 
   // ========== 文件操作积木 ==========
@@ -1273,14 +1358,16 @@ ${elseBranch}end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
-    return `file.upload_group(${groupId}, ${file}, ${name})\n`;
+    // file/name 必须是 string
+    return `file.upload_group(${groupId}, tostring(${file}), tostring(${name}))\n`;
   };
 
   generator.forBlock['file_delete_group'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
     const busid = generator.valueToCode(block, 'BUSID', generator.ORDER_NONE) || '0';
-    return `file.delete_group_file(${groupId}, ${fileId}, ${busid})\n`;
+    // fileId 必须是 string
+    return `file.delete_group_file(${groupId}, tostring(${fileId}), ${busid})\n`;
   };
 
   generator.forBlock['file_get_group_system_info'] = function(block: Blockly.Block) {
@@ -1295,59 +1382,62 @@ ${elseBranch}end
 
   generator.forBlock['file_read'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return [`file.read(${path})`, generator.ORDER_HIGH];
+    // path 必须是 string
+    return [`file.read(tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_write'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return `file.write(${path}, ${content})\n`;
+    // path/content 必须是 string
+    return `file.write(tostring(${path}), tostring(${content}))\n`;
   };
 
   generator.forBlock['file_delete'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return `file.delete(${path})\n`;
+    return `file.delete(tostring(${path}))\n`;
   };
 
   generator.forBlock['file_exists'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return [`file.exists(${path})`, generator.ORDER_HIGH];
+    return [`file.exists(tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_mkdir'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return `file.mkdir(${path})\n`;
+    return `file.mkdir(tostring(${path}))\n`;
   };
 
   // ========== 工具积木 ==========
   generator.forBlock['utils_url_encode'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.url_encode(${text})`, generator.ORDER_HIGH];
+    // text 必须是 string
+    return [`utils.url_encode(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['utils_url_decode'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.url_decode(${text})`, generator.ORDER_HIGH];
+    return [`utils.url_decode(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['utils_base64_encode'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.base64_encode(${text})`, generator.ORDER_HIGH];
+    return [`utils.base64_encode(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['utils_base64_decode'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.base64_decode(${text})`, generator.ORDER_HIGH];
+    return [`utils.base64_decode(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['utils_html_escape'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.html_escape(${text})`, generator.ORDER_HIGH];
+    return [`utils.html_escape(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['utils_html_unescape'] = function(block: Blockly.Block) {
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
-    return [`utils.html_unescape(${text})`, generator.ORDER_HIGH];
+    return [`utils.html_unescape(tostring(${text}))`, generator.ORDER_HIGH];
   };
 
   // ========== 数据类型判断积木 ==========
@@ -1495,7 +1585,8 @@ ${doCode}until ${condition}
   generator.forBlock['time_format'] = function(block: Blockly.Block) {
     const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
     const format = generator.valueToCode(block, 'FORMAT', generator.ORDER_NONE) || '"%Y-%m-%d %H:%M:%S"';
-    return [`os.date(${format}, ${timestamp})`, generator.ORDER_HIGH];
+    // format 必须是 string,timestamp 必须是 number
+    return [`os.date(tostring(${format}), tonumber(${timestamp}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_add'] = function(block: Blockly.Block) {
@@ -1607,13 +1698,15 @@ ${doCode}until ${condition}
       'time-colon': '%H:%M:%S',
     };
     const fmt = formatMap[format] || '%Y-%m-%d %H:%M:%S';
-    return [`os.date("${fmt}", ${timestamp})`, generator.ORDER_HIGH];
+    // timestamp 必须是 number,使用 tonumber() 兼容
+    return [`os.date("${fmt}", tonumber(${timestamp}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_date_to_timestamp'] = function(block: Blockly.Block) {
     const date = generator.valueToCode(block, 'DATE', generator.ORDER_NONE) || '""';
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-    return [`blockly_time.date_to_timestamp(${date})`, generator.ORDER_HIGH];
+    // date 必须是 string,使用 tostring() 兼容
+    return [`blockly_time.date_to_timestamp(tostring(${date}))`, generator.ORDER_HIGH];
   };
 
   // 时间计算
@@ -1633,10 +1726,11 @@ ${doCode}until ${condition}
     // 月和年需要特殊处理，使用辅助函数
     if (unit === 'months' || unit === 'years') {
       markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-      return [`blockly_time.add_unit(${timestamp}, "${operation}", ${amount}, "${unit}")`, generator.ORDER_HIGH];
+      // timestamp 应该是 number,amount 应该是 number
+      return [`blockly_time.add_unit(tonumber(${timestamp}) or 0, "${operation}", tonumber(${amount}) or 0, "${unit}")`, generator.ORDER_HIGH];
     }
     const multiplier = multipliers[unit] || 1;
-    return [`(${timestamp} ${op} (${amount} * ${multiplier}))`, generator.ORDER_ADDITIVE];
+    return [`((tonumber(${timestamp}) or 0) ${op} ((tonumber(${amount}) or 0) * ${multiplier}))`, generator.ORDER_ADDITIVE];
   };
 
   generator.forBlock['time_diff'] = function(block: Blockly.Block) {
@@ -1650,32 +1744,36 @@ ${doCode}until ${condition}
       'days': 86400,
     };
     const divisor = divisors[unit] || 1;
-    return [`math.floor((${ts1} - ${ts2}) / ${divisor})`, generator.ORDER_HIGH];
+    return [`math.floor(((tonumber(${ts1}) or 0) - (tonumber(${ts2}) or 0)) / ${divisor})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_is_leap_year'] = function(block: Blockly.Block) {
     const year = generator.valueToCode(block, 'YEAR', generator.ORDER_NONE) || '0';
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-    return [`blockly_time.is_leap_year(${year})`, generator.ORDER_HIGH];
+    // year 应该是 number
+    return [`blockly_time.is_leap_year(tonumber(${year}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_days_in_month'] = function(block: Blockly.Block) {
     const year = generator.valueToCode(block, 'YEAR', generator.ORDER_NONE) || '0';
     const month = generator.valueToCode(block, 'MONTH', generator.ORDER_NONE) || '0';
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-    return [`blockly_time.days_in_month(${year}, ${month})`, generator.ORDER_HIGH];
+    // year/month 应该是 number
+    return [`blockly_time.days_in_month(tonumber(${year}) or 0, tonumber(${month}) or 1)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_start_of_day'] = function(block: Blockly.Block) {
     const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-    return [`blockly_time.start_of_day(${timestamp})`, generator.ORDER_HIGH];
+    // timestamp 应该是 number
+    return [`blockly_time.start_of_day(tonumber(${timestamp}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['time_end_of_day'] = function(block: Blockly.Block) {
     const timestamp = generator.valueToCode(block, 'TIMESTAMP', generator.ORDER_NONE) || '0';
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TIME_UTILS);
-    return [`blockly_time.end_of_day(${timestamp})`, generator.ORDER_HIGH];
+    // timestamp 应该是 number
+    return [`blockly_time.end_of_day(tonumber(${timestamp}) or 0)`, generator.ORDER_HIGH];
   };
 
   // ========== 调试工具积木 ==========
@@ -1732,33 +1830,37 @@ ${doCode}until ${condition}
     const flag = generator.valueToCode(block, 'FLAG', generator.ORDER_NONE) || '""';
     const approve = block.getFieldValue('APPROVE') === 'TRUE';
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
-    return `request.approve_friend(${flag}, ${approve}, ${remark})\n`;
+    // flag/remark 必须是 string
+    return `request.approve_friend(tostring(${flag}), ${approve}, tostring(${remark}))\n`;
   };
 
   generator.forBlock['request_approve_group'] = function(block: Blockly.Block) {
     const flag = generator.valueToCode(block, 'FLAG', generator.ORDER_NONE) || '""';
     const approve = block.getFieldValue('APPROVE') === 'TRUE';
     const reason = generator.valueToCode(block, 'REASON', generator.ORDER_NONE) || '""';
-    return `request.approve_group(${flag}, ${approve}, ${reason})\n`;
+    // flag/reason 必须是 string
+    return `request.approve_group(tostring(${flag}), ${approve}, tostring(${reason}))\n`;
   };
 
   // ========== HTTP 请求积木 ==========
   generator.forBlock['http_get'] = function(block: Blockly.Block) {
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
-    return [`http.request("GET", ${url})`, generator.ORDER_HIGH];
+    // url 必须是 string
+    return [`http.request("GET", tostring(${url}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['http_post'] = function(block: Blockly.Block) {
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) || '""';
-    return [`http.request("POST", ${url}, nil, ${body})`, generator.ORDER_HIGH];
+    // url/body 必须是 string
+    return [`http.request("POST", tostring(${url}), nil, tostring(${body}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['http_request'] = function(block: Blockly.Block) {
     const method = block.getFieldValue('METHOD') || 'GET';
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) || '""';
-    return [`http.request("${method}", ${url}, nil, ${body})`, generator.ORDER_HIGH];
+    return [`http.request("${method}", tostring(${url}), nil, tostring(${body}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['http_get_json'] = function(block: Blockly.Block) {
@@ -1768,7 +1870,7 @@ ${doCode}until ${condition}
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.HTTP_UTILS);
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.JSON);
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TABLE_UTILS);
-    return [`blockly_http_utils.get_json_field(${url}, ${field})`, generator.ORDER_HIGH];
+    return [`blockly_http_utils.get_json_field(tostring(${url}), tostring(${field}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['http_request_with_var'] = function(block: Blockly.Block) {
@@ -1777,7 +1879,7 @@ ${doCode}until ${condition}
     const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) ?? 'nil';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
     // 响应体作为 JSON 字符串存入变量
-    return `local __http_response = http.request("${method}", ${url}, nil, ${body})
+    return `local __http_response = http.request("${method}", tostring(${url}), nil, ${body} ~= nil and tostring(${body}) or nil)
 _G["${varName}"] = __http_response and __http_response.body or ""
 `;
   };
@@ -1785,34 +1887,37 @@ _G["${varName}"] = __http_response and __http_response.body or ""
   generator.forBlock['http_download_base64'] = function(block: Blockly.Block) {
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'base64data';
-    return `_G["${varName}"] = http.download_base64(${url})
+    // url 必须是 string
+    return `_G["${varName}"] = http.download_base64(tostring(${url}))
 `;
   };
 
   // ========== Base64文件操作积木 ==========
   generator.forBlock['file_read_base64'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return [`file.read_base64(${path})`, generator.ORDER_HIGH];
+    // path 必须是 string
+    return [`file.read_base64(tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_write_base64'] = function(block: Blockly.Block) {
     const base64 = generator.valueToCode(block, 'BASE64', generator.ORDER_NONE) || '""';
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return `file.write_base64(${path}, ${base64})
+    return `file.write_base64(tostring(${path}), tostring(${base64}))
 `;
   };
 
   generator.forBlock['send_group_image_base64'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const base64 = generator.valueToCode(block, 'BASE64', generator.ORDER_NONE) || '""';
-    return `message.send_group_image(${groupId}, ${base64})
+    // base64 必须是 string
+    return `message.send_group_image(${groupId}, tostring(${base64}))
 `;
   };
 
   generator.forBlock['send_private_image_base64'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const base64 = generator.valueToCode(block, 'BASE64', generator.ORDER_NONE) || '""';
-    return `message.send_private_image(${userId}, ${base64})
+    return `message.send_private_image(${userId}, tostring(${base64}))
 `;
   };
 
@@ -1858,7 +1963,8 @@ _G["${varName}"] = __http_response and __http_response.body or ""
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
     // 直接使用后端的 json 库，不再需要运行时库
-    return [`json.get(${json}, ${path})`, generator.ORDER_HIGH];
+    // json/path 必须是 string
+    return [`json.get(tostring(${json}), tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['json_encode'] = function(block: Blockly.Block) {
@@ -1870,7 +1976,8 @@ _G["${varName}"] = __http_response and __http_response.body or ""
   generator.forBlock['json_decode'] = function(block: Blockly.Block) {
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
     // 直接使用后端的 json 库，不再需要运行时库
-    return [`json.decode(${json})`, generator.ORDER_HIGH];
+    // json 必须是 string
+    return [`json.decode(tostring(${json}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['table_get'] = function(block: Blockly.Block) {
@@ -1878,7 +1985,8 @@ _G["${varName}"] = __http_response and __http_response.body or ""
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
     // 标记使用表操作库
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TABLE_UTILS);
-    return [`blockly_table_utils.get(${table}, ${path})`, generator.ORDER_HIGH];
+    // path 必须是 string
+    return [`blockly_table_utils.get(${table}, tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['table_set'] = function(block: Blockly.Block) {
@@ -1887,7 +1995,7 @@ _G["${varName}"] = __http_response and __http_response.body or ""
     const value = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) ?? 'nil';
     // 标记使用表操作库
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.TABLE_UTILS);
-    return `blockly_table_utils.set(${table}, ${path}, ${value})\n`;
+    return `blockly_table_utils.set(${table}, tostring(${path}), ${value})\n`;
   };
 
   // 新版积木
@@ -1895,18 +2003,20 @@ _G["${varName}"] = __http_response and __http_response.body or ""
     const json = generator.valueToCode(block, 'JSON', generator.ORDER_NONE) || '"{}"';
     const pathType = block.getFieldValue('PATH_TYPE');
     // 直接使用后端的 json 库，不再需要运行时库
-    
+    // json 必须是 string
+    const safeJson = `tostring(${json})`;
+
     switch (pathType) {
       case 'first':
-        return [`(function() local _t = json.decode(${json}); return _t and _t[1] or nil end)()`, generator.ORDER_HIGH];
+        return [`(function() local _t = json.decode(${safeJson}); return _t and _t[1] or nil end)()`, generator.ORDER_HIGH];
       case 'last':
-        return [`(function() local _t = json.decode(${json}); return _t and _t[#_t] or nil end)()`, generator.ORDER_HIGH];
+        return [`(function() local _t = json.decode(${safeJson}); return _t and _t[#_t] or nil end)()`, generator.ORDER_HIGH];
       case 'index':
-        return [`json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${safeJson})`, generator.ORDER_HIGH];
       case 'field':
-        return [`json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${safeJson})`, generator.ORDER_HIGH];
       default:
-        return [`json.decode(${json})`, generator.ORDER_HIGH];
+        return [`json.decode(${safeJson})`, generator.ORDER_HIGH];
     }
   };
 
@@ -1937,24 +2047,27 @@ _G["${varName}"] = __http_response and __http_response.body or ""
   // ========== 文件管理积木 ==========
   generator.forBlock['file_read_safe'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return [`file.read_safe(${path})`, generator.ORDER_HIGH];
+    // path 必须是 string
+    return [`file.read_safe(tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_write_safe'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
-    return [`file.write_safe(${path}, ${content})`, generator.ORDER_HIGH];
+    // path/content 必须是 string
+    return [`file.write_safe(tostring(${path}), tostring(${content}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_exists'] = function(block: Blockly.Block) {
     const path = generator.valueToCode(block, 'PATH', generator.ORDER_NONE) || '""';
-    return [`file.exists(${path})`, generator.ORDER_HIGH];
+    return [`file.exists(tostring(${path}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['file_filter'] = function(block: Blockly.Block) {
     const files = generator.valueToCode(block, 'FILES', generator.ORDER_NONE) || '{}';
     const pattern = generator.valueToCode(block, 'PATTERN', generator.ORDER_NONE) || '""';
-    return [`file.filter_files(${files}, ${pattern})`, generator.ORDER_HIGH];
+    // pattern 必须是 string
+    return [`file.filter_files(${files}, tostring(${pattern}))`, generator.ORDER_HIGH];
   };
 
   // ========== 简化数据库积木（键值存储） ==========
@@ -2095,7 +2208,7 @@ ${statements}end
     const text1 = generator.valueToCode(block, 'TEXT1', generator.ORDER_CONCATENATION) || '""';
     const text2 = generator.valueToCode(block, 'TEXT2', generator.ORDER_CONCATENATION) || '""';
     const text3 = generator.valueToCode(block, 'TEXT3', generator.ORDER_CONCATENATION) || '""';
-    return [`${text1} .. ${text2} .. ${text3}`, generator.ORDER_CONCATENATION];
+    return [`tostring(${text1}) .. tostring(${text2}) .. tostring(${text3})`, generator.ORDER_CONCATENATION];
   };
 
   // ========== 连接文本积木 - 四个输入 ==========
@@ -2104,7 +2217,7 @@ ${statements}end
     const text2 = generator.valueToCode(block, 'TEXT2', generator.ORDER_CONCATENATION) || '""';
     const text3 = generator.valueToCode(block, 'TEXT3', generator.ORDER_CONCATENATION) || '""';
     const text4 = generator.valueToCode(block, 'TEXT4', generator.ORDER_CONCATENATION) || '""';
-    return [`${text1} .. ${text2} .. ${text3} .. ${text4}`, generator.ORDER_CONCATENATION];
+    return [`tostring(${text1}) .. tostring(${text2}) .. tostring(${text3}) .. tostring(${text4})`, generator.ORDER_CONCATENATION];
   };
 
   // ========== 高级积木 ==========
@@ -2179,7 +2292,8 @@ end
     const card = generator.valueToCode(block, 'CARD', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = group.set_card(${groupId}, ${userId}, ${card})
+    // card 必须是 string
+    return `_G["${varName}"] = group.set_card(${groupId}, ${userId}, tostring(${card}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2205,7 +2319,8 @@ end
     const duration = generator.valueToCode(block, 'DURATION', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = group.set_ban(${groupId}, ${userId}, ${duration})
+    // duration 应该是 number
+    return `_G["${varName}"] = group.set_ban(${groupId}, ${userId}, tonumber(${duration}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2217,7 +2332,8 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = group.set_name(${groupId}, ${name})
+    // name 必须是 string
+    return `_G["${varName}"] = group.set_name(${groupId}, tostring(${name}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2230,7 +2346,8 @@ end
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.send_group(${groupId}, ${content})
+    // content 必须是 string
+    return `_G["${varName}"] = message.send_group(${groupId}, tostring(${content}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2242,7 +2359,8 @@ end
     const content = generator.valueToCode(block, 'CONTENT', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.send_private(${userId}, ${content})
+    // content 必须是 string
+    return `_G["${varName}"] = message.send_private(${userId}, tostring(${content}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2253,7 +2371,8 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.delete_msg(${messageId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.delete_msg(tonumber(${messageId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2264,7 +2383,8 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.set_essence(${messageId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.set_essence(tonumber(${messageId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2276,7 +2396,8 @@ end
     const times = generator.valueToCode(block, 'TIMES', generator.ORDER_NONE) || '1';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.send_like(${userId}, ${times})
+    // times 应该是 number
+    return `_G["${varName}"] = message.send_like(${userId}, tonumber(${times}) or 1)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2289,7 +2410,8 @@ end
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = user.set_remark(${userId}, ${remark})
+    // remark 必须是 string
+    return `_G["${varName}"] = user.set_remark(${userId}, tostring(${remark}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2314,7 +2436,8 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = file.upload_group(${groupId}, ${file}, ${name})
+    // file/name 必须是 string
+    return `_G["${varName}"] = file.upload_group(${groupId}, tostring(${file}), tostring(${name}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2326,7 +2449,8 @@ end
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = file.delete_group_file(${groupId}, ${fileId})
+    // fileId 必须是 string
+    return `_G["${varName}"] = file.delete_group_file(${groupId}, tostring(${fileId}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2338,7 +2462,8 @@ end
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = http.request("GET", ${url})
+    // url 必须是 string
+    return `_G["${varName}"] = http.request("GET", tostring(${url}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2350,7 +2475,8 @@ end
     const body = generator.valueToCode(block, 'BODY', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = http.request("POST", ${url}, nil, ${body})
+    // url/body 必须是 string
+    return `_G["${varName}"] = http.request("POST", tostring(${url}), nil, tostring(${body}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2363,7 +2489,8 @@ end
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
     // 后端统一返回表类型，包含 success 字段和 data 字段
-    return `_G["${varName}"] = message.get_msg(${messageId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.get_msg(tonumber(${messageId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2374,7 +2501,8 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.get_forward_msg(${messageId})
+    // messageId 应该是 string
+    return `_G["${varName}"] = message.get_forward_msg(tostring(${messageId}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2388,7 +2516,8 @@ end
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.get_group_msg_history(${groupId}, ${messageSeq}, ${count}, ${reverseOrder})
+    // messageSeq 必须是 string, count 应该是 number
+    return `_G["${varName}"] = message.get_group_msg_history(${groupId}, tostring(${messageSeq}), tonumber(${count}) or 20, ${reverseOrder})
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2402,7 +2531,8 @@ end
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.get_friend_msg_history(${userId}, ${messageSeq}, ${count}, ${reverseOrder})
+    // messageSeq 必须是 string, count 应该是 number
+    return `_G["${varName}"] = message.get_friend_msg_history(${userId}, tostring(${messageSeq}), tonumber(${count}) or 20, ${reverseOrder})
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2415,7 +2545,8 @@ end
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.forward_group_single_msg(${messageId}, ${groupId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.forward_group_single_msg(tonumber(${messageId}) or 0, ${groupId})
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2427,7 +2558,8 @@ end
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.forward_friend_single_msg(${messageId}, ${userId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.forward_friend_single_msg(tonumber(${messageId}) or 0, ${userId})
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2438,7 +2570,8 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.delete_essence_msg(${messageId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.delete_essence_msg(tonumber(${messageId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2449,7 +2582,8 @@ end
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.mark_msg_as_read(${messageId})
+    // messageId 应该是 number
+    return `_G["${varName}"] = message.mark_msg_as_read(tonumber(${messageId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2461,7 +2595,8 @@ end
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.set_msg_emoji_like(${messageId}, ${emojiId})
+    // messageId 应该是 number, emojiId 必须是 string
+    return `_G["${varName}"] = message.set_msg_emoji_like(tonumber(${messageId}) or 0, tostring(${emojiId}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2473,7 +2608,8 @@ end
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = message.unset_msg_emoji_like(${messageId}, ${emojiId})
+    // messageId 应该是 number, emojiId 必须是 string
+    return `_G["${varName}"] = message.unset_msg_emoji_like(tonumber(${messageId}) or 0, tostring(${emojiId}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2544,7 +2680,8 @@ end
     const title = generator.valueToCode(block, 'TITLE', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = group.set_special_title(${groupId}, ${userId}, ${title})
+    // title 必须是 string
+    return `_G["${varName}"] = group.set_special_title(${groupId}, ${userId}, tostring(${title}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2601,7 +2738,8 @@ end
     const categoryId = generator.valueToCode(block, 'CATEGORY_ID', generator.ORDER_NONE) || '0';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = user.set_category(${userId}, ${categoryId})
+    // categoryId 应该是 number
+    return `_G["${varName}"] = user.set_category(${userId}, tonumber(${categoryId}) or 0)
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2615,7 +2753,8 @@ end
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = request.set_friend_add(${flag}, ${approve}, ${remark})
+    // flag/remark 必须是 string
+    return `_G["${varName}"] = request.set_friend_add(tostring(${flag}), ${approve}, tostring(${remark}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2628,7 +2767,8 @@ end
     const reason = generator.valueToCode(block, 'REASON', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = request.set_group_add(${flag}, ${approve}, ${reason})
+    // flag/reason 必须是 string
+    return `_G["${varName}"] = request.set_group_add(tostring(${flag}), ${approve}, tostring(${reason}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2642,7 +2782,8 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = file.upload_private(${userId}, ${file}, ${name})
+    // file/name 必须是 string
+    return `_G["${varName}"] = file.upload_private(${userId}, tostring(${file}), tostring(${name}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2654,7 +2795,8 @@ end
     const folderId = generator.valueToCode(block, 'FOLDER_ID', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = file.delete_group_folder(${groupId}, ${folderId})
+    // folderId 必须是 string
+    return `_G["${varName}"] = file.delete_group_folder(${groupId}, tostring(${folderId}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2666,7 +2808,8 @@ end
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = file.create_group_folder(${groupId}, ${name})
+    // name 必须是 string
+    return `_G["${varName}"] = file.create_group_folder(${groupId}, tostring(${name}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2708,7 +2851,8 @@ end
     const domain = generator.valueToCode(block, 'DOMAIN', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = system.get_cookies(${domain})
+    // domain 必须是 string
+    return `_G["${varName}"] = system.get_cookies(tostring(${domain}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -2720,7 +2864,8 @@ end
     const personalNote = generator.valueToCode(block, 'PERSONAL_NOTE', generator.ORDER_NONE) || '""';
     const varName = generator.getVariableName(block, block.getFieldValue('VAR')) || 'response';
 
-    return `_G["${varName}"] = user.set_qq_profile(${nickname}, ${personalNote})
+    // nickname/personalNote 必须是 string
+    return `_G["${varName}"] = user.set_qq_profile(tostring(${nickname}), tostring(${personalNote}))
 if type(_G["${varName}"]) ~= "table" then
   _G["${varName}"] = {success = false, error = tostring(_G["${varName}"])}
 end
@@ -3033,7 +3178,7 @@ ${statements}end
     const text1 = generator.valueToCode(block, 'TEXT1', generator.ORDER_CONCATENATION) || '""';
     const text2 = generator.valueToCode(block, 'TEXT2', generator.ORDER_CONCATENATION) || '""';
     const text3 = generator.valueToCode(block, 'TEXT3', generator.ORDER_CONCATENATION) || '""';
-    return [`${text1} .. ${text2} .. ${text3}`, generator.ORDER_CONCATENATION];
+    return [`tostring(${text1}) .. tostring(${text2}) .. tostring(${text3})`, generator.ORDER_CONCATENATION];
   };
 
   // ========== 自定义Lua代码积木 ==========
@@ -3077,12 +3222,14 @@ ${statements}end
   // ========== OneBot API 积木 - 消息相关 ==========
   generator.forBlock['onebot_get_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return [`message.get_msg(${messageId})`, generator.ORDER_HIGH];
+    // messageId 应该是 number
+    return [`message.get_msg(tonumber(${messageId}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_forward_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '""';
-    return [`message.get_forward_msg(${messageId})`, generator.ORDER_HIGH];
+    // messageId 应该是 string
+    return [`message.get_forward_msg(tostring(${messageId}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_group_msg_history'] = function(block: Blockly.Block) {
@@ -3090,7 +3237,8 @@ ${statements}end
     const messageSeq = generator.valueToCode(block, 'MESSAGE_SEQ', generator.ORDER_NONE) || '""';
     const count = generator.valueToCode(block, 'COUNT', generator.ORDER_NONE) || '20';
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
-    return [`message.get_group_msg_history(${groupId}, ${messageSeq}, ${count}, ${reverseOrder})`, generator.ORDER_HIGH];
+    // messageSeq 必须是 string, count 应该是 number
+    return [`message.get_group_msg_history(${groupId}, tostring(${messageSeq}), tonumber(${count}) or 20, ${reverseOrder})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_friend_msg_history'] = function(block: Blockly.Block) {
@@ -3098,63 +3246,74 @@ ${statements}end
     const messageSeq = generator.valueToCode(block, 'MESSAGE_SEQ', generator.ORDER_NONE) || '""';
     const count = generator.valueToCode(block, 'COUNT', generator.ORDER_NONE) || '20';
     const reverseOrder = block.getFieldValue('REVERSE_ORDER') === 'TRUE';
-    return [`message.get_friend_msg_history(${userId}, ${messageSeq}, ${count}, ${reverseOrder})`, generator.ORDER_HIGH];
+    // messageSeq 必须是 string, count 应该是 number
+    return [`message.get_friend_msg_history(${userId}, tostring(${messageSeq}), tonumber(${count}) or 20, ${reverseOrder})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_forward_group_single_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
-    return `message.forward_group_single_msg(${messageId}, ${groupId})\n`;
+    // messageId 应该是 number
+    return `message.forward_group_single_msg(tonumber(${messageId}) or 0, ${groupId})\n`;
   };
 
   generator.forBlock['onebot_forward_friend_single_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
-    return `message.forward_friend_single_msg(${messageId}, ${userId})\n`;
+    // messageId 应该是 number
+    return `message.forward_friend_single_msg(tonumber(${messageId}) or 0, ${userId})\n`;
   };
 
   generator.forBlock['onebot_mark_msg_as_read'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return `message.mark_msg_as_read(${messageId})\n`;
+    // messageId 应该是 number
+    return `message.mark_msg_as_read(tonumber(${messageId}) or 0)\n`;
   };
 
   generator.forBlock['onebot_set_msg_emoji_like'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
-    return `message.set_msg_emoji_like(${messageId}, ${emojiId})\n`;
+    // messageId 应该是 number, emojiId 必须是 string
+    return `message.set_msg_emoji_like(tonumber(${messageId}) or 0, tostring(${emojiId}))\n`;
   };
 
   generator.forBlock['onebot_unset_msg_emoji_like'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
     const emojiId = generator.valueToCode(block, 'EMOJI_ID', generator.ORDER_NONE) || '""';
-    return `message.unset_msg_emoji_like(${messageId}, ${emojiId})\n`;
+    // messageId 应该是 number, emojiId 必须是 string
+    return `message.unset_msg_emoji_like(tonumber(${messageId}) or 0, tostring(${emojiId}))\n`;
   };
 
   generator.forBlock['onebot_delete_essence_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return `message.delete_essence_msg(${messageId})\n`;
+    // messageId 应该是 number
+    return `message.delete_essence_msg(tonumber(${messageId}) or 0)\n`;
   };
 
   generator.forBlock['onebot_get_image'] = function(block: Blockly.Block) {
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
-    return [`message.get_image(${file})`, generator.ORDER_HIGH];
+    // file 必须是 string
+    return [`message.get_image(tostring(${file}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_record'] = function(block: Blockly.Block) {
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
     const outFormat = generator.valueToCode(block, 'OUT_FORMAT', generator.ORDER_NONE) || '"mp3"';
-    return [`message.get_record(${file}, ${outFormat})`, generator.ORDER_HIGH];
+    // file/outFormat 必须是 string
+    return [`message.get_record(tostring(${file}), tostring(${outFormat}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_file'] = function(block: Blockly.Block) {
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
     const download = block.getFieldValue('DOWNLOAD') === 'TRUE';
-    return [`message.get_file(${file}, ${download})`, generator.ORDER_HIGH];
+    // file 必须是 string
+    return [`message.get_file(tostring(${file}), ${download})`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_voice_msg_to_text'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return [`message.voice_msg_to_text(${messageId})`, generator.ORDER_HIGH];
+    // messageId 应该是 number
+    return [`message.voice_msg_to_text(tonumber(${messageId}) or 0)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_send_group_ai_record'] = function(block: Blockly.Block) {
@@ -3162,9 +3321,10 @@ ${statements}end
     const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || '""';
     const character = generator.valueToCode(block, 'CHARACTER', generator.ORDER_NONE) || '""';
     const chatType = block.getFieldValue('CHAT_TYPE') || '1';
+    // text/character 必须是 string
     // 生成带错误处理的代码
     return `do
-  local __ai_record_result = message.send_group_ai_record(${groupId}, ${text}, ${character}, ${chatType})
+  local __ai_record_result = message.send_group_ai_record(${groupId}, tostring(${text}), tostring(${character}), ${chatType})
   if __ai_record_result and __ai_record_result.success then
     log.debug("AI语音发送成功")
   else
@@ -3235,7 +3395,8 @@ end)()`, generator.ORDER_HIGH];
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const title = generator.valueToCode(block, 'TITLE', generator.ORDER_NONE) || '""';
-    return `group.set_special_title(${groupId}, ${userId}, ${title})\n`;
+    // title 必须是 string
+    return `group.set_special_title(${groupId}, ${userId}, tostring(${title}))\n`;
   };
 
   generator.forBlock['onebot_set_group_remark'] = function(block: Blockly.Block) {
@@ -3340,7 +3501,8 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_set_friend_remark'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
-    return `user.set_remark(${userId}, ${remark})\n`;
+    // remark 必须是 string
+    return `user.set_remark(${userId}, tostring(${remark}))\n`;
   };
 
   generator.forBlock['onebot_set_friend_category'] = function(block: Blockly.Block) {
@@ -3380,7 +3542,8 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_set_qq_profile'] = function(block: Blockly.Block) {
     const nickname = generator.valueToCode(block, 'NICKNAME', generator.ORDER_NONE) || '""';
     const personalNote = generator.valueToCode(block, 'PERSONAL_NOTE', generator.ORDER_NONE) || '""';
-    return `user.set_qq_profile(${nickname}, ${personalNote})\n`;
+    // nickname/personalNote 必须是 string
+    return `user.set_qq_profile(tostring(${nickname}), tostring(${personalNote}))\n`;
   };
 
   generator.forBlock['onebot_get_robot_uin_range'] = function(block: Blockly.Block) {
@@ -3399,7 +3562,8 @@ end)()`, generator.ORDER_HIGH];
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const folderId = generator.valueToCode(block, 'FOLDER_ID', generator.ORDER_NONE) || '""';
-    return `file.upload_group(${groupId}, ${file}, ${name}, ${folderId})\n`;
+    // file/name/folderId 必须是 string
+    return `file.upload_group(${groupId}, tostring(${file}), tostring(${name}), tostring(${folderId}))\n`;
   };
 
   generator.forBlock['onebot_upload_private_file'] = function(block: Blockly.Block) {
@@ -3413,19 +3577,20 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_delete_group_file'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
-    return `file.delete_group_file(${groupId}, ${fileId})\n`;
+    // fileId 必须是 string
+    return `file.delete_group_file(${groupId}, tostring(${fileId}))\n`;
   };
 
   generator.forBlock['onebot_delete_group_folder'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const folderId = generator.valueToCode(block, 'FOLDER_ID', generator.ORDER_NONE) || '""';
-    return `file.delete_group_folder(${groupId}, ${folderId})\n`;
+    return `file.delete_group_folder(${groupId}, tostring(${folderId}))\n`;
   };
 
   generator.forBlock['onebot_create_group_file_folder'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
-    return `file.create_group_file_folder(${groupId}, ${name})\n`;
+    return `file.create_group_file_folder(${groupId}, tostring(${name}))\n`;
   };
 
   generator.forBlock['onebot_rename_group_file_folder'] = function(block: Blockly.Block) {
@@ -3433,7 +3598,7 @@ end)()`, generator.ORDER_HIGH];
     const folderId = generator.valueToCode(block, 'FOLDER_ID', generator.ORDER_NONE) || '""';
     const newName = generator.valueToCode(block, 'NEW_NAME', generator.ORDER_NONE) || '""';
     // 注意：file.rename_group_folder API当前未实现，此积木暂时不可用
-    return `-- 警告：file.rename_group_folder(${groupId}, ${folderId}, ${newName}) API未实现\n`;
+    return `-- 警告：file.rename_group_folder(${groupId}, tostring(${folderId}), tostring(${newName})) API未实现\n`;
   };
 
   generator.forBlock['onebot_move_group_file'] = function(block: Blockly.Block) {
@@ -3441,7 +3606,7 @@ end)()`, generator.ORDER_HIGH];
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
     const parentDirectory = generator.valueToCode(block, 'PARENT_DIRECTORY', generator.ORDER_NONE) || '""';
     const targetDirectory = generator.valueToCode(block, 'TARGET_DIRECTORY', generator.ORDER_NONE) || '""';
-    return `file.move_group_file(${groupId}, ${fileId}, ${parentDirectory}, ${targetDirectory})\n`;
+    return `file.move_group_file(${groupId}, tostring(${fileId}), tostring(${parentDirectory}), tostring(${targetDirectory}))\n`;
   };
 
   generator.forBlock['onebot_get_group_file_url'] = function(block: Blockly.Block) {
@@ -3476,7 +3641,8 @@ end)()`, generator.ORDER_HIGH];
     const base64 = generator.valueToCode(block, 'BASE64', generator.ORDER_NONE) || '""';
     const name = generator.valueToCode(block, 'NAME', generator.ORDER_NONE) || '""';
     const headers = generator.valueToCode(block, 'HEADERS', generator.ORDER_NONE) || '{}';
-    return [`file.download_file(${url}, ${base64}, ${name}, ${headers})`, generator.ORDER_HIGH];
+    // url/base64/name 必须是 string
+    return [`file.download_file(tostring(${url}), tostring(${base64}), tostring(${name}), ${headers})`, generator.ORDER_HIGH];
   };
 
   // ========== OneBot API 积木 - 请求处理 ==========
@@ -3484,24 +3650,28 @@ end)()`, generator.ORDER_HIGH];
     const flag = generator.valueToCode(block, 'FLAG', generator.ORDER_NONE) || '""';
     const approve = block.getFieldValue('APPROVE') === 'TRUE';
     const remark = generator.valueToCode(block, 'REMARK', generator.ORDER_NONE) || '""';
-    return `request.set_friend_add_request(${flag}, ${approve}, ${remark})\n`;
+    // flag/remark 必须是 string
+    return `request.set_friend_add_request(tostring(${flag}), ${approve}, tostring(${remark}))\n`;
   };
 
   generator.forBlock['onebot_set_group_add_request'] = function(block: Blockly.Block) {
     const flag = generator.valueToCode(block, 'FLAG', generator.ORDER_NONE) || '""';
     const approve = block.getFieldValue('APPROVE') === 'TRUE';
     const reason = generator.valueToCode(block, 'REASON', generator.ORDER_NONE) || '""';
-    return `request.set_group_add_request(${flag}, ${approve}, ${reason})\n`;
+    // flag/reason 必须是 string
+    return `request.set_group_add_request(tostring(${flag}), ${approve}, tostring(${reason}))\n`;
   };
 
   generator.forBlock['onebot_get_doubt_friends_add_request'] = function(block: Blockly.Block) {
     const count = generator.valueToCode(block, 'COUNT', generator.ORDER_NONE) || '50';
-    return [`request.get_doubt_friends(${count})`, generator.ORDER_HIGH];
+    // count 应该是 number
+    return [`request.get_doubt_friends(tonumber(${count}) or 50)`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_set_doubt_friends_add_request'] = function(block: Blockly.Block) {
     const flag = generator.valueToCode(block, 'FLAG', generator.ORDER_NONE) || '""';
-    return `request.handle_doubt_friend(${flag})\n`;
+    // flag 必须是 string
+    return `request.handle_doubt_friend(tostring(${flag}))\n`;
   };
 
   // ========== OneBot API 积木 - 系统相关 ==========
@@ -3519,7 +3689,8 @@ end)()`, generator.ORDER_HIGH];
 
   generator.forBlock['onebot_get_cookies'] = function(block: Blockly.Block) {
     const domain = generator.valueToCode(block, 'DOMAIN', generator.ORDER_NONE) || '""';
-    return [`system.get_cookies(${domain})`, generator.ORDER_HIGH];
+    // domain 必须是 string
+    return [`system.get_cookies(tostring(${domain}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_set_online_status'] = function(block: Blockly.Block) {
@@ -3543,13 +3714,15 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_scan_qrcode'] = function(block: Blockly.Block) {
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
     // 注意：system.scan_qrcode 实际上是 message.scan_qrcode
-    return [`message.scan_qrcode(${file})`, generator.ORDER_HIGH];
+    // file 必须是 string
+    return [`message.scan_qrcode(tostring(${file}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_ocr_image'] = function(block: Blockly.Block) {
     const image = generator.valueToCode(block, 'IMAGE', generator.ORDER_NONE) || '""';
     // 注意：system.ocr_image 实际上是 message.ocr_image
-    return [`message.ocr_image(${image})`, generator.ORDER_HIGH];
+    // image 必须是 string
+    return [`message.ocr_image(tostring(${image}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['onebot_get_rkey'] = function(block: Blockly.Block) {
@@ -3612,32 +3785,36 @@ end)()`, generator.ORDER_HIGH];
     const url = generator.valueToCode(block, 'URL', generator.ORDER_NONE) || '""';
     // 标记使用 URL 工具库
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.URL_UTILS);
-    return [`blockly_url_utils.extract_domain(${url})`, generator.ORDER_HIGH];
+    // url 必须是 string
+    return [`blockly_url_utils.extract_domain(tostring(${url}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['url_extract_tld'] = function(block: Blockly.Block) {
     const urlOrDomain = generator.valueToCode(block, 'URL_OR_DOMAIN', generator.ORDER_NONE) || '""';
     // 标记使用 URL 工具库
     markRuntimeLibraryUsed(generator, RuntimeLibraryType.URL_UTILS);
-    return [`blockly_url_utils.extract_tld(${urlOrDomain})`, generator.ORDER_HIGH];
+    // urlOrDomain 必须是 string
+    return [`blockly_url_utils.extract_tld(tostring(${urlOrDomain}))`, generator.ORDER_HIGH];
   };
 
   // ========== 二维码检测与解析积木 ==========
   generator.forBlock['message_image_has_qrcode'] = function(block: Blockly.Block) {
     const image = generator.valueToCode(block, 'IMAGE', generator.ORDER_NONE) || '""';
-    return [`message.image_has_qrcode(${image})`, generator.ORDER_HIGH];
+    // image 必须是 string
+    return [`message.image_has_qrcode(tostring(${image}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['message_image_count_qrcodes'] = function(block: Blockly.Block) {
     const image = generator.valueToCode(block, 'IMAGE', generator.ORDER_NONE) || '""';
-    return [`message.image_count_qrcodes(${image})`, generator.ORDER_HIGH];
+    // image 必须是 string
+    return [`message.image_count_qrcodes(tostring(${image}))`, generator.ORDER_HIGH];
   };
 
   generator.forBlock['message_image_get_qrcodes'] = function(block: Blockly.Block) {
     const image = generator.valueToCode(block, 'IMAGE', generator.ORDER_NONE) || '""';
     const index = generator.valueToCode(block, 'INDEX', generator.ORDER_NONE) || '0';
-    // 如果index为0或空，返回所有二维码内容；否则返回指定位置的二维码内容
-    return [`message.image_get_qrcodes(${image}, ${index})`, generator.ORDER_HIGH];
+    // image 必须是 string,index 应该是 number
+    return [`message.image_get_qrcodes(tostring(${image}), tonumber(${index}) or 0)`, generator.ORDER_HIGH];
   };
 
   // ========== 拓展API积木 ==========
@@ -3658,13 +3835,15 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_set_group_portrait'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const file = generator.valueToCode(block, 'FILE', generator.ORDER_NONE) || '""';
-    return `api.call("set_group_portrait", {group_id = ${groupId}, file = ${file}})\n`;
+    // file 必须是 string
+    return `api.call("set_group_portrait", {group_id = ${groupId}, file = tostring(${file})})\n`;
   };
 
   generator.forBlock['onebot_set_group_add_option'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const option = generator.valueToCode(block, 'OPTION', generator.ORDER_NONE) || '""';
-    return `api.call("set_group_add_option", {group_id = ${groupId}, option = ${option}})\n`;
+    // option 必须是 string
+    return `api.call("set_group_add_option", {group_id = ${groupId}, option = tostring(${option})})\n`;
   };
 
   generator.forBlock['onebot_get_clientkey'] = function(block: Blockly.Block) {
@@ -3679,7 +3858,8 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_set_input_status'] = function(block: Blockly.Block) {
     const userId = generator.valueToCode(block, 'USER_ID', generator.ORDER_NONE) || '0';
     const status = generator.valueToCode(block, 'STATUS', generator.ORDER_NONE) || '0';
-    return `api.call("set_input_status", {user_id = ${userId}, status = ${status}})\n`;
+    // status 应该是 number
+    return `api.call("set_input_status", {user_id = ${userId}, status = tonumber(${status}) or 0})\n`;
   };
 
   generator.forBlock['onebot_mark_group_msg_as_read'] = function(block: Blockly.Block) {
@@ -3709,12 +3889,14 @@ end)()`, generator.ORDER_HIGH];
 
   generator.forBlock['onebot_get_recent_contact'] = function(block: Blockly.Block) {
     const count = generator.valueToCode(block, 'COUNT', generator.ORDER_NONE) || '10';
-    return `api.call("get_recent_contact", {count = ${count}})\n`;
+    // count 应该是 number
+    return `api.call("get_recent_contact", {count = tonumber(${count}) or 10})\n`;
   };
 
   generator.forBlock['onebot_translate_en2zh'] = function(block: Blockly.Block) {
     const words = generator.valueToCode(block, 'WORDS', generator.ORDER_NONE) || '""';
-    return [`api.call("translate_en2zh", {words = ${words}})`, generator.ORDER_ATOMIC];
+    // words 必须是 string
+    return [`api.call("translate_en2zh", {words = tostring(${words})})`, generator.ORDER_ATOMIC];
   };
 
   generator.forBlock['onebot_set_qq_profile_full'] = function(block: Blockly.Block) {
@@ -3723,12 +3905,14 @@ end)()`, generator.ORDER_HIGH];
     const email = generator.valueToCode(block, 'EMAIL', generator.ORDER_NONE) || '""';
     const college = generator.valueToCode(block, 'COLLEGE', generator.ORDER_NONE) || '""';
     const personalNote = generator.valueToCode(block, 'PERSONAL_NOTE', generator.ORDER_NONE) || '""';
-    return `api.call("set_qq_profile", {nickname = ${nickname}, company = ${company}, email = ${email}, college = ${college}, personal_note = ${personalNote}})\n`;
+    // 所有 string 字段都需 tostring
+    return `api.call("set_qq_profile", {nickname = tostring(${nickname}), company = tostring(${company}), email = tostring(${email}), college = tostring(${college}), personal_note = tostring(${personalNote})})\n`;
   };
 
   generator.forBlock['onebot_set_self_longnick'] = function(block: Blockly.Block) {
     const nickname = generator.valueToCode(block, 'NICKNAME', generator.ORDER_NONE) || '""';
-    return `api.call("set_self_longnick", {nickname = ${nickname}})\n`;
+    // nickname 必须是 string
+    return `api.call("set_self_longnick", {nickname = tostring(${nickname})})\n`;
   };
 
   generator.forBlock['onebot_get_guild_list'] = function(block: Blockly.Block) {
@@ -3738,7 +3922,8 @@ end)()`, generator.ORDER_HIGH];
   generator.forBlock['onebot_set_group_todo'] = function(block: Blockly.Block) {
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const todo = generator.valueToCode(block, 'TODO', generator.ORDER_NONE) || '""';
-    return `api.call("set_group_todo", {group_id = ${groupId}, todo = ${todo}})\n`;
+    // todo 必须是 string
+    return `api.call("set_group_todo", {group_id = ${groupId}, todo = tostring(${todo})})\n`;
   };
 
   generator.forBlock['onebot_cancel_group_todo'] = function(block: Blockly.Block) {
@@ -3760,7 +3945,8 @@ end)()`, generator.ORDER_HIGH];
 
   generator.forBlock['onebot_reshare_flash_file'] = function(block: Blockly.Block) {
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
-    return `api.call("reshare_flash_file", {file_id = ${fileId}})\n`;
+    // fileId 必须是 string
+    return `api.call("reshare_flash_file", {file_id = tostring(${fileId})})\n`;
   };
 
   generator.forBlock['onebot_group_poke'] = function(block: Blockly.Block) {
@@ -3773,7 +3959,8 @@ end)()`, generator.ORDER_HIGH];
     const groupId = generator.valueToCode(block, 'GROUP_ID', generator.ORDER_NONE) || '0';
     const fileId = generator.valueToCode(block, 'FILE_ID', generator.ORDER_NONE) || '""';
     const newName = generator.valueToCode(block, 'NEW_NAME', generator.ORDER_NONE) || '""';
-    return `api.call("rename_group_file", {group_id = ${groupId}, file_id = ${fileId}, new_name = ${newName}})\n`;
+    // fileId/newName 必须是 string
+    return `api.call("rename_group_file", {group_id = ${groupId}, file_id = tostring(${fileId}), new_name = tostring(${newName})})\n`;
   };
 
   generator.forBlock['onebot_send_group_forward_msg'] = function(block: Blockly.Block) {
@@ -3800,12 +3987,24 @@ end)()`, generator.ORDER_HIGH];
 
   generator.forBlock['onebot_set_essence_msg'] = function(block: Blockly.Block) {
     const messageId = generator.valueToCode(block, 'MESSAGE_ID', generator.ORDER_NONE) || '0';
-    return `api.call("set_essence_msg", {message_id = ${messageId}})\n`;
+    // messageId 应该是 number
+    return `api.call("set_essence_msg", {message_id = tonumber(${messageId}) or 0})\n`;
   };
 
+  // 原版（不带筛选）
   generator.forBlock['event_on_message_sent'] = function(block: Blockly.Block) {
     const branch = generator.statementToCode(block, 'DO');
     return `on_message_sent(function(msg)\n${branch}end)\n`;
+  };
+
+  // 带筛选的版本
+  generator.forBlock['event_on_message_sent_filtered'] = function(block: Blockly.Block) {
+    const branch = generator.statementToCode(block, 'DO');
+    const filter = buildEventFilter(block);
+    const filterArg = filter ? `, {${filter}}` : '';
+    return `on_message_sent(function(msg)${filterArg}
+${branch}end)
+`;
   };
 
   generator.forBlock['event_on_lifecycle'] = function(block: Blockly.Block) {
@@ -3895,12 +4094,14 @@ end)()`, generator.ORDER_HIGH];
 
   generator.forBlock['api_get_result_field'] = function(block: Blockly.Block) {
     const fieldName = generator.valueToCode(block, 'FIELD_NAME', generator.ORDER_NONE) || '"data"';
-    return [`result[${fieldName}]`, generator.ORDER_ATOMIC];
+    // fieldName 必须是 string (作为 table key)
+    return [`(result and result[${fieldName}]) or nil`, generator.ORDER_ATOMIC];
   };
 
   generator.forBlock['api_get_result_data'] = function(block: Blockly.Block) {
     const fieldName = generator.valueToCode(block, 'FIELD_NAME', generator.ORDER_NONE) || '"data"';
-    return [`(result.data and result.data[${fieldName}]) or nil`, generator.ORDER_ATOMIC];
+    // fieldName 必须是 string (作为 table key)
+    return [`(result and result.data and result.data[${fieldName}]) or nil`, generator.ORDER_ATOMIC];
   };
 
   registerConfigGenerators(generator);

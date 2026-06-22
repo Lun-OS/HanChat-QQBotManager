@@ -800,52 +800,67 @@ func (s *ReverseWebSocketService) handleEvent(selfID string, eventData map[strin
 		eventData["_self_id"] = selfID
 	}
 
-	s.eventHandlersMu.RLock()
-	handlerCount := len(s.eventHandlers)
-	if handlerCount == 0 {
-		s.eventHandlersMu.RUnlock()
+	// 关键修复: 之前 eventHandlers 为空时直接 return，且 raw handlers 在 event handlers
+	// 之后串行执行，导致：
+	//   (1) 仅注册了 raw handler 的场景下日志广播不触发
+	//   (2) raw handler 实时性被前面的 event handler 拖慢
+	//   (3) 任何一路 handler panic 会中断后续 handler
+	// 现在拆成三路独立调用：日志广播、event handlers、raw event handlers。
 
-		s.rawEventHandlersMu.RLock()
-		rawHandlerCount := len(s.rawEventHandlers)
-		if rawHandlerCount == 0 {
-			s.rawEventHandlersMu.RUnlock()
-			return
-		}
-		rawHandlers := make([]func(selfID string, rawData []byte), rawHandlerCount)
-		copy(rawHandlers, s.rawEventHandlers)
-		s.rawEventHandlersMu.RUnlock()
-		for _, handler := range rawHandlers {
-			handler(selfID, rawData)
-		}
-		return
-	}
-
-	handlers := make([]func(selfID string, eventData map[string]interface{}), handlerCount)
-	copy(handlers, s.eventHandlers)
-	s.eventHandlersMu.RUnlock()
-
+	// 1) 日志广播（非阻塞）
 	select {
 	case s.logBroadcastChan <- s.buildLogBroadcastTask(selfID, postType, eventData):
 	default:
 	}
 
-	for _, handler := range handlers {
-		handler(selfID, eventData)
-	}
+	// 2) 普通 event handlers 独立调度
+	s.dispatchEventHandlers(selfID, eventData)
 
-	s.rawEventHandlersMu.RLock()
-	rawHandlerCount := len(s.rawEventHandlers)
-	if rawHandlerCount == 0 {
-		s.rawEventHandlersMu.RUnlock()
-		return
+	// 3) raw handlers 独立调度（透传调试用，避免被业务 handler 拖慢）
+	s.dispatchRawEventHandlers(selfID, rawData)
+}
+
+// dispatchEventHandlers 安全地分发给所有 event handlers
+func (s *ReverseWebSocketService) dispatchEventHandlers(selfID string, eventData map[string]interface{}) {
+	s.eventHandlersMu.RLock()
+	handlers := make([]func(selfID string, eventData map[string]interface{}), len(s.eventHandlers))
+	copy(handlers, s.eventHandlers)
+	s.eventHandlersMu.RUnlock()
+
+	for i, handler := range handlers {
+		// 关键修复: handler panic 隔离，避免单个 handler 拖垮整条事件链。
+		s.safeInvokeHandler(i, "event", func() {
+			handler(selfID, eventData)
+		})
 	}
-	rawHandlers := make([]func(selfID string, rawData []byte), rawHandlerCount)
-	copy(rawHandlers, s.rawEventHandlers)
+}
+
+// dispatchRawEventHandlers 安全地分发给所有 raw event handlers
+func (s *ReverseWebSocketService) dispatchRawEventHandlers(selfID string, rawData []byte) {
+	s.rawEventHandlersMu.RLock()
+	handlers := make([]func(selfID string, rawData []byte), len(s.rawEventHandlers))
+	copy(handlers, s.rawEventHandlers)
 	s.rawEventHandlersMu.RUnlock()
 
-	for _, handler := range rawHandlers {
-		handler(selfID, rawData)
+	for i, handler := range handlers {
+		s.safeInvokeHandler(i, "raw_event", func() {
+			handler(selfID, rawData)
+		})
 	}
+}
+
+// safeInvokeHandler 调用单个 handler，捕获 panic 防止影响后续 handler
+func (s *ReverseWebSocketService) safeInvokeHandler(idx int, kind string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Errorw("事件处理器panic",
+				"handler_kind", kind,
+				"handler_index", idx,
+				"panic", fmt.Sprintf("%v", r),
+			)
+		}
+	}()
+	fn()
 }
 
 // buildLogBroadcastTask 构建日志广播任务

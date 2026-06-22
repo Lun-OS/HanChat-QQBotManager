@@ -84,7 +84,15 @@ func (f *EventFilter) ShouldPass(rawData []byte) bool {
 				rule.MatchType,
 				rule.Value,
 			))
-			break // 白名单模式: 一个不匹配就失败; 黑名单模式后面继续检查
+			// 关键修复: 仅白名单模式在第一个不匹配时即失败；
+			// 黑名单模式下需要继续检查其它规则是否命中，以决定是否过滤。
+			if f.config.Mode == models.FilterModeWhitelist {
+				break
+			}
+		} else if f.config.Mode == models.FilterModeBlacklist {
+			// 黑名单模式: 任一规则命中即过滤，无需继续。
+			allMatch = true
+			break
 		}
 	}
 

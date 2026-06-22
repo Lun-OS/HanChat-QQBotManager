@@ -139,8 +139,13 @@ func (s *LLOneBotService) HandleResponse(response map[string]interface{}) {
 		return
 	}
 
+	// 关键修复: 取出即删，避免重复响应时 channel 已满导致发送者永久阻塞。
+	// 同时使用非阻塞发送，channel 关闭时不 panic、已满时丢弃（CallAPIRaw 已 defer 清理）。
 	s.requestMu.Lock()
 	respChan, exists := s.pendingReqs[echo]
+	if exists {
+		delete(s.pendingReqs, echo)
+	}
 	s.requestMu.Unlock()
 
 	if !exists {
@@ -148,9 +153,18 @@ func (s *LLOneBotService) HandleResponse(response map[string]interface{}) {
 	}
 
 	data, _ := json.Marshal(response)
-	respChan <- &WSResponse{
+	resp := &WSResponse{
 		Echo: echo,
 		Data: data,
+	}
+
+	// 非阻塞发送：channel 已满（CallAPIRaw 已读取且 defer 关闭）则安全丢弃。
+	select {
+	case respChan <- resp:
+	default:
+		s.logger.Warnw("API响应通道已满/已关闭，丢弃响应",
+			"echo", echo,
+			"self_id", s.selfID)
 	}
 }
 

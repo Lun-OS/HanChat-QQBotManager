@@ -4587,102 +4587,173 @@ db.delete("mydb", "name")
 
 ### 31. 全局事件注册
 
-注册各类事件处理器。
+注册各类事件处理器。所有 `on_*` 系列函数均支持一个**可选的过滤配置表**作为第二参数，**不传则保持原有行为，接收所有该类型事件**。过滤机制参考代理适配器的白/黑名单思路（[internal/services/proxy/filter.go](../internal/services/proxy/filter.go)），按事件类型粒度生效。
 
 #### `on_message`
 
-**签名**: `on_message(handler: function) -> void`
+**签名**: `on_message(handler: function, filter?: table) -> void`
 
 **参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | handler | function | 是 | 处理函数，参数为event表 |
+| filter | table | 否 | 事件级过滤配置，不传则接收全部消息 |
+
+**filter 表字段**（所有字段均可选，全部为空等同于不传）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| whitelistTypes | string[] | 类型白名单（如 `"message.group"` / `"message.private"` / `"sub.friend"`），命中其一才放行 |
+| blacklistTypes | string[] | 类型黑名单，命中即丢弃 |
+| whitelistKeywords | string[] | 关键词白名单（不区分大小写），消息文本需包含其中之一 |
+| blacklistKeywords | string[] | 关键词黑名单，消息文本包含则丢弃 |
 
 **返回**: 无返回值
 
 **示例**:
 ```lua
+-- 原用法保持不变：接收所有消息
 on_message(function(event)
     log.info(msg.get_plain_text(event))
 end)
+
+-- 仅接收群消息，且过滤包含 "广告" 的内容
+on_message(function(event)
+    log.info(msg.get_plain_text(event))
+end, {
+    whitelistTypes    = { "message.group" },
+    blacklistKeywords = { "广告" },
+})
+
+-- 仅接收群消息里包含 "签到" 或 "打卡" 的
+on_message(function(event)
+    handle_sign(event)
+end, {
+    whitelistTypes     = { "message.group" },
+    whitelistKeywords  = { "签到", "打卡" },
+})
 ```
 
 #### `on_notice`
 
-**签名**: `on_notice(handler: function) -> void`
+**签名**: `on_notice(handler: function, filter?: table) -> void`
 
 **参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | handler | function | 是 | 处理函数 |
+| filter | table | 否 | 过滤配置（同 `on_message`），按 notice_type / sub_type 过滤 |
 
 **返回**: 无返回值
 
 **示例**:
 ```lua
+-- 原用法：接收所有通知
 on_notice(function(event)
     log.info("通知事件")
 end)
+
+-- 仅接收群文件上传、群成员增加 通知
+on_notice(function(event)
+    log.info("notice:", event.notice_type)
+end, {
+    whitelistTypes = { "notice.group_upload", "notice.group_increase" },
+})
 ```
 
 #### `on_request`
 
-**签名**: `on_request(handler: function) -> void`
+**签名**: `on_request(handler: function, filter?: table) -> void`
 
 **参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | handler | function | 是 | 处理函数 |
+| filter | table | 否 | 过滤配置，按 request_type 过滤 |
 
 **返回**: 无返回值
 
 **示例**:
 ```lua
+-- 原用法：接收所有请求
 on_request(function(event)
     request.approve_friend(event.flag, true)
 end)
+
+-- 只处理加好友请求（过滤掉加群请求）
+on_request(function(event)
+    if event.request_type == "friend" then
+        request.approve_friend(event.flag, true)
+    end
+end, {
+    whitelistTypes = { "request.friend" },
+})
 ```
 
 #### `on_message_sent`
 
-**签名**: `on_message_sent(handler: function) -> void`
+**签名**: `on_message_sent(handler: function, filter?: table) -> void`
 
 **参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | handler | function | 是 | 处理函数 |
+| filter | table | 否 | 过滤配置，可按 message_type / 关键词过滤 |
 
 **返回**: 无返回值
 
 **示例**:
 ```lua
+-- 原用法：接收自己发送的所有消息
 on_message_sent(function(event)
     log.info("消息已发送")
 end)
+
+-- 只关心自己发送的群消息
+on_message_sent(function(event)
+    log.info("sent:", msg.get_plain_text(event))
+end, {
+    whitelistTypes = { "message_sent.group" },
+})
 ```
 
 #### `on_meta_event`
 
-**签名**: `on_meta_event(handler: function) -> void`
+**签名**: `on_meta_event(handler: function, filter?: table) -> void`
 
 **参数**:
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
 | handler | function | 是 | 处理函数 |
+| filter | table | 否 | 过滤配置，按 meta_event_type 过滤 |
 
 **返回**: 无返回值
 
 **示例**:
 ```lua
+-- 原用法：接收所有元事件
 on_meta_event(function(event)
     -- 处理元事件
 end)
+
+-- 只处理生命周期事件，过滤掉心跳
+on_meta_event(function(event)
+    log.info("lifecycle:", event.meta_event_type)
+end, {
+    whitelistTypes = { "meta_event.lifecycle" },
+})
 ```
+
+> **过滤规则说明**：
+> 1. `whitelist*` 数组非空时，**必须命中其一**才放行；为空则不限制。
+> 2. `blacklist*` 数组中**任一命中即丢弃**；为空则不限制。
+> 3. 类型匹配支持精确、前缀（如 `"message"` 匹配 `"message.group"` / `"message.private"`）以及 `sub.xxx` 形式匹配 `sub_type` 字段。
+> 4. 事件级过滤独立于插件全局 `config.filter`，可与全局过滤**叠加生效**（两者均需通过）。
 
 #### `on_bot_status_change`
 

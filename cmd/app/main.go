@@ -37,7 +37,7 @@ const (
 
 	// HanChat 版本信息（统一管理）
 	AppName    = "HanChat"
-	AppVersion = "26.6.21"
+	AppVersion = "26.6.22"
 )
 
 // LogWriter 日志写入器
