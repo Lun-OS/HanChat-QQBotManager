@@ -262,11 +262,6 @@ QQbot-LLbot/
 
 ***
 
-## 开源协议
-
-本项目基于 [MIT License](LICENSE) 开源，您可以自由使用、修改和分发。
-
-***
 
 <p align="center">
   Made with ❤️ by HanChat Team
