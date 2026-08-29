@@ -264,7 +264,7 @@ QQbot-LLbot/
 
 
 <p align="center">
-  Made with ❤️ by HanChat Team
+  项目后端功能已经基本稳定完成开发，正在开发抖音机器人底层框架，并且加上学业可能会暂缓更新速度
 </p>
 
 ***
